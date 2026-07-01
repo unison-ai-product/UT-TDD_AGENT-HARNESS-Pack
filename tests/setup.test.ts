@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -329,6 +329,15 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
           }),
         ]),
       );
+      expect(templates["adapter/.claude/agents/pmo-sonnet.md"]).toContain(
+        "model: claude-sonnet-4-6",
+      );
+      expect(templates["adapter/.claude/agents/pmo-haiku.md"]).toContain(
+        "model: claude-haiku-4-5-20251001",
+      );
+      expect(templates["adapter/.claude/agents/pdm-tech-innovation.md"]).toContain(
+        "model: claude-opus-4-7",
+      );
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
@@ -442,7 +451,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         "docs/governance/README.md",
         "docs/governance/ut-tdd-agent-harness-concept_v3.1.md",
         "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md",
-        "docs/skills/SKILL_MAP.md",
+        "skills/SKILL_MAP.md",
         "docs/governance/conditional-backfill-decision-audit-2026-06-22.md",
         "docs/governance/forward-convergence-legacy-debt-audit.md",
         "docs/governance/reverse-fullback-backprop-audit-2026-06-22.md",
@@ -470,12 +479,12 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(plan.artifactPaths).toContain(
       "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md",
     );
-    expect(cleanDistributionArtifactPath("docs/skills/SKILL_MAP.md")).toBe("skills/SKILL_MAP.md");
+    expect(cleanDistributionArtifactPath("skills/SKILL_MAP.md")).toBe("skills/SKILL_MAP.md");
     expect(plan.artifactPaths).toContain("skills/SKILL_MAP.md");
     expect(plan.artifactPaths).not.toContain("docs/skills/SKILL_MAP.md");
     expect(
-      cleanDistributionSourcePath("skills/SKILL_MAP.md", ["README.md", "docs/skills/SKILL_MAP.md"]),
-    ).toBe("docs/skills/SKILL_MAP.md");
+      cleanDistributionSourcePath("skills/SKILL_MAP.md", ["README.md", "skills/SKILL_MAP.md"]),
+    ).toBe("skills/SKILL_MAP.md");
     expect(plan.artifactPaths).not.toContain("src/web/page.tsx");
     expect(plan.artifactPaths).not.toContain(".codex/hooks.json");
     expect(plan.artifactPaths).not.toContain(".claude/settings.json");
@@ -520,11 +529,10 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     ];
 
     expect(plan.ok).toBe(true);
+    const sourcePaths = walkRepoCandidatePaths(process.cwd());
     for (const path of dogfoodGovernanceDocs) {
       expect(plan.artifactPaths).not.toContain(path);
-      if (existsSync(join(process.cwd(), path))) {
-        expect(plan.excludedPaths).toContain(path);
-      }
+      if (sourcePaths.includes(path)) expect(plan.excludedPaths).toContain(path);
     }
 
     const textArtifacts = plan.artifactPaths.filter((path) =>
@@ -532,7 +540,6 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     );
     const legacyRuntimeName = "he" + "lix";
     const legacyNamePattern = new RegExp(`\\b${legacyRuntimeName}\\b`, "i");
-    const sourcePaths = walkRepoCandidatePaths(process.cwd());
     const legacyNameHits = textArtifacts.filter((path) => {
       const sourcePath = cleanDistributionSourcePath(path, sourcePaths);
       return legacyNamePattern.test(readFileSync(join(process.cwd(), sourcePath), "utf8"));

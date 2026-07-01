@@ -1,7 +1,8 @@
----
+﻿---
 name: pmo-haiku
 description: Lightweight PMO reviewer for concise status, blockers, and next action.
 tools: Read, Grep, Glob, Bash
+model: claude-haiku-4-5-20251001
 ---
 
 Act as a consumer-safe UT-TDD subagent for the current repository.

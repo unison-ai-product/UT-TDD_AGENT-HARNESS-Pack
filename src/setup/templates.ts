@@ -4,42 +4,100 @@ import type { GeneratedFile } from "./index";
 export type TemplateSet = { [name: string]: string };
 
 const CLAUDE_AGENT_TEMPLATES = [
-  ["be-api", "Backend API reviewer for route, contract, and integration concerns."],
-  ["be-logic", "Backend domain logic reviewer for invariants, boundaries, and TDD fit."],
+  [
+    "be-api",
+    "Backend API reviewer for route, contract, and integration concerns.",
+    "claude-sonnet-4-6",
+  ],
+  [
+    "be-logic",
+    "Backend domain logic reviewer for invariants, boundaries, and TDD fit.",
+    "claude-sonnet-4-6",
+  ],
   [
     "code-reviewer",
     "Read-only senior engineering reviewer for correctness, security, and maintainability.",
+    "claude-sonnet-4-6",
   ],
-  ["db-schema", "Database schema reviewer for migrations, indexes, and data contracts."],
-  ["devops-deploy", "CI, deployment, rollback, and release-readiness reviewer."],
+  [
+    "db-schema",
+    "Database schema reviewer for migrations, indexes, and data contracts.",
+    "claude-sonnet-4-6",
+  ],
+  [
+    "devops-deploy",
+    "CI, deployment, rollback, and release-readiness reviewer.",
+    "claude-sonnet-4-6",
+  ],
   [
     "pdm-innovation-manager",
     "Product management reviewer for opportunity, scope, and portfolio fit.",
+    "claude-opus-4-7",
   ],
-  ["pdm-marketing-innovation", "Market and user-value reviewer for product framing and adoption."],
+  [
+    "pdm-marketing-innovation",
+    "Market and user-value reviewer for product framing and adoption.",
+    "claude-opus-4-7",
+  ],
   [
     "pdm-tech-innovation",
     "Technical product reviewer for feasibility, platform leverage, and risk.",
+    "claude-opus-4-7",
   ],
-  ["pmo-haiku", "Lightweight PMO reviewer for concise status, blockers, and next action."],
-  ["pmo-project-explorer", "Project discovery reviewer for goals, constraints, and evidence gaps."],
-  ["pmo-project-scout", "Project triage reviewer for backlog, ownership, and workflow routing."],
+  [
+    "pmo-haiku",
+    "Lightweight PMO reviewer for concise status, blockers, and next action.",
+    "claude-haiku-4-5-20251001",
+  ],
+  [
+    "pmo-project-explorer",
+    "Project discovery reviewer for goals, constraints, and evidence gaps.",
+    "claude-sonnet-4-6",
+  ],
+  [
+    "pmo-project-scout",
+    "Project triage reviewer for backlog, ownership, and workflow routing.",
+    "claude-haiku-4-5-20251001",
+  ],
   [
     "pmo-sonnet",
     "PMO reviewer for plan structure, handover quality, and cross-document consistency.",
+    "claude-sonnet-4-6",
   ],
-  ["pmo-tech-docs", "Technical documentation reviewer for ADR, process, and governance quality."],
-  ["pmo-tech-fork", "Fork, extraction, and distribution reviewer for clean-room boundaries."],
-  ["pmo-tech-news", "Technical research reviewer for external signals and dated source checks."],
-  ["qa-test", "Quality reviewer for test strategy, oracle strength, and regression scope."],
+  [
+    "pmo-tech-docs",
+    "Technical documentation reviewer for ADR, process, and governance quality.",
+    "claude-sonnet-4-6",
+  ],
+  [
+    "pmo-tech-fork",
+    "Fork, extraction, and distribution reviewer for clean-room boundaries.",
+    "claude-sonnet-4-6",
+  ],
+  [
+    "pmo-tech-news",
+    "Technical research reviewer for external signals and dated source checks.",
+    "claude-sonnet-4-6",
+  ],
+  [
+    "qa-test",
+    "Quality reviewer for test strategy, oracle strength, and regression scope.",
+    "claude-sonnet-4-6",
+  ],
   [
     "refactor-scout",
     "Refactoring reviewer for complexity, duplication, and low-risk extraction candidates.",
+    "claude-haiku-4-5-20251001",
   ],
-  ["security-audit", "Security reviewer for auth, secrets, PII, and threat-model concerns."],
+  [
+    "security-audit",
+    "Security reviewer for auth, secrets, PII, and threat-model concerns.",
+    "claude-sonnet-4-6",
+  ],
   [
     "ut-tdd-tl",
     "Technical-lead reviewer for UT-TDD workflow, gates, tests, and release readiness.",
+    "claude-sonnet-4-6",
   ],
 ] as const;
 
@@ -53,12 +111,13 @@ const CLAUDE_COMMAND_TEMPLATES = [
   ["test", "Run targeted UT-TDD verification for the current change."],
 ] as const;
 
-function agentTemplate(name: string, description: string): string {
+function agentTemplate(name: string, description: string, model: string): string {
   return [
     "---",
     `name: ${name}`,
     `description: ${description}`,
     "tools: Read, Grep, Glob, Bash",
+    `model: ${model}`,
     "---",
     "",
     "Act as a consumer-safe UT-TDD subagent for the current repository.",
@@ -90,9 +149,9 @@ function commandTemplate(name: string, description: string): string {
 }
 
 const CLAUDE_AGENT_TEMPLATE_SET: TemplateSet = Object.fromEntries(
-  CLAUDE_AGENT_TEMPLATES.map(([name, description]) => [
+  CLAUDE_AGENT_TEMPLATES.map(([name, description, model]) => [
     `adapter/.claude/agents/${name}.md`,
-    agentTemplate(name, description),
+    agentTemplate(name, description, model),
   ]),
 );
 
