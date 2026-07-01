@@ -177,6 +177,19 @@ export const HARNESS_DB_CORE_TABLES: TableDef[] = [
     ],
   },
   {
+    name: "memory_entries",
+    columns: [
+      pk("memory_id"),
+      col("kind"),
+      col("title"),
+      col("body"),
+      col("tags"),
+      col("source_path"),
+      col("updated_at"),
+      col("content_hash"),
+    ],
+  },
+  {
     name: "quality_signals",
     columns: [
       pk("signal_id"),

@@ -213,6 +213,87 @@ describe("L7 CLI surface closure", () => {
     expect(routePayload.decision.model).not.toBe("gpt-5.4-mini");
   }, 20_000);
 
+  it("exposes upper-model advisor dry-runs for lower orchestrator models", () => {
+    const run = runCli([
+      "advisor",
+      "--task",
+      "review whether the release gate is safe to close",
+      "--current-model",
+      "claude-sonnet-4-6",
+      "--mode",
+      "hybrid",
+      "--json",
+    ]);
+    const payload = JSON.parse(run.stdout);
+
+    expect(run.status).toBe(0);
+    expect(payload).toMatchObject({
+      provider: "claude",
+      model: "claude-opus-4-8",
+      effort: "high",
+      current_model_lower_than_advisor: true,
+      adapterPlan: {
+        provider: "claude",
+        model: "claude-opus-4-8",
+        effort: "high",
+        dry_run: true,
+      },
+    });
+    expect(payload.adapterPlan.stdin).toContain("upper-model advisor");
+  }, 20_000);
+
+  it("executes advisor through the selected upper Codex adapter", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-cli-advisor-exec-"));
+    try {
+      const binDir = join(root, "bin");
+      mkdirSync(binDir);
+      const fakeCodex = writeFakeProvider(binDir, "codex");
+      const currentPath = process.env.PATH ?? process.env.Path ?? "";
+      const testPath = `${binDir}${process.platform === "win32" ? ";" : ":"}${currentPath}`;
+      const run = runCliIn(
+        root,
+        [
+          "advisor",
+          "--task",
+          "advise on uncertain implementation close",
+          "--provider",
+          "codex",
+          "--mode",
+          "codex-only",
+          "--execute",
+          "--json",
+        ],
+        {
+          ...process.env,
+          PATH: testPath,
+          Path: testPath,
+          UT_TDD_CODEX_BIN: fakeCodex,
+        },
+      );
+      const payload = JSON.parse(run.stdout);
+
+      expect(run.status).toBe(0);
+      expect(run.stdout).not.toContain("noisy-codex");
+      expect(payload).toMatchObject({
+        provider: "codex",
+        model: "gpt-5.5",
+        effort: "xhigh",
+        adapterPlan: {
+          provider: "codex",
+          model: "gpt-5.5",
+          dry_run: false,
+          executed: true,
+          exit_code: 0,
+        },
+      });
+      const codexEnv = readFileSync(join(root, "codex-env.txt"), "utf8");
+      expect(codexEnv).toContain("gpt-5.5");
+      expect(codexEnv).toContain("args=");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   it("exposes builder catalog as a JSON command surface", () => {
     const run = runCli(["builder", "catalog", "--json"]);
     const payload = JSON.parse(run.stdout);
@@ -278,6 +359,7 @@ describe("L7 CLI surface closure", () => {
           ok: true,
           channel: "clean-repo-plus-signed-tarball",
           sourceTag: "v0.1.0",
+          cleanRepo: "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
         },
         readiness: {
           ok: true,
@@ -288,6 +370,9 @@ describe("L7 CLI surface closure", () => {
         "docs/plans/PLAN-L7-157-distribution-clean-pull.md",
       );
       expect(payload.readiness.rollback.managedPaths).toContain("AGENTS.md");
+      expect(payload.readiness.contracts.tagPin).toBe(
+        "github:unison-ai-product/UT-TDD_AGENT-HARNESS-Pack#v0.1.0",
+      );
       expect(payload.readiness.contracts.tagPin).toContain("#v0.1.0");
       expect(payload.readiness.ci.forkPullRequestSecrets).toBe("not-required");
     } finally {
@@ -335,6 +420,167 @@ describe("L7 CLI surface closure", () => {
       rmSync(outDir, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("exposes a non-destructive Pack repository sync plan", () => {
+    const run = runCliIn(repoRoot, [
+      "distribution",
+      "sync-plan",
+      "--tag",
+      "v0.1.0",
+      "--staging-dir",
+      "tmp-pack-stage",
+      "--json",
+    ]);
+    const payload = JSON.parse(run.stdout);
+
+    expect(run.status, run.stderr || run.stdout).toBe(0);
+    expect(payload).toMatchObject({
+      ok: true,
+      actualRemoteMutationRequiresPoApproval: true,
+      sync: {
+        mode: "non-destructive-sync-plan",
+        cleanRepo: "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
+        sourceTag: "v0.1.0",
+        branch: "main",
+        publishRequiresPoApproval: true,
+        destructiveRemoteMutation: false,
+      },
+    });
+    expect(payload.sync.copyPlan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          artifactPath: "skills/SKILL_MAP.md",
+        }),
+      ]),
+    );
+    expect(
+      payload.sync.copyPlan.map((entry: { artifactPath: string }) => entry.artifactPath),
+    ).not.toContain("docs/plans/PLAN-L7-157-distribution-clean-pull.md");
+    expect(payload.sync.commands).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "git clone https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git",
+        ),
+        expect.stringContaining("git -C "),
+        expect.stringContaining("push origin main --follow-tags"),
+      ]),
+    );
+  });
+
+  it("materializes clean Pack artifacts into a local staging directory without publishing", () => {
+    const outDir = mkdtempSync(join(tmpdir(), "ut-tdd-pack-stage-"));
+    try {
+      const run = runCliIn(repoRoot, [
+        "distribution",
+        "sync-stage",
+        "--tag",
+        "v0.1.0",
+        "--out",
+        outDir,
+        "--json",
+      ]);
+      const payload = JSON.parse(run.stdout);
+
+      expect(run.status, run.stderr || run.stdout).toBe(0);
+      expect(payload).toMatchObject({
+        ok: true,
+        stage: {
+          outDir,
+          destructiveRemoteMutation: false,
+          actualRemoteMutationRequiresPoApproval: true,
+          unmanagedExistingPaths: [],
+          copyError: null,
+        },
+      });
+      expect(existsSync(join(outDir, "skills", "SKILL_MAP.md"))).toBe(true);
+      expect(existsSync(join(outDir, "docs", "templates", "adapter", "AGENTS.md"))).toBe(true);
+      expect(existsSync(join(outDir, "docs", "templates", "adapter", ".codex", "hooks.json"))).toBe(
+        true,
+      );
+      expect(
+        existsSync(join(outDir, "docs", "plans", "PLAN-L7-157-distribution-clean-pull.md")),
+      ).toBe(false);
+      expect(existsSync(join(outDir, ".ut-tdd", "harness.db"))).toBe(false);
+      expect(existsSync(payload.stage.manifest)).toBe(true);
+      const manifest = JSON.parse(readFileSync(payload.stage.manifest, "utf8"));
+      expect(manifest.stage.copiedArtifacts).toBeGreaterThan(100);
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("exposes non-destructive release publication planning", () => {
+    const run = runCliIn(repoRoot, [
+      "distribution",
+      "release-plan",
+      "--tag",
+      "v0.1.0",
+      "--repo",
+      "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
+      "--json",
+    ]);
+    const payload = JSON.parse(run.stdout);
+
+    expect(run.status, run.stderr || run.stdout).toBe(0);
+    expect(payload).toMatchObject({
+      ok: true,
+      tag: "v0.1.0",
+      repo: "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
+      externalPublishRequiresApproval: true,
+    });
+    expect(payload.commands).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("git tag -a v0.1.0"),
+        expect.stringContaining("gh release create v0.1.0"),
+      ]),
+    );
+  });
+
+  it("exposes GitHub branch-type guard as a JSON command surface", () => {
+    const body = join(tmpdir(), `ut-tdd-pr-body-${Date.now()}.md`);
+    const commits = join(tmpdir(), `ut-tdd-commits-${Date.now()}.txt`);
+    writeFileSync(body, "## Summary\nPatch only.\n", "utf8");
+    writeFileSync(commits, "fix: patch production regression\n", "utf8");
+    try {
+      const run = runCliIn(repoRoot, [
+        "github",
+        "guard",
+        "--head-ref",
+        "hotfix/prod-regression",
+        "--base-ref",
+        "main",
+        "--pr-title",
+        "fix: patch production regression",
+        "--pr-body-file",
+        body,
+        "--commit-file",
+        commits,
+        "--json",
+      ]);
+      const payload = JSON.parse(run.stdout);
+
+      expect(run.status).toBe(1);
+      expect(payload.ok).toBe(false);
+      expect(payload.findings).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: "hotfix-postmortem-missing" })]),
+      );
+    } finally {
+      rmSync(body, { force: true });
+      rmSync(commits, { force: true });
+    }
+  });
+
+  it("rejects team setup when CODEOWNERS team slugs are omitted", () => {
+    const repo = mkdtempSync(join(tmpdir(), "ut-tdd-setup-no-teams-"));
+    try {
+      const run = runCliIn(repo, ["setup", "--team", "--dry-run"]);
+
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain("--tl-team / --qa-team / --po-team");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
 
   it("exposes telemetry scan as a JSON command surface without provider CLI execution", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-cli-telemetry-"));
@@ -589,7 +835,7 @@ describe("L7 CLI surface closure", () => {
         "reason=ut-tdd-runtime-adapter-wrapper",
       );
       expect(readFileSync(join(root, "claude-env.txt"), "utf8")).not.toContain("raw=1");
-      expect(readFileSync(join(root, "claude-env.txt"), "utf8")).toContain("effort=medium");
+      expect(readFileSync(join(root, "claude-env.txt"), "utf8")).toContain("effort=high");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

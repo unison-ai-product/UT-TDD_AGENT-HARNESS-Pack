@@ -34,6 +34,7 @@ import {
   catalogVerificationProfiles,
   recommendVerificationProfiles,
 } from "../lint/verification-profile";
+import { loadMemoryEntries } from "../memory/index";
 import {
   HARNESS_DB_TABLE_BY_NAME,
   HARNESS_DB_TABLES,
@@ -2228,6 +2229,25 @@ function projectAutomationAssets(repoRoot: string, db: HarnessDb): void {
   }
 }
 
+function projectMemoryEntries(repoRoot: string, db: HarnessDb): void {
+  for (const entry of loadMemoryEntries(repoRoot)) {
+    recordProjectionEvent(db, {
+      table: "memory_entries",
+      id: entry.memory_id,
+      row: {
+        memory_id: entry.memory_id,
+        kind: entry.kind,
+        title: entry.title,
+        body: entry.body,
+        tags: entry.tags.join(","),
+        source_path: normalizePath(entry.source_path),
+        updated_at: entry.updated_at,
+        content_hash: entry.content_hash,
+      },
+    });
+  }
+}
+
 function skillScore(plan: ProjectedPlan, asset: Record<string, unknown>): number {
   const text = [
     asset.asset_id,
@@ -2899,6 +2919,7 @@ export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarn
       projectDescentObligations(repoRoot, db);
       projectVerificationBandExecution(db);
       projectAutomationAssets(repoRoot, db);
+      projectMemoryEntries(repoRoot, db);
       projectRuntimeSkillInvocationsFromSessionLogs(repoRoot, db, plans);
       projectSkillTelemetry(db, plans);
       projectSkillMetrics(db);

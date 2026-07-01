@@ -6,6 +6,7 @@ import {
   applyBranchProtection,
   buildCleanDistributionPlan,
   buildConsumerReadinessPlan,
+  buildPackSyncPlan,
   cleanDistributionArtifactPath,
   cleanDistributionSourcePath,
   detectProjectScale,
@@ -251,6 +252,9 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       const templates = loadTemplates(repo);
       expect(templates["adapter/AGENTS.md"]).toContain("UT-TDD Agent Harness Adapter");
       expect(templates["common/harness-check.yml"]).toContain("harness-check");
+      expect(templates["common/harness-check.yml"]).toContain("github guard");
+      expect(templates["common/harness-check.yml"]).toContain("audit quality --include-tests");
+      expect(templates["common/harness-check.yml"]).toContain("ut-tdd.mjs doctor");
       expect(templates["team/CODEOWNERS"]).toContain("{{TL_TEAM}}");
       const deps = mockDeps({ repoRoot: repo, templates });
       const plan = planSetup("0-B", {
@@ -534,6 +538,59 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     ]);
   });
 
+  it("U-SETUP-011c: Pack sync plan is non-destructive and copies only clean artifacts", () => {
+    const sourcePaths = [
+      "README.md",
+      "LICENSE",
+      "package.json",
+      "src/cli.ts",
+      "src/setup/index.ts",
+      ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
+        (entry) => `docs/templates/${entry.template}`,
+      ),
+      "docs/governance/README.md",
+      "docs/governance/ut-tdd-agent-harness-concept_v3.1.md",
+      "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md",
+      "docs/skills/SKILL_MAP.md",
+      "docs/plans/PLAN-L7-157-distribution-clean-pull.md",
+      ".ut-tdd/harness.db",
+    ];
+    const exportPlan = buildCleanDistributionPlan({
+      sourceTag: "v0.1.0",
+      paths: sourcePaths,
+    });
+    const sync = buildPackSyncPlan({
+      exportPlan,
+      sourcePaths,
+      stagingDir: "/tmp/ut-tdd-pack",
+      branch: "main",
+    });
+
+    expect(sync.ok).toBe(true);
+    expect(sync.mode).toBe("non-destructive-sync-plan");
+    expect(sync.cleanRepo).toBe("unison-ai-product/UT-TDD_AGENT-HARNESS-Pack");
+    expect(sync.publishRequiresPoApproval).toBe(true);
+    expect(sync.destructiveRemoteMutation).toBe(false);
+    expect(sync.copyPlan).toContainEqual({
+      sourcePath: "docs/skills/SKILL_MAP.md",
+      artifactPath: "skills/SKILL_MAP.md",
+    });
+    expect(sync.copyPlan.map((entry) => entry.artifactPath)).not.toContain(
+      "docs/plans/PLAN-L7-157-distribution-clean-pull.md",
+    );
+    expect(sync.copyPlan.map((entry) => entry.artifactPath)).not.toContain(".ut-tdd/harness.db");
+    expect(sync.commands).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "git clone https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git",
+        ),
+        expect.stringContaining("git -C /tmp/ut-tdd-pack status --short"),
+        expect.stringContaining("git -C /tmp/ut-tdd-pack push origin main --follow-tags"),
+      ]),
+    );
+    expect(sync.checks).toContain("denylistViolations.length === 0");
+  });
+
   it("U-SETUP-011b: real clean distribution artifact excludes dogfood governance audit documents", () => {
     const plan = buildCleanDistributionPlan({
       sourceTag: "v0.1.0",
@@ -556,6 +613,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     const nonPackDbFiles = /\.(?:db|sqlite)(?:-|$|\.)/i;
 
     expect(plan.ok).toBe(true);
+    expect(plan.cleanRepo).toBe("unison-ai-product/UT-TDD_AGENT-HARNESS-Pack");
     const sourcePaths = walkRepoCandidatePaths(process.cwd());
     for (const path of dogfoodGovernanceDocs) {
       expect(plan.artifactPaths).not.toContain(path);
@@ -604,6 +662,9 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(ready.rollback.managedPaths).toContain(".ut-tdd/bin/ut-tdd.mjs");
     expect(ready.rollback.managedPaths).toContain(".claude/agents/code-reviewer.md");
     expect(ready.rollback.managedPaths).toContain(".claude/commands/build.md");
+    expect(ready.contracts.tagPin).toBe(
+      "github:unison-ai-product/UT-TDD_AGENT-HARNESS-Pack#v0.1.0",
+    );
     expect(ready.contracts.tagPin).toContain("#v0.1.0");
     expect(ready.contracts.stable).toContain("adapter managed markers");
     expect(ready.contracts.stable).toContain("project-local .ut-tdd/bin/ut-tdd.mjs wrapper");

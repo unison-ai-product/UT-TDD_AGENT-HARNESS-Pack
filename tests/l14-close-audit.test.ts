@@ -30,7 +30,7 @@ const compliant = `# A-TEST
 | drive-model-bookbinding | Drive models merge back to V-model. | \`docs/design/harness/L4-basic-design/function.md\`, \`docs/process/modes/README.md\`, \`src/lint/forward-convergence.ts\`, \`tests/forward-convergence.test.ts\`, \`src/lint/drive-model-passage.ts\` | none | keep convergence lint | \`closed\` |
 | l8-l14-right-arm | Right arm is locally closed. | \`tests/l14-close-audit.test.ts\` | PO final signoff and post-deploy evidence are external | PO signoff after post-deploy evidence | \`human_required\` |
 | release-publication-boundary | Release publication is controlled. | \`tests/l14-close-audit.test.ts\` | signed tarball signature is not published | record signature | \`external_required\` |
-| green-evidence-integrity | Green evidence is trustworthy. | \`tests/l14-close-audit.test.ts\`, \`src/lint/green-command-digest.ts\`, \`tests/green-command-digest.test.ts\`, \`docs/plans/PLAN-L7-132-green-command-digest-integrity.md\`, \`docs/plans/PLAN-L7-174-green-command-digest-correction.md\` | historical digest mismatch remains | correct before hardening | \`partial\` |
+| green-evidence-integrity | Green evidence is trustworthy. | \`tests/l14-close-audit.test.ts\`, \`src/lint/green-command-digest.ts\`, \`tests/green-command-digest.test.ts\`, \`docs/plans/PLAN-L7-132-green-command-digest-integrity.md\`, \`docs/plans/PLAN-L7-174-green-command-digest-correction.md\`, \`.ut-tdd/audit/A-155-green-command-digest-rebind-2026-07-01.md\` | historical digest mismatch remains | correct before hardening | \`partial\` |
 `;
 
 describe("l14-close-audit", () => {
@@ -44,7 +44,7 @@ describe("l14-close-audit", () => {
 
   it("U-L14CLOSE-002: fails when an expected audit item is missing", () => {
     const content = compliant.replace(
-      "| green-evidence-integrity | Green evidence is trustworthy. | `tests/l14-close-audit.test.ts`, `src/lint/green-command-digest.ts`, `tests/green-command-digest.test.ts`, `docs/plans/PLAN-L7-132-green-command-digest-integrity.md`, `docs/plans/PLAN-L7-174-green-command-digest-correction.md` | historical digest mismatch remains | correct before hardening | `partial` |\n",
+      "| green-evidence-integrity | Green evidence is trustworthy. | `tests/l14-close-audit.test.ts`, `src/lint/green-command-digest.ts`, `tests/green-command-digest.test.ts`, `docs/plans/PLAN-L7-132-green-command-digest-integrity.md`, `docs/plans/PLAN-L7-174-green-command-digest-correction.md`, `.ut-tdd/audit/A-155-green-command-digest-rebind-2026-07-01.md` | historical digest mismatch remains | correct before hardening | `partial` |\n",
       "",
     );
     const result = analyzeL14CloseAudit([{ file: "A.md", content }], process.cwd());

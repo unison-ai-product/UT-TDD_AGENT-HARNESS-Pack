@@ -86,6 +86,11 @@ export const HARNESS_DB_INDEXES: IndexDef[] = [
     columns: ["source_table", "source_id"],
   },
   {
+    name: "idx_memory_kind_updated",
+    table: "memory_entries",
+    columns: ["kind", "updated_at"],
+  },
+  {
     name: "idx_tool_name_scope",
     table: "tool_runs",
     columns: ["tool_name", "input_scope"],

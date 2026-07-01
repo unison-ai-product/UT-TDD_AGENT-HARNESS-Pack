@@ -48,6 +48,11 @@
 | Forward 接続先確定 | ADR に「接続先 (L1/L4)」と「次アクション」が記載されていること |
 | research-memo 完了 | `docs/research/` に保存済 |
 
+第二 exit: 調査/監査が `regression` / `premise-gap` / `deviation` を見つけた場合は、ADR で閉じず、
+`route eval --finding-type <type>` で既存 `regression_dev` signal 経由の Recovery 起票候補へ接続する。
+`feature-gap` / `latent-defect` は Add-feature、`smell` は Refactor の起票候補へ分岐する。いずれも自動起票はせず、
+人間確認後に PLAN を作る。
+
 ---
 
 ## 4. Forward 合流点

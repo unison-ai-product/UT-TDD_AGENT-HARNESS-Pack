@@ -40,6 +40,7 @@ Recovery は phase ではなく **二段構えの機構**で動作する:
 | **(b)** | **逸脱/オーバーステップ** | **勝手に余計なこと**をした (指示外の追加・改変) | 指示範囲を超えた逸脱 |
 | (c) | 認識ずれ・前提誤読 | 前提を取り違えて進めた | (本当に誤読のときのみ) |
 | (d) | AI 暴走 | runaway / context 枯渇 / regression | — |
+| (e) | research/audit finding | 調査/監査で見つかった `regression` / `premise-gap` / `deviation` | `route eval --finding-type <type>` が既存 `regression_dev` signal 経由で Recovery 起票候補を出す。人間承認前に自動起票しない |
 
 > harness の存在意義 = AI が指示どおり動かない/逸脱するのを検出・是正すること。
 

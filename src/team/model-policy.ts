@@ -32,8 +32,19 @@ export const MODEL_IDS = {
 export const TASK_DIFFICULTIES = ["trivial", "simple", "standard", "complex", "critical"] as const;
 export type TaskDifficulty = (typeof TASK_DIFFICULTIES)[number];
 
-export const REASONING_EFFORTS = ["low", "medium", "high"] as const;
+export const REASONING_EFFORTS = ["low", "medium", "middle", "high", "xhigh"] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+export const TASK_INTENTS = [
+  "docs",
+  "research",
+  "implementation",
+  "lightweight",
+  "review",
+  "uiux",
+  "general",
+] as const;
+export type TaskIntent = (typeof TASK_INTENTS)[number];
 
 export interface TeamModelSelection {
   provider: TeamProvider;
@@ -44,6 +55,7 @@ export interface TeamModelSelection {
   model_source: "explicit" | "engine" | "policy";
   reasoning_effort: ReasoningEffort;
   effort_source: "explicit" | "policy";
+  task_intent: TaskIntent;
   evidence_path: string;
 }
 
@@ -124,6 +136,10 @@ const COMPLEX_TERMS = [
 ];
 
 const SIMPLE_TERMS = ["comment", "docs", "format", "lint", "readme", "rename", "typo"];
+const RESEARCH_TERMS = ["research", "source", "sources", "survey", "market", "web"];
+const IMPLEMENTATION_TERMS = ["implement", "implementation", "code", "src", "fix", "build"];
+const REVIEW_TERMS = ["review", "verify", "audit", "judge", "acceptance"];
+const UIUX_TERMS = ["ui", "ux", "screen", "visual", "wireframe", "mock", "frontend"];
 
 function hasAny(text: string, terms: readonly string[]): boolean {
   return terms.some((term) => text.includes(term));
@@ -189,6 +205,51 @@ function modelForProvider(input: { provider: TeamProvider; engine: string; model
   return { model: MODEL_IDS.claude.haiku, source: "policy" };
 }
 
+export function inferTaskIntent(input: {
+  role?: string;
+  engine?: string;
+  task: string;
+  difficulty?: TaskDifficulty;
+}): TaskIntent {
+  const text = `${input.role ?? ""} ${input.engine ?? ""} ${input.task}`.toLowerCase();
+  if (input.role === "uiux" || hasAny(text, UIUX_TERMS)) return "uiux";
+  if (input.role === "qa" || hasAny(text, REVIEW_TERMS)) return "review";
+  if (input.role === "docs" || hasAny(text, ["docs", "doc", "readme", "governance"])) {
+    return "docs";
+  }
+  if (hasAny(text, RESEARCH_TERMS)) return "research";
+  if (hasAny(text, IMPLEMENTATION_TERMS)) return "implementation";
+  if (
+    input.difficulty === "trivial" ||
+    input.difficulty === "simple" ||
+    hasAny(text, SIMPLE_TERMS)
+  ) {
+    return "lightweight";
+  }
+  return "general";
+}
+
+function policyEffort(input: {
+  provider: TeamProvider;
+  model: string;
+  difficulty: TaskDifficulty;
+  intent: TaskIntent;
+  fallback: ReasoningEffort;
+}): ReasoningEffort {
+  if (input.intent === "uiux") return "xhigh";
+  if (input.model === MODEL_IDS.codex.mini || input.model === MODEL_IDS.codex.spark) {
+    return "high";
+  }
+  if (input.intent === "review") {
+    return input.provider === "codex" ? "xhigh" : "high";
+  }
+  if (input.difficulty === "critical") return "high";
+  if (input.difficulty === "complex") return input.provider === "codex" ? "high" : "high";
+  if (input.provider === "codex") return "middle";
+  if (input.provider === "claude") return "high";
+  return input.fallback;
+}
+
 export function selectTeamModel(input: {
   provider: TeamProvider;
   role: string;
@@ -212,16 +273,32 @@ export function selectTeamModel(input: {
     engine: input.engine,
     modelFamily: recommendation.model_family,
   });
+  const taskIntent = inferTaskIntent({
+    role: input.role,
+    engine: input.engine,
+    task: input.task,
+    difficulty: difficulty.difficulty,
+  });
+  const model = input.model ?? selectedModel.model;
 
   return {
     provider: input.provider,
     difficulty: difficulty.difficulty,
     difficulty_source: difficulty.source,
     model_family: recommendation.model_family,
-    model: input.model ?? selectedModel.model,
+    model,
     model_source: input.model ? "explicit" : selectedModel.source,
-    reasoning_effort: input.effort ?? recommendation.reasoning_effort,
+    reasoning_effort:
+      input.effort ??
+      policyEffort({
+        provider: input.provider,
+        model,
+        difficulty: difficulty.difficulty,
+        intent: taskIntent,
+        fallback: recommendation.reasoning_effort,
+      }),
     effort_source: input.effort ? "explicit" : "policy",
+    task_intent: taskIntent,
     evidence_path: recommendation.evidence_path,
   };
 }

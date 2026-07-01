@@ -19,7 +19,7 @@ export { HARNESS_DB_INDEXES, HARNESS_DB_TABLES } from "./harness-db-catalog";
  * affinity ヒント)。各 table の列・PK・index は §2.7/§9.1/§9.3 に準拠。
  */
 
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 export type ColumnType = "TEXT" | "INTEGER" | "REAL";
 

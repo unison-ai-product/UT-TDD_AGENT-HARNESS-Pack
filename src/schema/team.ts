@@ -28,7 +28,7 @@ export const taskDifficultySchema = z.enum([
 ]);
 export type TaskDifficulty = z.infer<typeof taskDifficultySchema>;
 
-export const reasoningEffortSchema = z.enum(["low", "medium", "high"]);
+export const reasoningEffortSchema = z.enum(["low", "medium", "middle", "high", "xhigh"]);
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 
 export const modelOverrideSchema = z

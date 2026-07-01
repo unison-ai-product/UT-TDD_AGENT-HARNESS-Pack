@@ -38,6 +38,11 @@ import {
 } from "./feedback/surface";
 import { evaluateGateReview, loadReviewChecklistIfPresent } from "./gate/review-tier";
 import { evaluateStaticGate } from "./gate/static";
+import {
+  buildReleasePublicationPlan,
+  evaluateGithubOpsGuard,
+  renderGithubOpsGuard,
+} from "./github/ops-guard";
 import { loadRelationGraphSourceSet } from "./graph/loader";
 import {
   checkHandoverBypass,
@@ -65,9 +70,17 @@ import {
   saveVerificationEvidence,
   verificationRecommendationMermaid,
 } from "./lint/verification-profile";
+import {
+  type MemoryKind,
+  renderMemoryList,
+  renderMemorySurface,
+  selectMemoryEntries,
+  writeMemoryEntry,
+} from "./memory/index";
 import { lintPlanWithGate } from "./plan/lint";
 import {
   type AdapterContextInjection,
+  type AdapterPlan,
   type AdapterProvider,
   buildAdapterPlan,
   buildProviderInvocation,
@@ -130,6 +143,7 @@ import { findReference } from "./search/index";
 import {
   buildCleanDistributionPlan,
   buildConsumerReadinessPlan,
+  buildPackSyncPlan,
   cleanDistributionSourcePath,
   nodeSetupDeps,
   runSetup,
@@ -161,6 +175,7 @@ import {
   routeTeamMembers,
   routeToAdapterPlan,
 } from "./task/tier-router";
+import { buildAdvisorDecision } from "./team/advisor-policy";
 import { recommendTeamLaunch } from "./team/launch-policy";
 import {
   buildTeamRunPlan,
@@ -385,6 +400,7 @@ function runSessionStartSideEffects(
     // fail-open: lifecycle maintenance must not block the runtime.
   }
   surfaceTakeoverFeedbackToStdout(repoRoot);
+  surfaceMemoryToStdout(repoRoot);
   surfaceAttemptEscalationToStdout(repoRoot, input.session_id);
 }
 
@@ -430,6 +446,20 @@ function surfaceTakeoverFeedbackToStdout(repoRoot: string): void {
     }
   } catch {
     // fail-open: feedback surface は best-effort。DB 不在 / ロック / 破損で runtime を止めない。
+  }
+}
+
+function surfaceMemoryToStdout(repoRoot: string): void {
+  try {
+    const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
+    try {
+      const block = renderMemorySurface(selectMemoryEntries(db, { limit: 5 }));
+      if (block) process.stdout.write(block);
+    } finally {
+      db.close();
+    }
+  } catch {
+    // fail-open: memory surface is shared context, not a runtime blocker.
   }
 }
 
@@ -1973,6 +2003,7 @@ routeCommand
   .requiredOption("--signal <signal>", "observed signal")
   .option("--env <env>", "runtime environment")
   .option("--drift-type <type>", "drift subtype")
+  .option("--finding-type <type>", "audit/research finding type")
   .option("--route-map <path>", "route-map YAML override")
   .option("--format <format>", "output format: text or json", "text")
   .action(
@@ -1980,6 +2011,7 @@ routeCommand
       signal: string;
       env?: string;
       driftType?: string;
+      findingType?: string;
       routeMap?: string;
       format?: string;
     }) => {
@@ -1989,6 +2021,7 @@ routeCommand
         signal: opts.signal,
         env: opts.env,
         drift_type: opts.driftType,
+        finding_type: opts.findingType,
         approval_policy: loadRouteApprovalPolicy(repoRoot),
         route_map: routeMap.routes,
         route_config_violations: routeMap.violations,
@@ -2003,11 +2036,163 @@ routeCommand
         process.stdout.write(`mode=${evaluated.mode}\n`);
         process.stdout.write(`suggest_command=${evaluated.suggest_command}\n`);
         process.stdout.write(`command=${evaluated.recommended_command.command}\n`);
+        if (evaluated.finding_route) {
+          process.stdout.write(
+            `finding_route=${evaluated.finding_route.finding_type}->${evaluated.finding_route.mode}\n`,
+          );
+          process.stdout.write(`auto_create=${String(evaluated.finding_route.auto_create)}\n`);
+        }
         if (auditPath) process.stderr.write(`human approval blocked; audit=${auditPath}\n`);
       } else {
         process.stderr.write(`${evaluated.suggest_command}\n`);
       }
       process.exitCode = evaluated.exit_code;
+    },
+  );
+
+function executeAdapterPlanForCli(
+  plan: AdapterPlan,
+  input: { sessionPrefix: string; role: string; planId?: string; jsonOut?: boolean },
+): { executed: true; exit_code: number | null; signal: string | null } {
+  const sessionId = `${input.sessionPrefix}-${Date.now()}`;
+  const repoRoot = process.cwd();
+  const deps = nodeDeps(repoRoot, gitBranch, gitHead);
+  const startInput: SessionHookInput = {
+    hook_event_name: HOOK_EVENT_SESSION_START,
+    session_id: sessionId,
+    ...(input.planId ? { plan_id: input.planId } : {}),
+  };
+  runSessionStartSideEffects(repoRoot, startInput, deps);
+  dispatch(startInput, deps, HOOK_EVENT_SESSION_START);
+  const invocation = buildProviderInvocation({
+    provider: plan.provider,
+    command: plan.command,
+    args: plan.args,
+  });
+  const child = spawnSync(invocation.command, invocation.args, {
+    input: plan.stdin,
+    stdio:
+      plan.stdin === undefined
+        ? ["inherit", input.jsonOut ? 2 : "inherit", "inherit"]
+        : ["pipe", input.jsonOut ? 2 : "inherit", "inherit"],
+    env: adapterExecutionEnv(plan.provider, plan.env),
+    shell: invocation.shell ?? false,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
+  });
+  if (child.error) {
+    process.stderr.write(`${plan.provider}: failed to launch (${String(child.error)})\n`);
+  }
+  dispatch(
+    {
+      hook_event_name: "PostToolUse",
+      session_id: sessionId,
+      ...(input.planId ? { plan_id: input.planId } : {}),
+      tool_name: input.role,
+      tool_input: { command: `${plan.command} ${plan.args.join(" ")}` },
+      tool_response: { outcome: child.status === 0 ? "ok" : "error" },
+    },
+    deps,
+    "PostToolUse",
+  );
+  dispatch(
+    {
+      hook_event_name: "Stop",
+      session_id: sessionId,
+      ...(input.planId ? { plan_id: input.planId } : {}),
+    },
+    deps,
+    "Stop",
+  );
+  writeHandoverWarnings();
+  return { executed: true, exit_code: child.status ?? null, signal: child.signal ?? null };
+}
+
+program
+  .command("advisor")
+  .description("upper-model advisor adapter for uncertain orchestration decisions")
+  .option("--task <text>", "task text")
+  .option("--task-file <path>", TASK_FILE_OPTION_DESCRIPTION)
+  .option("--provider <provider>", "advisor provider (claude|codex)")
+  .option("--current-model <model>", "current orchestrator model that needs advice")
+  .option("--reason <text>", "why upper-model advice is needed")
+  .option("--plan <id>", "PLAN id")
+  .option("--execute", "execute provider CLI instead of dry-run")
+  .option("--mode <mode>", MODE_OVERRIDE_OPTION_DESCRIPTION)
+  .option("--json", "JSON output")
+  .action(
+    (opts: {
+      task?: string;
+      taskFile?: string;
+      provider?: string;
+      currentModel?: string;
+      reason?: string;
+      plan?: string;
+      execute?: boolean;
+      mode?: ReturnType<typeof detectMode>["mode"];
+      json?: boolean;
+    }) => {
+      const task = resolveTaskText(opts);
+      if (!task) {
+        process.stderr.write("advisor requires exactly one of --task or --task-file\n");
+        process.exitCode = 1;
+        return;
+      }
+      if (opts.provider && opts.provider !== "claude" && opts.provider !== "codex") {
+        process.stderr.write("advisor --provider must be claude or codex\n");
+        process.exitCode = 1;
+        return;
+      }
+      const mode = opts.mode ?? detectMode().mode;
+      const decision = buildAdvisorDecision({
+        task,
+        mode,
+        provider: opts.provider as AdapterProvider | undefined,
+        currentModel: opts.currentModel,
+        reason: opts.reason,
+        planId: opts.plan,
+        execute: Boolean(opts.execute),
+        contextInjection: resolveSkillContextInjection(opts.plan),
+      });
+      if (!decision.adapterPlan.available) {
+        if (opts.json) process.stdout.write(`${JSON.stringify(decision, null, 2)}\n`);
+        else process.stderr.write(`${decision.adapterPlan.messages.join("\n")}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!opts.execute) {
+        if (opts.json) process.stdout.write(`${JSON.stringify(decision, null, 2)}\n`);
+        else {
+          process.stdout.write(
+            `advisor: provider=${decision.provider} model=${decision.model} effort=${decision.effort} intent=${decision.task_intent} lower=${decision.current_model_lower_than_advisor} dry-run\n`,
+          );
+          process.stdout.write(`  - ${decision.reason}\n`);
+          process.stdout.write(
+            `  - dispatch: command=${decision.adapterPlan.command} args=[${decision.adapterPlan.args.join(" ")}]\n`,
+          );
+        }
+        return;
+      }
+      const execution = executeAdapterPlanForCli(decision.adapterPlan, {
+        sessionPrefix: `advisor-${decision.provider}`,
+        role: "advisor",
+        planId: opts.plan,
+        jsonOut: Boolean(opts.json),
+      });
+      const output = {
+        ...decision,
+        adapterPlan: {
+          ...decision.adapterPlan,
+          ...execution,
+          dry_run: false,
+        },
+      };
+      if (opts.json) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+      else {
+        process.stdout.write(
+          `advisor executed: provider=${decision.provider} model=${decision.model} exit=${execution.exit_code ?? "null"}\n`,
+        );
+      }
+      process.exitCode = execution.exit_code ?? 1;
     },
   );
 
@@ -2667,6 +2852,45 @@ branch
     }
   });
 
+const github = program.command("github").description("GitHub operations guards");
+
+github
+  .command("guard")
+  .description("fail-close branch-type and commit message checks for harness-check")
+  .requiredOption("--head-ref <ref>", "PR head branch ref")
+  .requiredOption("--base-ref <ref>", "PR base branch ref")
+  .option("--pr-title <text>", "PR title")
+  .option("--pr-body-file <path>", "file containing PR body")
+  .option("--commit-file <path>", "file containing one commit subject per line")
+  .option("--json", "JSON output")
+  .action(
+    (opts: {
+      headRef: string;
+      baseRef: string;
+      prTitle?: string;
+      prBodyFile?: string;
+      commitFile?: string;
+      json?: boolean;
+    }) => {
+      const prBody =
+        opts.prBodyFile && existsSync(opts.prBodyFile) ? readFileSync(opts.prBodyFile, "utf8") : "";
+      const commitSubjects =
+        opts.commitFile && existsSync(opts.commitFile)
+          ? readFileSync(opts.commitFile, "utf8").split(/\r?\n/).filter(Boolean)
+          : [];
+      const result = evaluateGithubOpsGuard({
+        headRef: opts.headRef,
+        baseRef: opts.baseRef,
+        prTitle: opts.prTitle,
+        prBody,
+        commitSubjects,
+      });
+      if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      else process.stdout.write(renderGithubOpsGuard(result));
+      process.exitCode = result.ok ? 0 : 1;
+    },
+  );
+
 const feedback = program
   .command("feedback")
   .description("強制停止フィードバック (forced-stop-feedback, PLAN-L7-02)");
@@ -2779,6 +3003,13 @@ program
         return;
       }
       const teamCount = [opts.tlTeam, opts.qaTeam, opts.poTeam].filter(Boolean).length;
+      if (opts.team && teamCount === 0) {
+        process.stderr.write(
+          "--team requires --tl-team / --qa-team / --po-team so generated CODEOWNERS never ships with unresolved team placeholders.\n",
+        );
+        process.exitCode = 1;
+        return;
+      }
       if (teamCount > 0 && teamCount < 3) {
         process.stderr.write(
           "--tl-team / --qa-team / --po-team は 3 つとも指定してください (CODEOWNERS の @TODO 混入防止)\n",
@@ -2814,6 +3045,74 @@ program
     },
   );
 
+const memory = program.command("memory").description("shared cross-runtime project memory");
+memory
+  .command("add")
+  .description("write a shared memory entry under .ut-tdd/memory")
+  .requiredOption("--title <title>", "memory title")
+  .option("--kind <kind>", "project | feedback | reference | user", "project")
+  .option("--body <text>", "memory body")
+  .option("--body-file <path>", "read memory body from a UTF-8 file")
+  .option("--tags <csv>", "comma-separated tags")
+  .action(
+    (opts: { title: string; kind: string; body?: string; bodyFile?: string; tags?: string }) => {
+      const body = opts.bodyFile ? readFileSync(opts.bodyFile, "utf8") : (opts.body ?? "");
+      const tags = opts.tags
+        ? opts.tags
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter(Boolean)
+        : [];
+      try {
+        const entry = writeMemoryEntry(process.cwd(), {
+          kind: opts.kind as MemoryKind,
+          title: opts.title,
+          body,
+          tags,
+        });
+        process.stdout.write(`memory: wrote ${entry.source_path}\n`);
+      } catch (error) {
+        process.stderr.write(`memory: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    },
+  );
+
+memory
+  .command("list")
+  .description("list shared memory entries from harness.db")
+  .option("--query <text>", "filter by text")
+  .option("--limit <n>", "maximum rows", "20")
+  .action((opts: { query?: string; limit?: string }) => {
+    const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
+    try {
+      process.stdout.write(
+        renderMemoryList(
+          selectMemoryEntries(db, { query: opts.query, limit: Number(opts.limit ?? 20) }),
+        ),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+memory
+  .command("recall")
+  .description("render shared memory context from harness.db")
+  .option("--query <text>", "filter by text")
+  .option("--limit <n>", "maximum rows", "5")
+  .action((opts: { query?: string; limit?: string }) => {
+    const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
+    try {
+      const block = renderMemorySurface(
+        selectMemoryEntries(db, { query: opts.query, limit: Number(opts.limit ?? 5) }),
+      );
+      process.stdout.write(block || "memory: no entries\n");
+    } finally {
+      db.close();
+    }
+  });
+
 const distribution = program.command("distribution").description("clean distribution planning");
 distribution
   .command("plan")
@@ -2822,7 +3121,7 @@ distribution
   .option(
     "--clean-repo <name>",
     "clean distribution repository",
-    "UNISON-TECHNOLOGY/ut-tdd-agent-harness-clean",
+    "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
   )
   .option("--package-root <path>", "consumer package root; defaults to repo root")
   .option("--json", "JSON output")
@@ -2913,13 +3212,188 @@ distribution
   });
 
 distribution
+  .command("sync-plan")
+  .description("emit a non-destructive clean Pack repository sync plan")
+  .option("--tag <tag>", "source/release tag", gitHead() ?? "unreleased")
+  .option(
+    "--clean-repo <name>",
+    "clean distribution repository",
+    "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
+  )
+  .option("--branch <name>", "Pack repository target branch", "main")
+  .option("--staging-dir <path>", "local Pack staging clone path")
+  .option("--json", "JSON output")
+  .action(
+    (opts: {
+      tag?: string;
+      cleanRepo?: string;
+      branch?: string;
+      stagingDir?: string;
+      json?: boolean;
+    }) => {
+      const repoRoot = process.cwd();
+      const sourcePaths = collectDistributionCandidatePaths(repoRoot);
+      const exportPlan = buildCleanDistributionPlan({
+        paths: sourcePaths,
+        sourceTag: opts.tag,
+        cleanRepo: opts.cleanRepo,
+      });
+      const stagingDir = opts.stagingDir
+        ? isAbsolute(opts.stagingDir)
+          ? opts.stagingDir
+          : join(repoRoot, opts.stagingDir)
+        : join(repoRoot, ".ut-tdd", "pack-sync", exportPlan.sourceTag);
+      const sync = buildPackSyncPlan({
+        exportPlan,
+        sourcePaths,
+        stagingDir,
+        branch: opts.branch,
+      });
+      const output = {
+        ok: sync.ok,
+        export: exportPlan,
+        sync,
+        actualRemoteMutationRequiresPoApproval: true,
+      };
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+        process.exitCode = sync.ok ? 0 : 1;
+        return;
+      }
+      process.stdout.write(
+        `distribution sync-plan: ${sync.ok ? "ok" : "blocked"} tag=${sync.sourceTag}\n`,
+      );
+      process.stdout.write(`  clean-repo: ${sync.cleanRepo}\n`);
+      process.stdout.write(`  staging-dir: ${sync.stagingDir}\n`);
+      process.stdout.write(`  copy-plan: ${sync.copyPlan.length} files\n`);
+      process.stdout.write("  remote mutation: requires PO approval; commands were not executed\n");
+      process.exitCode = sync.ok ? 0 : 1;
+    },
+  );
+
+distribution
+  .command("sync-stage")
+  .description("materialize clean Pack artifacts into a local staging directory without publishing")
+  .option("--tag <tag>", "source/release tag", gitHead() ?? "unreleased")
+  .option(
+    "--clean-repo <name>",
+    "clean distribution repository",
+    "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
+  )
+  .option("--branch <name>", "Pack repository target branch", "main")
+  .option("--out <dir>", "local staging directory", ".ut-tdd/pack-stage")
+  .option("--json", "JSON output")
+  .action(
+    (opts: { tag?: string; cleanRepo?: string; branch?: string; out?: string; json?: boolean }) => {
+      const repoRoot = process.cwd();
+      const sourcePaths = collectDistributionCandidatePaths(repoRoot);
+      const exportPlan = buildCleanDistributionPlan({
+        paths: sourcePaths,
+        sourceTag: opts.tag,
+        cleanRepo: opts.cleanRepo,
+      });
+      const outDir = opts.out
+        ? isAbsolute(opts.out)
+          ? opts.out
+          : join(repoRoot, opts.out)
+        : join(repoRoot, ".ut-tdd", "pack-stage");
+      const sync = buildPackSyncPlan({
+        exportPlan,
+        sourcePaths,
+        stagingDir: outDir,
+        branch: opts.branch,
+      });
+      mkdirSync(outDir, { recursive: true });
+      const plannedArtifacts = new Set(exportPlan.artifactPaths);
+      const unmanagedExistingPaths = collectDistributionCandidatePaths(outDir).filter(
+        (path) => !plannedArtifacts.has(path) && !path.startsWith(".git/"),
+      );
+      let copyError: string | null = null;
+      if (exportPlan.ok) {
+        try {
+          for (const rel of exportPlan.artifactPaths) {
+            const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
+            const from = join(repoRoot, ...sourceRel.split("/"));
+            const to = join(outDir, ...rel.split("/"));
+            mkdirSync(dirname(to), { recursive: true });
+            cpSync(from, to, { recursive: true });
+          }
+        } catch (error) {
+          copyError = error instanceof Error ? error.message : String(error);
+        }
+      }
+      const manifest = join(outDir, ".ut-tdd-pack-sync-manifest.json");
+      const output = {
+        ok: exportPlan.ok && copyError === null && unmanagedExistingPaths.length === 0,
+        export: exportPlan,
+        sync,
+        stage: {
+          outDir,
+          manifest,
+          copiedArtifacts:
+            copyError === null && exportPlan.ok ? exportPlan.artifactPaths.length : 0,
+          unmanagedExistingPaths,
+          copyError,
+          destructiveRemoteMutation: false,
+          actualRemoteMutationRequiresPoApproval: true,
+        },
+      };
+      writeFileSync(manifest, `${JSON.stringify(output, null, 2)}\n`, "utf8");
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+        process.exitCode = output.ok ? 0 : 1;
+        return;
+      }
+      process.stdout.write(
+        `distribution sync-stage: ${output.ok ? "ok" : "blocked"} tag=${exportPlan.sourceTag}\n`,
+      );
+      process.stdout.write(`  out: ${outDir}\n`);
+      process.stdout.write(`  copied-artifacts: ${output.stage.copiedArtifacts}\n`);
+      process.stdout.write(`  unmanaged-existing: ${unmanagedExistingPaths.length}\n`);
+      process.stdout.write(
+        "  remote mutation: requires PO approval; no push/release was executed\n",
+      );
+      process.exitCode = output.ok ? 0 : 1;
+    },
+  );
+
+distribution
+  .command("release-plan")
+  .description("emit non-destructive git tag and gh release commands for human-approved publishing")
+  .requiredOption("--tag <tag>", "release tag, e.g. v0.1.0")
+  .option(
+    "--repo <name>",
+    "GitHub repository for release publication",
+    "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
+  )
+  .option("--json", "JSON output")
+  .action((opts: { tag: string; repo?: string; json?: boolean }) => {
+    const plan = buildReleasePublicationPlan({
+      tag: opts.tag,
+      repo: opts.repo ?? "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
+      dryRun: true,
+    });
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+      process.exitCode = plan.ok ? 0 : 1;
+      return;
+    }
+    process.stdout.write(
+      `release plan: ${plan.ok ? "ok" : "blocked"} tag=${plan.tag} repo=${plan.repo}\n`,
+    );
+    for (const command of plan.commands) process.stdout.write(`  ${command}\n`);
+    process.stdout.write("  publish: requires PO approval; commands were not executed\n");
+    process.exitCode = plan.ok ? 0 : 1;
+  });
+
+distribution
   .command("package")
   .description("create a local clean tarball and sha256 checksum without publishing")
   .option("--tag <tag>", "source/release tag", gitHead() ?? "unreleased")
   .option(
     "--clean-repo <name>",
     "clean distribution repository",
-    "UNISON-TECHNOLOGY/ut-tdd-agent-harness-clean",
+    "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
   )
   .option("--out <dir>", "output directory for local release artifacts", ".ut-tdd/release")
   .option("--json", "JSON output")

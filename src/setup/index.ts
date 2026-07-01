@@ -144,6 +144,7 @@ const STATE_PATH = join(".ut-tdd", "state", "setup.json");
 const BP_SCRIPT = join("scripts", "setup-branch-protection.sh");
 const MANAGED_START = "<!-- UT-TDD:managed:start -->";
 const MANAGED_END = "<!-- UT-TDD:managed:end -->";
+const PACK_REPO = "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack";
 const SETUP_SOURCE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "cli.ts");
 const MERGEABLE_ADAPTER_DOCS = new Set(["AGENTS.md", "CLAUDE.md", join(".claude", "CLAUDE.md")]);
 const CLEAN_REQUIRED_PATHS = [
@@ -413,6 +414,24 @@ export function cleanDistributionSourcePath(
   return artifact;
 }
 
+export interface PackSyncPlan {
+  ok: boolean;
+  mode: "non-destructive-sync-plan";
+  cleanRepo: string;
+  sourceTag: string;
+  branch: string;
+  stagingDir: string;
+  artifactCount: number;
+  excludedCount: number;
+  missingRequired: string[];
+  denylistViolations: string[];
+  copyPlan: { sourcePath: string; artifactPath: string }[];
+  commands: string[];
+  checks: string[];
+  publishRequiresPoApproval: true;
+  destructiveRemoteMutation: false;
+}
+
 function hasMinimumBun(version: string, minimum = "1.3.0"): boolean {
   const parse = (v: string): number[] => {
     const match = v.match(/\d+(?:\.\d+){0,2}/)?.[0] ?? "0";
@@ -434,7 +453,7 @@ export function buildCleanDistributionPlan(input: {
   cleanRepo?: string;
 }): CleanDistributionPlan {
   const sourceTag = input.sourceTag ?? "unreleased";
-  const cleanRepo = input.cleanRepo ?? "UNISON-TECHNOLOGY/ut-tdd-agent-harness-clean";
+  const cleanRepo = input.cleanRepo ?? PACK_REPO;
   const normalized = [...new Set(input.paths.map(normalizeDistributionPath))].sort();
   const includedSourcePaths = normalized.filter(
     (path) => isAllowedCleanPath(path) && !isDeniedCleanPath(path),
@@ -560,7 +579,7 @@ export function buildConsumerReadinessPlan(input: {
     },
     contracts: {
       semver: "0.x may add capabilities; breaking public contract changes require migration notes",
-      tagPin: `github:UNISON-TECHNOLOGY/ut-tdd-agent-harness-clean#${tag}`,
+      tagPin: `github:${PACK_REPO}#${tag}`,
       stable: [
         "CLI surface",
         "adapter managed markers",
@@ -586,6 +605,52 @@ export function buildConsumerReadinessPlan(input: {
  * U-SETUP-004: render → 書込。dryRun は書かず path 一覧を返すのみ。既存上書きは confirm 経由。
  * 生成内容に token を埋め込まない (render は templates と team slug のみ)。書いた path を返す。
  */
+export function buildPackSyncPlan(input: {
+  exportPlan: CleanDistributionPlan;
+  sourcePaths: string[];
+  stagingDir: string;
+  branch?: string;
+}): PackSyncPlan {
+  const branch = input.branch ?? "main";
+  const sourcePathSet = new Set(input.sourcePaths.map(normalizeDistributionPath));
+  const copyPlan = input.exportPlan.artifactPaths.map((artifactPath) => ({
+    sourcePath: cleanDistributionSourcePath(artifactPath, sourcePathSet),
+    artifactPath,
+  }));
+  return {
+    ok: input.exportPlan.ok,
+    mode: "non-destructive-sync-plan",
+    cleanRepo: input.exportPlan.cleanRepo,
+    sourceTag: input.exportPlan.sourceTag,
+    branch,
+    stagingDir: input.stagingDir,
+    artifactCount: input.exportPlan.artifactPaths.length,
+    excludedCount: input.exportPlan.excludedPaths.length,
+    missingRequired: input.exportPlan.missingRequired,
+    denylistViolations: input.exportPlan.denylistViolations,
+    copyPlan,
+    commands: [
+      `git clone https://github.com/${input.exportPlan.cleanRepo}.git ${input.stagingDir}`,
+      `git -C ${input.stagingDir} switch ${branch}`,
+      "copy only copyPlan.sourcePath files from source repo to copyPlan.artifactPath in the staging repo",
+      `git -C ${input.stagingDir} status --short`,
+      `git -C ${input.stagingDir} add -- .`,
+      `git -C ${input.stagingDir} commit -m "chore: sync clean pack ${input.exportPlan.sourceTag}"`,
+      `git -C ${input.stagingDir} tag -a ${input.exportPlan.sourceTag} -m "${input.exportPlan.sourceTag}"`,
+      `git -C ${input.stagingDir} push origin ${branch} --follow-tags`,
+    ],
+    checks: [
+      "denylistViolations.length === 0",
+      "missingRequired.length === 0",
+      "git status --short shows only intended clean Pack files",
+      "Pack CI passes before release publication",
+      "signature tarball and GitHub release publication remain separate human-approved operations",
+    ],
+    publishRequiresPoApproval: true,
+    destructiveRemoteMutation: false,
+  };
+}
+
 export function emitSetup(plan: SetupPlan, templates: TemplateSet, deps: SetupDeps): string[] {
   const rendered = renderArtifacts(plan, templates);
   if (plan.dryRun) return rendered.map((r) => r.path);

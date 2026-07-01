@@ -216,6 +216,65 @@ describe("L7 workflow contract implementations", () => {
       signal: "version_deferral",
       mode: "version-up",
     });
+    for (const findingType of ["regression", "premise-gap", "deviation"]) {
+      const findingRoute = evaluateRouteCommand({
+        signal: `audit finding ${findingType}`,
+        finding_type: findingType,
+      });
+      expect(findingRoute.mode).toBe("recovery");
+      expect(findingRoute.exit_code).toBe(1);
+      expect(findingRoute.approval.required).toBe(true);
+      expect(findingRoute.recommended_command?.safety.requires_human_approval).toBe(true);
+      expect(findingRoute.recommended_command?.args).toMatchObject({
+        route_signal: "regression_dev",
+        finding_type: findingType,
+        source_signal: `audit finding ${findingType}`,
+      });
+      expect(findingRoute.finding_route).toMatchObject({
+        finding_type: findingType,
+        mode: "recovery",
+        route_signal: "regression_dev",
+        proposed_plan_prefix: "PLAN-RECOVERY-",
+        auto_create: false,
+      });
+      expect(findingRoute.finding_route?.required_recovery_fields).toContain("root_cause");
+      expect(findingRoute.finding_route?.required_recovery_fields).toContain("l14_route");
+    }
+    const approvedFindingRoute = evaluateRouteCommand({
+      signal: "A-144 VER-1 premise-gap",
+      approval_policy: {
+        rules: [{ mode: "recovery", required_approvers: ["tl", "po"] }],
+        approvals: [
+          { mode: "recovery", approver: "tl", approved_at: "2026-07-01T00:00:00.000Z" },
+          { mode: "recovery", approver: "po", approved_at: "2026-07-01T00:00:00.000Z" },
+        ],
+      },
+    });
+    expect(approvedFindingRoute.exit_code).toBe(0);
+    expect(approvedFindingRoute.finding_route?.finding_type).toBe("premise-gap");
+    expect(approvedFindingRoute.recommended_command?.safety.auto_apply).toBe(false);
+    const featureGapRoute = evaluateRouteCommand({ signal: "feature-gap adapter portability" });
+    expect(featureGapRoute.mode).toBe("add-feature");
+    expect(featureGapRoute.exit_code).toBe(0);
+    expect(featureGapRoute.finding_route).toMatchObject({
+      finding_type: "feature-gap",
+      mode: "add-feature",
+      route_signal: "feature_addition",
+      auto_create: false,
+    });
+    const latentDefectRoute = evaluateRouteCommand({ signal: "latent-defect hook coverage" });
+    expect(latentDefectRoute.mode).toBe("add-feature");
+    expect(latentDefectRoute.finding_route?.finding_type).toBe("latent-defect");
+    const smellRoute = evaluateRouteCommand({ signal: "smell duplicated routing table" });
+    expect(smellRoute.mode).toBe("refactor");
+    expect(smellRoute.exit_code).toBe(0);
+    expect(smellRoute.finding_route).toMatchObject({
+      finding_type: "smell",
+      mode: "refactor",
+      route_signal: "code_smell",
+      proposed_plan_prefix: "PLAN-REFACTOR-",
+      auto_create: false,
+    });
     const legacyCommandRoute = evaluateRouteCommand({
       signal: "legacy override",
       route_map: [

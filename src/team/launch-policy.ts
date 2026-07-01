@@ -58,7 +58,7 @@ function memberWithOptionalSerialization(input: {
   task: string;
   difficulty: TaskDifficulty;
   model?: string;
-  effort?: "low" | "medium" | "high";
+  effort?: "low" | "medium" | "middle" | "high" | "xhigh";
   ownership?: string;
   serialize_after?: string;
 }): TeamMember {
@@ -124,9 +124,11 @@ function difficultyForLane(
   return "critical";
 }
 
-function effortForLane(lane: ProposalSubagentRecommendationInput): "low" | "medium" | "high" {
-  if (lane.tier === "T2-mini" || lane.tier === "T2-spark") return "low";
-  if (lane.tier === "T1-worker") return "medium";
+function effortForLane(
+  lane: ProposalSubagentRecommendationInput,
+): "low" | "medium" | "middle" | "high" | "xhigh" {
+  if (lane.tier === "T2-mini" || lane.tier === "T2-spark") return "high";
+  if (lane.tier === "T1-worker") return "middle";
   return "high";
 }
 
@@ -172,7 +174,7 @@ function buildProposalDefinition(input: {
         engine: "pmo-sonnet",
         task: `Cross-provider review of proposal lane outputs for: ${input.task}`,
         difficulty: input.difficulty === "critical" ? "critical" : "standard",
-        effort: input.difficulty === "critical" ? "high" : "medium",
+        effort: input.difficulty === "critical" ? "xhigh" : "high",
         ownership: "single cross-provider review of mini/spark outputs and coverage guardrails",
         serialize_after: firstParallelEngine,
       }),

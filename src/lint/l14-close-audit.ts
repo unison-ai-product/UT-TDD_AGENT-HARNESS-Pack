@@ -158,6 +158,7 @@ const REQUIRED_EVIDENCE_BY_ITEM: Partial<Record<(typeof EXPECTED_ITEMS)[number],
     "tests/green-command-digest.test.ts",
     "docs/plans/PLAN-L7-132-green-command-digest-integrity.md",
     "docs/plans/PLAN-L7-174-green-command-digest-correction.md",
+    ".ut-tdd/audit/A-155-green-command-digest-rebind-2026-07-01.md",
   ],
 };
 

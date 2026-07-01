@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { inferTaskDifficulty, selectTeamModel } from "../src/team/model-policy";
+import { buildAdvisorDecision } from "../src/team/advisor-policy";
+import { inferTaskDifficulty, inferTaskIntent, selectTeamModel } from "../src/team/model-policy";
 
 describe("team model policy", () => {
   it("infers critical difficulty from high-risk task terms", () => {
@@ -9,7 +10,7 @@ describe("team model policy", () => {
     });
   });
 
-  it("uses fast codex model and low effort for trivial work", () => {
+  it("uses fast codex model and high effort for lightweight work", () => {
     const selection = selectTeamModel({
       provider: "codex",
       role: "docs",
@@ -21,16 +22,17 @@ describe("team model policy", () => {
       difficulty: "trivial",
       model_family: "fast",
       model: "gpt-5.3-codex-spark",
-      reasoning_effort: "low",
+      reasoning_effort: "high",
+      task_intent: "docs",
     });
   });
 
-  it("uses frontier model and high effort for critical codex work", () => {
+  it("uses frontier model and xhigh effort for critical codex review work", () => {
     const selection = selectTeamModel({
       provider: "codex",
-      role: "tl",
+      role: "qa",
       engine: "codex-tl",
-      task: "production security migration",
+      task: "review production security migration",
     });
 
     expect(selection).toMatchObject({
@@ -38,7 +40,8 @@ describe("team model policy", () => {
       model_family: "frontier",
       // frontier = T0 最上位。tier-router TIER_TABLE.T0.codex (gpt-5.5) と整合 (PLAN-L7-75 reconcile)。
       model: "gpt-5.5",
-      reasoning_effort: "high",
+      reasoning_effort: "xhigh",
+      task_intent: "review",
     });
   });
 
@@ -56,6 +59,34 @@ describe("team model policy", () => {
     expect(selection.reasoning_effort).toBe("high");
   });
 
+  it("maps docs, research, UI/UX, and implementation intent to the requested effort defaults", () => {
+    expect(inferTaskIntent({ role: "docs", task: "update governance docs" })).toBe("docs");
+    expect(inferTaskIntent({ task: "research public SDK sources" })).toBe("research");
+    expect(inferTaskIntent({ role: "uiux", task: "screen visual design" })).toBe("uiux");
+    expect(inferTaskIntent({ role: "se", task: "implement setup wrapper" })).toBe("implementation");
+
+    expect(
+      selectTeamModel({
+        provider: "claude",
+        role: "uiux",
+        engine: "pmo-sonnet",
+        task: "screen visual design",
+      }),
+    ).toMatchObject({
+      model: "claude-sonnet-4-6",
+      reasoning_effort: "xhigh",
+      task_intent: "uiux",
+    });
+    expect(
+      selectTeamModel({
+        provider: "codex",
+        role: "se",
+        engine: "codex-se",
+        task: "implement setup wrapper",
+      }).reasoning_effort,
+    ).toBe("middle");
+  });
+
   it("honors explicit difficulty, model, and effort overrides", () => {
     const selection = selectTeamModel({
       provider: "codex",
@@ -64,7 +95,7 @@ describe("team model policy", () => {
       task: "implement",
       difficulty: "simple",
       model: "gpt-custom",
-      effort: "high",
+      effort: "xhigh",
     });
 
     expect(selection).toMatchObject({
@@ -72,8 +103,49 @@ describe("team model policy", () => {
       difficulty_source: "explicit",
       model: "gpt-custom",
       model_source: "explicit",
-      reasoning_effort: "high",
+      reasoning_effort: "xhigh",
       effort_source: "explicit",
     });
+  });
+
+  it("builds upper-model advisor decisions for lower orchestrators", () => {
+    const claude = buildAdvisorDecision({
+      task: "review whether the release gate is safe to close",
+      mode: "hybrid",
+      currentModel: "claude-sonnet-4-6",
+    });
+
+    expect(claude).toMatchObject({
+      provider: "claude",
+      model: "claude-opus-4-8",
+      effort: "high",
+      current_model_lower_than_advisor: true,
+      adapterPlan: {
+        provider: "claude",
+        model: "claude-opus-4-8",
+        effort: "high",
+        dry_run: true,
+      },
+    });
+    expect(claude.adapterPlan.stdin).toContain("upper-model advisor");
+
+    const codex = buildAdvisorDecision({
+      task: "advise on uncertain implementation close",
+      mode: "codex-only",
+      provider: "codex",
+      execute: true,
+    });
+
+    expect(codex).toMatchObject({
+      provider: "codex",
+      model: "gpt-5.5",
+      effort: "xhigh",
+      adapterPlan: {
+        provider: "codex",
+        model: "gpt-5.5",
+        dry_run: false,
+      },
+    });
+    expect(codex.adapterPlan.args).toEqual(["exec", "-m", "gpt-5.5", "-"]);
   });
 });
