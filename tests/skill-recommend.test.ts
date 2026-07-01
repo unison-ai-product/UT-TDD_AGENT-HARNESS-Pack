@@ -7,7 +7,7 @@ import {
   recommendSkillsForText,
   recordSkillInvocations,
   recordSkillRecommendations,
-} from "../src/skills/recommend";
+} from "../src/skill-engine/recommend";
 import { openHarnessDb } from "../src/state-db/index";
 import { migrate, rowCounts } from "../src/state-db/migration";
 import { recordProjectionEvent } from "../src/state-db/projection-writer";

@@ -380,7 +380,7 @@ export function loadRelationGraphSourceSet(repoRoot: string): RelationGraphSourc
   }
 
   const skillDocs: string[] = [];
-  walkMd(join(repoRoot, "docs", "skills"), repoRoot, skillDocs);
+  walkMd(join(repoRoot, "skills"), repoRoot, skillDocs);
   for (const path of skillDocs) {
     addDesignDocIfAbsent(designDocs, path);
   }

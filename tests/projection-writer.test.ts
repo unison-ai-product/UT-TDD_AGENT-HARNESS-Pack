@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -56,6 +56,56 @@ describe("SECRET_PATTERN word-boundary anchoring", () => {
 });
 
 describe("IT-DB-01/02: harness.db projection writer", () => {
+  it("rebuilds a clean pack repo with root skills and no docs/plans", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-pack-projection-"));
+    try {
+      mkdirSync(join(root, "skills"), { recursive: true });
+      writeFileSync(
+        join(root, "skills", "refactoring.md"),
+        [
+          "---",
+          "schema_version: skill.v1",
+          "name: refactoring",
+          "skill_type: workflow",
+          "category: workflow",
+          "applies_to:",
+          "  drive_models:",
+          "    - Refactor",
+          "---",
+          "# refactoring",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const db = openHarnessDb(":memory:", { repoRoot: root });
+      try {
+        const result = rebuildHarnessDb({
+          repoRoot: root,
+          db,
+          relationGraph: { nodes: [], edges: [], verificationProfiles: [], findings: [] },
+          documentExports: {
+            document_export_runs: [],
+            document_export_datasets: [],
+            document_export_artifacts: [],
+            findings: [],
+            actionsTaken: [],
+            ok: true,
+          },
+        });
+        const row = db
+          .prepare("SELECT path FROM automation_assets WHERE asset_id = ?")
+          .get("skill:refactoring") as { path?: string } | undefined;
+
+        expect(result.ok).toBe(true);
+        expect(row?.path).toBe("skills/refactoring.md");
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("detects typed refactor candidates for split, extraction, dedupe, and externalization", () => {
     expect(REFACTOR_CANDIDATE_THRESHOLDS.splitModuleLines).toBe(700);
     expect(REFACTOR_POLICY_TERMS).toContain("subagent");

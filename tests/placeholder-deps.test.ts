@@ -120,7 +120,7 @@ describe("U-PHDEPS: placeholder_deps 2-type recognition (IMP-107)", () => {
           traceKey: "FR-L1-47",
           layer: "L7",
           role: "source",
-          path: "src/skills/recommend.ts",
+          path: "src/skill-engine/recommend.ts",
           status: "active",
         },
         {

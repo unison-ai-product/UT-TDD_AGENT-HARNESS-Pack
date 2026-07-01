@@ -1,4 +1,15 @@
-name: harness-pack-check
+# harness-check — UT-TDD Agent Harness CI (要件定義書 §6.2/§6.9)
+#
+# §6.9: ローカル hook は早期検知のみ。全量テスト・回帰確認は GitHub Actions で実行する。
+# §6.2: Branch Protection の Required Status Checks は本 `harness-check` 1 本のみ (集約 gate)。
+#
+# 本 workflow は §6.5 Phase 0-A 相当 (配備するが Required 化はしない / solo)。
+# トリガは §6.9 の `pull_request: [main]` に加え、solo main 直開発を即 dogfood するため `push: [main]` も含める。
+#
+# 現状実装される subjob = typecheck + 全回帰 (vitest) + biome lint + doctor。
+# 以下は negative carry (実装後に subjob 追加):
+#   - commitlint / poc-no-merge-guard / hotfix-postmortem-required 等 §6.3 の branch-type subjob: PLAN で追加
+name: harness-check
 
 on:
   push:
@@ -10,11 +21,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: harness-pack-check-${{ github.ref }}
+  group: harness-check-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  harness-pack-check:
+  harness-check:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
@@ -28,17 +39,17 @@ jobs:
       - name: install deps (frozen)
         run: bun install --frozen-lockfile
 
-      - name: typecheck
+      - name: typecheck (tsc --noEmit)
         run: bun run typecheck
 
-      - name: distribution smoke tests
-        run: bun run vitest run tests/distribution-acceptance.test.ts tests/runtime-portability.test.ts --reporter=dot
+      - name: db rebuild (deterministic projection)
+        run: bun src/cli.ts db rebuild --json
 
-      - name: lint
+      - name: test — 全回帰 (vitest run)
+        run: bun run test
+
+      - name: lint (biome)
         run: bun run lint
 
-      - name: setup solo
-        run: bun src/cli.ts setup --solo
-
-      - name: setup smoke
-        run: bun .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+      - name: doctor (governance hard gates)
+        run: bun src/cli.ts doctor

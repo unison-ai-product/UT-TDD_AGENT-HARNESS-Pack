@@ -125,6 +125,27 @@ describe("dependency-drift and regression expansion (PLAN-REVERSE-42)", () => {
     expect(scope.testPaths).toEqual(["tests/runtime-hook-entrypoints.test.ts"]);
   });
 
+  it("U-REGEXP-004: deleted source modules are not treated as live regression targets", () => {
+    const drift = analyzeDependencyDrift({
+      sourceDocs: [
+        { path: "src/skill-engine/recommend.ts", text: "export const recommend = true;" },
+      ],
+      testDocs: [
+        {
+          path: "tests/skill-recommend.test.ts",
+          text: 'import "../src/skill-engine/recommend";',
+        },
+      ],
+    });
+    const scope = expandRegressionScope(drift, [
+      "src/skills/recommend.ts",
+      "src/skill-engine/recommend.ts",
+    ]);
+
+    expect(scope.ok).toBe(true);
+    expect(scope.changedModules).toEqual(["skill-engine"]);
+  });
+
   it("IT-ASSET-03: runtime may import the roster boundary through agent-slots only", () => {
     const result = analyzeDependencyDrift({
       sourceDocs: [

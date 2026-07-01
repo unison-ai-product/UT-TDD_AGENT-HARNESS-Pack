@@ -338,8 +338,15 @@ export function expandRegressionScope(
   drift: DependencyDriftResult,
   changedPaths: string[],
 ): RegressionExpansionResult {
+  const existingModules = new Set(
+    drift.sourceDocs.map((doc) => sourceModule(doc.path)).filter((m): m is string => m != null),
+  );
   const changedModules = [
-    ...new Set(changedPaths.map(sourceModule).filter((m): m is string => m != null)),
+    ...new Set(
+      changedPaths
+        .map(sourceModule)
+        .filter((m): m is string => m != null && existingModules.has(m)),
+    ),
   ].sort();
   const affected = new Set(changedModules);
   const blockedEdges = new Set(

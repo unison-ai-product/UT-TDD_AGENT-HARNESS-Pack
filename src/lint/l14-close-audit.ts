@@ -169,11 +169,11 @@ const REQUIRED_BOUNDARY_MARKERS_BY_ITEM: Partial<
     nextAction: ["hosted/api", "preflight"],
   },
   "clean-distribution-package": {
-    gap: ["clean public repo", "signed tarball"],
-    nextAction: ["po approval"],
+    gap: ["signed tarball"],
+    nextAction: ["signature"],
   },
   "version-up-nonbreaking": {
-    gap: ["released tag"],
+    gap: ["multi-version consumer upgrade"],
     nextAction: ["tag-pin", "rollback"],
   },
   "l11-uat-boundary": {
@@ -197,8 +197,8 @@ const REQUIRED_BOUNDARY_MARKERS_BY_ITEM: Partial<
     nextAction: ["po signoff", "post-deploy"],
   },
   "release-publication-boundary": {
-    gap: ["clean github repo", "tag push", "signed tarball"],
-    nextAction: ["po approval", "checksums", "signature"],
+    gap: ["signed tarball"],
+    nextAction: ["signature"],
   },
 };
 

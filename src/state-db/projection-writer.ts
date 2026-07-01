@@ -2262,7 +2262,7 @@ function projectSkillTelemetry(db: HarnessDb, plans: Map<string, ProjectedPlan>)
     .prepare("SELECT * FROM automation_assets WHERE asset_type = ? ORDER BY asset_id")
     .all("skill")
     // A skill-MAP (index of skills — the W10 curate draft and the future
-    // SKILL_MAP.md) is catalogued under docs/skills for asset-drift coverage but
+    // SKILL_MAP.md) is catalogued under the skill root for asset-drift coverage but
     // is NOT itself a recommendable skill, so it must not enter the ranking.
     .filter((asset) => !String(asset.skill_type ?? "").startsWith("skill-map"));
   for (const plan of plans.values()) {

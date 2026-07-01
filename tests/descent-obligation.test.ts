@@ -236,7 +236,12 @@ describe("descent-obligation ledger (PLAN-L6-35 / FR-L1-03)", () => {
     const result = analyzeDescentObligations(
       [
         a({ traceKey: "FR-L1-47", layer: "L6", role: "design" }),
-        a({ traceKey: "FR-L1-47", layer: "L7", role: "source", path: "src/skills/recommend.ts" }),
+        a({
+          traceKey: "FR-L1-47",
+          layer: "L7",
+          role: "source",
+          path: "src/skill-engine/recommend.ts",
+        }),
         a({ traceKey: "FR-L1-47", layer: "L7", role: "test-design" }),
       ],
       DEFAULT_DESCENT_ADJACENCY,
@@ -273,7 +278,12 @@ describe("descent-obligation ledger (PLAN-L6-35 / FR-L1-03)", () => {
     const result = analyzeDescentObligations(
       [
         a({ traceKey: "FR-L1-47", layer: "L6", role: "design" }),
-        a({ traceKey: "FR-L1-47", layer: "L7", role: "source", path: "src/skills/recommend.ts" }),
+        a({
+          traceKey: "FR-L1-47",
+          layer: "L7",
+          role: "source",
+          path: "src/skill-engine/recommend.ts",
+        }),
       ],
       DEFAULT_DESCENT_ADJACENCY,
       [],

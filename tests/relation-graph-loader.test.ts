@@ -19,7 +19,7 @@ function buildRepo(root: string): void {
   mkdirSync(join(root, "docs", "design", "harness"), { recursive: true });
   mkdirSync(join(root, "docs", "governance"), { recursive: true });
   mkdirSync(join(root, "docs", "process", "modes"), { recursive: true });
-  mkdirSync(join(root, "docs", "skills"), { recursive: true });
+  mkdirSync(join(root, "skills"), { recursive: true });
   mkdirSync(join(root, "docs", "test-design", "harness"), { recursive: true });
   mkdirSync(join(root, ".claude", "agents"), { recursive: true });
   mkdirSync(join(root, ".codex"), { recursive: true });
@@ -114,7 +114,7 @@ function buildRepo(root: string): void {
     "utf8",
   );
   writeFileSync(
-    join(root, "docs", "skills", "SKILL_MAP.md"),
+    join(root, "skills", "SKILL_MAP.md"),
     ["# Skill Map", "", "Fixture skill catalog body.", ""].join("\n"),
     "utf8",
   );
@@ -219,10 +219,10 @@ describe("loadRelationGraphSourceSet", () => {
         id: ".claude/agents/refactor-scout.md",
         path: ".claude/agents/refactor-scout.md",
       });
-      const skillMapDoc = sourceSet.designDocs?.find((d) => d.path === "docs/skills/SKILL_MAP.md");
+      const skillMapDoc = sourceSet.designDocs?.find((d) => d.path === "skills/SKILL_MAP.md");
       expect(skillMapDoc).toMatchObject({
-        id: "docs/skills/SKILL_MAP.md",
-        path: "docs/skills/SKILL_MAP.md",
+        id: "skills/SKILL_MAP.md",
+        path: "skills/SKILL_MAP.md",
       });
       const adrDoc = sourceSet.designDocs?.find(
         (d) => d.path === "docs/adr/ADR-001-test-decision.md",
@@ -528,13 +528,11 @@ describe("relation graph real-repo loader (PLAN-L7-142 stale-edge fence)", () =>
       expect(impact.findings.map((f) => f.code)).not.toContain("missing-projection");
     }
     const skillMapImpact = analyzeRelationImpact({
-      changedPaths: ["docs/skills/SKILL_MAP.md"],
+      changedPaths: ["skills/SKILL_MAP.md"],
       projection,
     });
     expect(skillMapImpact.ok).toBe(true);
-    expect(skillMapImpact.changedNodes.map((n) => n.id)).toContain(
-      "design:docs/skills/SKILL_MAP.md",
-    );
+    expect(skillMapImpact.changedNodes.map((n) => n.id)).toContain("design:skills/SKILL_MAP.md");
     expect(skillMapImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
     const adapterAgentImpact = analyzeRelationImpact({
       changedPaths: ["docs/templates/adapter/.claude/agents/ut-tdd-tl.md"],

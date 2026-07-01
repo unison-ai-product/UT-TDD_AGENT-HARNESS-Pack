@@ -460,9 +460,13 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         "docs/governance/future-release-audit-2026-06-30.md",
         "docs/governance/product-runtime-parity-check.md",
         "docs/governance/customer-extraction-plan.md",
+        "docs/adr/ADR-005-distribution-model-and-central-ui.md",
         "docs/plans/PLAN-L7-157-distribution-clean-pull.md",
         "docs/design/harness/L6-function-design/setup-solo-team.md",
+        "docs/test-design/harness/L7-unit-test-design.md",
         ".ut-tdd/handover/CURRENT.json",
+        ".ut-tdd/harness.db",
+        ".ut-tdd/harness.db-wal",
       ],
     });
 
@@ -506,8 +510,17 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(plan.artifactPaths).not.toContain("docs/governance/future-release-audit-2026-06-30.md");
     expect(plan.artifactPaths).not.toContain("docs/governance/product-runtime-parity-check.md");
     expect(plan.artifactPaths).not.toContain("docs/governance/customer-extraction-plan.md");
+    expect(plan.artifactPaths).not.toContain(
+      "docs/adr/ADR-005-distribution-model-and-central-ui.md",
+    );
     expect(plan.artifactPaths).not.toContain("docs/plans/PLAN-L7-157-distribution-clean-pull.md");
+    expect(plan.artifactPaths).not.toContain(
+      "docs/design/harness/L6-function-design/setup-solo-team.md",
+    );
+    expect(plan.artifactPaths).not.toContain("docs/test-design/harness/L7-unit-test-design.md");
     expect(plan.artifactPaths).not.toContain(".ut-tdd/handover/CURRENT.json");
+    expect(plan.artifactPaths).not.toContain(".ut-tdd/harness.db");
+    expect(plan.artifactPaths).not.toContain(".ut-tdd/harness.db-wal");
     expect(plan.releaseIntegrity.artifacts).toEqual([
       "v0.1.0.tar.gz",
       "v0.1.0.tar.gz.sha256",
@@ -527,6 +540,14 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       "docs/governance/runtime-parity-l0-l3-design-audit-2026-06-02.md",
       "docs/governance/ut-tdd-agent-harness-extraction-plan_v0.1.md",
     ];
+    const nonPackPrefixes = [
+      "docs/adr/",
+      "docs/design/",
+      "docs/test-design/",
+      "docs/plans/",
+      ".ut-tdd/",
+    ];
+    const nonPackDbFiles = /\.(?:db|sqlite)(?:-|$|\.)/i;
 
     expect(plan.ok).toBe(true);
     const sourcePaths = walkRepoCandidatePaths(process.cwd());
@@ -534,6 +555,12 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       expect(plan.artifactPaths).not.toContain(path);
       if (sourcePaths.includes(path)) expect(plan.excludedPaths).toContain(path);
     }
+    expect(
+      plan.artifactPaths.filter(
+        (path) =>
+          nonPackPrefixes.some((prefix) => path.startsWith(prefix)) || nonPackDbFiles.test(path),
+      ),
+    ).toEqual([]);
 
     const textArtifacts = plan.artifactPaths.filter((path) =>
       /\.(?:md|ts|json|toml|ya?ml|js|txt)$/.test(path),

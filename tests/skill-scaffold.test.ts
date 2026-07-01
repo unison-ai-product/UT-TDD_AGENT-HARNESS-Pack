@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scaffoldSkill, skillOutputRoot } from "../src/skills/scaffold";
+import { scaffoldSkill, skillOutputRoot } from "../src/skill-engine/scaffold";
 
 describe("skill scaffolder", () => {
   it("U-SKILL-NEW-001: scaffolds a workflow skill that passes self lint", () => {

@@ -141,8 +141,8 @@ import {
   recommendSkillsForPlan,
   recommendSkillsForText,
   recordSkillRecommendations,
-} from "./skills/recommend";
-import { type SkillCategory, scaffoldSkill } from "./skills/scaffold";
+} from "./skill-engine/recommend";
+import { type SkillCategory, scaffoldSkill } from "./skill-engine/scaffold";
 import { defaultHarnessDbPath, openHarnessDb } from "./state-db/index";
 import { harnessDbStatus } from "./state-db/maintenance";
 import { migrate } from "./state-db/migration";

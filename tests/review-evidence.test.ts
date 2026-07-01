@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   analyzeReviewEvidence,
@@ -22,6 +25,15 @@ const plan = (o: Partial<ParsedReviewPlan>): ParsedReviewPlan => ({
 });
 
 describe("green command evidence (IMP-108)", () => {
+  it("returns an empty plan set when docs/plans is absent", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-no-plans-"));
+    try {
+      expect(loadReviewPlans(root)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("U-GREENDEF-001: legacy timestamp-only review evidence remains valid before enforcement", () => {
     const r = analyzeReviewEvidence([
       plan({
