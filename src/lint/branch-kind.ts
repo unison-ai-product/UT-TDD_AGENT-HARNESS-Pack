@@ -94,12 +94,12 @@ export function analyzeBranchKind(input: BranchKindInput): BranchKindResult {
   const findings: BranchKindFinding[] = [];
 
   if (kind === "docs" || kind === "chore") {
-    const touchesSkillDocs = changedPaths.some((p) => /^docs\/skills\/.+\.md$/.test(p));
+    const touchesSkillDocs = changedPaths.some((p) => /^(?:skills|docs\/skills)\/.+\.md$/.test(p));
     if (touchesSkillDocs && plans.length === 0) {
       findings.push({
         code: "skill_doc_plan_missing",
         severity: "error",
-        message: `${kind} branch changes docs/skills but no PLAN was touched`,
+        message: `${kind} branch changes skills but no PLAN was touched`,
       });
     }
     return {

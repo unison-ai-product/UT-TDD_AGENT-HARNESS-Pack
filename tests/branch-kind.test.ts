@@ -63,7 +63,7 @@ describe("branch-kind-check", () => {
   it("requires PLAN when docs/chore branches touch skill docs", () => {
     const result = analyzeBranchKind({
       branch: "docs/skill-update",
-      changedPaths: ["docs/skills/review-checklist.md"],
+      changedPaths: ["skills/review-checklist.md"],
       plans: [],
     });
 
@@ -71,5 +71,12 @@ describe("branch-kind-check", () => {
     expect(result.findings).toContainEqual(
       expect.objectContaining({ code: "skill_doc_plan_missing", severity: "error" }),
     );
+
+    const legacy = analyzeBranchKind({
+      branch: "chore/legacy-skill-update",
+      changedPaths: ["docs/skills/review-checklist.md"],
+      plans: [],
+    });
+    expect(legacy.ok).toBe(false);
   });
 });

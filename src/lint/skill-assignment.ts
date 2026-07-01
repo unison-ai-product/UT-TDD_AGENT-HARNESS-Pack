@@ -34,13 +34,15 @@ export const VALID_SKILL_DRIVE_MODELS = [
 ] as const;
 
 /**
- * skill category (skill-index.md §2)。workflow = L/駆動で索引 (category 省略可)。
- * domain/project = L/駆動を持たず category + メタデータで索引する situation-pull skill。
+ * skill category (skill-index.md §2):
+ * - workflow: indexed by layer / drive model.
+ * - domain/project: indexed by category and metadata as situation-pull skills.
  */
 export const VALID_SKILL_CATEGORIES = ["workflow", "domain", "project"] as const;
 
-/** L/駆動が共に空でも category=domain/project なら索引可能 (§2.1 indexable-by-something)。 */
+/** If layer / drive model is empty, domain/project category can still make the skill indexable. */
 const INDEXABLE_CATEGORIES = new Set<string>(["domain", "project"]);
+const DEFAULT_SKILL_ROOTS = ["skills", "docs/skills"] as const;
 
 export interface SkillAssignmentDoc {
   path: string;
@@ -105,7 +107,9 @@ function stringList(value: unknown): string[] {
 }
 
 export function loadSkillAssignmentDocs(repoRoot: string): SkillAssignmentDoc[] {
-  const root = join(repoRoot, "docs", "skills");
+  const rootRel =
+    DEFAULT_SKILL_ROOTS.find((root) => existsSync(join(repoRoot, root))) ?? "docs/skills";
+  const root = join(repoRoot, rootRel);
   return skillFiles(root).map((path) => ({
     path: relative(repoRoot, path).replace(/\\/g, "/"),
     metadata: parseMetadata(path),
@@ -128,8 +132,6 @@ export function analyzeSkillAssignments(docs: SkillAssignmentDoc[]): SkillAssign
       doc.metadata.applies_to && typeof doc.metadata.applies_to === "object"
         ? (doc.metadata.applies_to as Record<string, unknown>)
         : {};
-    // layers / drive_models は任意 (skill-index.md §2)。存在すれば値のみ検証する
-    // (旧 missing-layers / missing-drive-models は撤廃 = 強制 workflow 化の解消)。
     const layers = stringList(appliesTo.layers);
     for (const layer of layers) {
       if (!validLayers.has(layer)) {
@@ -153,8 +155,6 @@ export function analyzeSkillAssignments(docs: SkillAssignmentDoc[]): SkillAssign
       violations.push({ path: doc.path, kind: "unknown-category", value: category });
     }
 
-    // indexable-by-something (§2.1): L+駆動 か category(domain/project) のどちらかで
-    // 索引可能でなければ死蔵 = fail-close。
     const indexable =
       layers.length > 0 || driveModels.length > 0 || INDEXABLE_CATEGORIES.has(category);
     if (!indexable) {
@@ -174,7 +174,7 @@ export function skillAssignmentMessages(result: SkillAssignmentResult): string[]
     return [`skill-assignment - OK (checked=${result.checked}, indexable by L+drive or category)`];
   }
   if (result.checked === 0) {
-    return ["skill-assignment - violation: docs/skills has no skill definitions"];
+    return ["skill-assignment - violation: skills or docs/skills has no skill definitions"];
   }
   return result.violations.map((v) => {
     const value = v.value ? ` value=${v.value}` : "";

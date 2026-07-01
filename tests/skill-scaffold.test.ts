@@ -12,7 +12,7 @@ describe("skill scaffolder", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.path).toBe("docs/skills/l6-reviewer.md");
+    expect(result.path).toBe("skills/l6-reviewer.md");
     expect(result.content).toContain("schema_version: skill.v1");
     expect(result.content).toContain("category: workflow");
     expect(result.content).toContain("  layers:\n    - L6");
@@ -28,13 +28,15 @@ describe("skill scaffolder", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(result.path).toBe("docs/skills/writing-style.md");
+    expect(result.path).toBe("skills/writing-style.md");
     expect(result.content).toContain("category: domain");
     expect(result.content).toContain("domain_tags:\n  - style\n  - writing");
     expect(result.content).not.toContain("applies_to:");
   });
 
   it("U-SKILL-NEW-003: sends project skills to the consumer root and reports collisions", () => {
+    expect(skillOutputRoot("workflow")).toBe("skills");
+    expect(skillOutputRoot("workflow", { productSkillRoot: "docs/skills" })).toBe("docs/skills");
     expect(skillOutputRoot("project", { projectSkillRoot: "project-skills" })).toBe(
       "project-skills",
     );

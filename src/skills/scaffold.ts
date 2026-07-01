@@ -28,6 +28,8 @@ export interface ScaffoldSkillInput {
 export interface ScaffoldSkillDeps {
   /** Return true when the repo-relative output path already exists. */
   exists?: (relPath: string) => boolean;
+  /** Product-owned output root for packaged/shared skills. */
+  productSkillRoot?: string;
   /** Consumer-owned output root for category=project skills. */
   projectSkillRoot?: string;
 }
@@ -40,7 +42,7 @@ export interface ScaffoldSkillResult {
   findings: string[];
 }
 
-const PRODUCT_SKILL_ROOT = "docs/skills";
+const PRODUCT_SKILL_ROOT = "skills";
 const DEFAULT_PROJECT_SKILL_ROOT = ".ut-tdd/skills";
 
 function slugify(value: string): string {
@@ -62,7 +64,7 @@ function yamlList(values: string[]): string {
 /** Output root by distribution boundary: product skills vs consumer-owned skills. */
 export function skillOutputRoot(category: SkillCategory, deps: ScaffoldSkillDeps = {}): string {
   if (category === "project") return deps.projectSkillRoot ?? DEFAULT_PROJECT_SKILL_ROOT;
-  return PRODUCT_SKILL_ROOT;
+  return deps.productSkillRoot ?? PRODUCT_SKILL_ROOT;
 }
 
 export function scaffoldSkill(

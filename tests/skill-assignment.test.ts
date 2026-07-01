@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   analyzeSkillAssignments,
@@ -6,13 +9,12 @@ import {
 } from "../src/lint/skill-assignment";
 
 const doc = (metadata: Record<string, unknown>): SkillAssignmentDoc => ({
-  path: "docs/skills/example.yaml",
+  path: "skills/example.yaml",
   metadata,
 });
 
 describe("skill-assignment lint", () => {
-  // U-SKILL-IDX-001: workflow 索引 (L+駆動) は非破壊。
-  it("accepts a workflow skill indexed by layers + drive models", () => {
+  it("U-SKILL-IDX-001: accepts a workflow skill indexed by layers + drive models", () => {
     const result = analyzeSkillAssignments([
       doc({
         skill_type: "quality-gate-review",
@@ -27,8 +29,7 @@ describe("skill-assignment lint", () => {
     expect(result.violations).toEqual([]);
   });
 
-  // U-SKILL-IDX-005: skill_type 空 + 値不正は依然違反 (layers/drive_models が存在すれば索引可能なので not-indexable は出ない)。
-  it("rejects missing type and unknown layer/drive-model values", () => {
+  it("U-SKILL-IDX-005: rejects missing type and unknown layer/drive-model values", () => {
     const result = analyzeSkillAssignments([
       doc({
         skill_type: "",
@@ -47,8 +48,7 @@ describe("skill-assignment lint", () => {
     ]);
   });
 
-  // U-SKILL-IDX-002: domain skill (L/駆動なし + category=domain) は登録できる (旧 lint なら missing-drive-models で落ちた)。
-  it("accepts a domain skill indexed by category without layers or drive models", () => {
+  it("U-SKILL-IDX-002: accepts a domain skill indexed by category without layers or drive models", () => {
     const result = analyzeSkillAssignments([
       doc({
         skill_type: "writing",
@@ -61,8 +61,7 @@ describe("skill-assignment lint", () => {
     expect(result.violations).toEqual([]);
   });
 
-  // U-SKILL-IDX-003: project skill (L/駆動なし + category=project) は登録できる。
-  it("accepts a project skill indexed by category", () => {
+  it("U-SKILL-IDX-003: accepts a project skill indexed by category", () => {
     const result = analyzeSkillAssignments([
       doc({ skill_type: "convention", category: "project", industry: "fintech" }),
     ]);
@@ -71,22 +70,44 @@ describe("skill-assignment lint", () => {
     expect(result.violations).toEqual([]);
   });
 
-  // U-SKILL-IDX-004: L/駆動なし + category なし = 無索引 = fail-close。
-  it("fails-closed on a not-indexable skill (no layers, no drive models, no category)", () => {
+  it("U-SKILL-IDX-004: fails closed on a not-indexable skill", () => {
     const result = analyzeSkillAssignments([doc({ skill_type: "orphan" })]);
 
     expect(result.ok).toBe(false);
     expect(result.violations.map((v) => v.kind)).toEqual(["not-indexable"]);
   });
 
-  // U-SKILL-IDX-005: category 値検証。
-  it("rejects an unknown category value", () => {
+  it("U-SKILL-IDX-005: rejects an unknown category value", () => {
     const result = analyzeSkillAssignments([
       doc({ skill_type: "x", category: "domains", domain_tags: ["writing"] }),
     ]);
 
     expect(result.ok).toBe(false);
     expect(result.violations.map((v) => v.kind)).toEqual(["unknown-category", "not-indexable"]);
+  });
+
+  it("prefers root skills over legacy docs/skills when both exist", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-skill-root-"));
+    try {
+      mkdirSync(join(root, "skills"), { recursive: true });
+      mkdirSync(join(root, "docs", "skills"), { recursive: true });
+      writeFileSync(
+        join(root, "skills", "root.md"),
+        "---\nskill_type: root\ncategory: domain\n---\n# Root\n",
+        "utf8",
+      );
+      writeFileSync(
+        join(root, "docs", "skills", "legacy.md"),
+        "---\nskill_type: legacy\ncategory: domain\n---\n# Legacy\n",
+        "utf8",
+      );
+
+      const docs = loadSkillAssignmentDocs(root);
+
+      expect(docs.map((d) => d.path)).toEqual(["skills/root.md"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("real repo skills are assigned to L and drive-model scopes", () => {
