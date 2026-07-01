@@ -1,0 +1,61 @@
+schema_version: review-checklist.v1
+name: review-checklist
+skill_type: quality-gate-review
+applies_to:
+  layers:
+    - L0
+    - L1
+    - L2
+    - L3
+    - L4
+    - L5
+    - L6
+    - L7
+    - L8
+    - L9
+    - L10
+    - L11
+    - L12
+    - L13
+    - L14
+  drive_models:
+    - Forward
+    - Discovery
+    - Scrum
+    - Reverse
+    - Recovery
+    - Incident
+    - Refactor
+    - Retrofit
+    - Add-feature
+    - Research
+description: Single-runtime judgment-gate review evidence. Each item requires pass/fail/n-a and evidence for n-a.
+items:
+  - id: DOC
+    label: Documentation consistency
+    status: pass
+    evidence: Replace this with the checked documentation references.
+  - id: TST
+    label: Test coverage and green result
+    status: pass
+    evidence: Replace this with the test command and result.
+  - id: COD
+    label: Code correctness and maintainability
+    status: pass
+    evidence: Replace this with reviewed source references.
+  - id: XR
+    label: Cross-runtime behavior
+    status: pass
+    evidence: Replace this with Claude/Codex mode evidence.
+  - id: DEP
+    label: Dependency and boundary impact
+    status: pass
+    evidence: Replace this with dependency/boundary check evidence.
+  - id: DUP
+    label: Duplicate implementation avoidance
+    status: pass
+    evidence: Replace this with reuse/search evidence.
+  - id: MOD
+    label: Module and workflow consistency
+    status: pass
+    evidence: Replace this with module/workflow consistency evidence.

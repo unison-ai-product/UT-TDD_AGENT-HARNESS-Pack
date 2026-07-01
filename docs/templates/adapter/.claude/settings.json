@@ -1,0 +1,79 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .ut-tdd/bin/ut-tdd.mjs hook agent-guard",
+            "timeout": 5,
+            "blockOnFailure": true,
+            "statusMessage": "agent-guard: subagent allowlist/model enforcement"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .ut-tdd/bin/ut-tdd.mjs hook work-guard",
+            "timeout": 5,
+            "blockOnFailure": true,
+            "statusMessage": "work-guard: foreign edit protection"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .ut-tdd/bin/ut-tdd.mjs session start",
+            "timeout": 5,
+            "statusMessage": "session-log: session start (fail-open)"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .ut-tdd/bin/ut-tdd.mjs hook post-tool-use",
+            "timeout": 5,
+            "statusMessage": "session-log: post tool use (fail-open)"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .ut-tdd/bin/ut-tdd.mjs session summary",
+            "timeout": 5,
+            "statusMessage": "session-log: PLAN digest summary (fail-open)"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .ut-tdd/bin/ut-tdd.mjs hook subagent-stop",
+            "timeout": 5,
+            "statusMessage": "agent-slots: release oldest guard slot (fail-open)"
+          }
+        ]
+      }
+    ]
+  }
+}

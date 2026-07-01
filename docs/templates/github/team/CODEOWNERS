@@ -1,0 +1,7 @@
+# UT-TDD CODEOWNERS (Phase 0-B / team、要件 §6.5)。
+# team slug は `ut-tdd setup --team --tl-team <slug> --qa-team <slug> --po-team <slug>` で注入。
+# 動的注入 (権限昇格ロジック) は持たない = 静的な初期 CODEOWNERS のみ (§9.1)。
+*           {{TL_TEAM}}
+/docs/      {{PO_TEAM}}
+/src/       {{TL_TEAM}}
+/tests/     {{QA_TEAM}}

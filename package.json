@@ -1,0 +1,39 @@
+{
+  "name": "ut-tdd",
+  "version": "0.1.0",
+  "description": "UT-TDD Agent Harness - AI agent workflow, verification, and distribution foundation (TypeScript core, ADR-001)",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "ut-tdd": "./src/cli.ts"
+  },
+  "engines": {
+    "bun": ">=1.3"
+  },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "build": "bun build src/cli.ts --compile --outfile dist/ut-tdd",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src tests",
+    "format": "biome check --write src tests",
+    "test": "vitest run",
+    "test:fast": "vitest run --exclude tests/cli-surface.test.ts --exclude tests/db-projection-ingestion.test.ts --exclude tests/distribution-acceptance.test.ts --exclude tests/doctor.test.ts --exclude tests/drive-db-registration.test.ts --exclude tests/projection-writer.test.ts --exclude tests/review-green-command-projection.test.ts --exclude tests/runtime-hook-entrypoints.test.ts",
+    "test:db": "bun run src/cli.ts db rebuild && vitest run tests/db-projection-ingestion.test.ts tests/drive-db-registration.test.ts tests/projection-writer.test.ts tests/review-green-command-projection.test.ts",
+    "test:cli": "vitest run tests/cli-surface.test.ts tests/distribution-acceptance.test.ts tests/runtime-hook-entrypoints.test.ts",
+    "test:node-fallback": "vitest run tests/state-db.test.ts tests/runtime-portability.test.ts",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "yaml": "^2.5.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.15",
+    "@types/node": "^22.7.4",
+    "@vitest/coverage-v8": "2.1.9",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.2"
+  }
+}

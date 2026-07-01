@@ -1,0 +1,17 @@
+# escalation-stale — 右腕 CI 失敗 / スパイン滞留の差し戻し Issue 自動起票 (要件 §6.8.4)。
+# scaffold skeleton: 検出ロジックは利用者 repo の運用に合わせて実装する (本テンプレは枠のみ)。
+name: escalation-stale
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+permissions:
+  issues: write
+jobs:
+  stale-spine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: detect-and-escalate
+        run: |
+          echo "TODO(§6.8.4): 右腕 post-merge CI 失敗 / handover 滞留を検出し差し戻し Issue を自動起票する"

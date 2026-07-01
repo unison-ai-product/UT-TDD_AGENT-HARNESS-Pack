@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# UT-TDD thin POSIX entrypoint (ADR-001). compiled binary first, fallback to bun run.
+set -e
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+if [ -x "$ROOT/dist/ut-tdd" ]; then
+  exec "$ROOT/dist/ut-tdd" "$@"
+fi
+exec bun run "$ROOT/src/cli.ts" "$@"

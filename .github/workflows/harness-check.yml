@@ -1,0 +1,44 @@
+name: harness-pack-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-pack-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness-pack-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+
+      - name: install deps (frozen)
+        run: bun install --frozen-lockfile
+
+      - name: typecheck
+        run: bun run typecheck
+
+      - name: distribution smoke tests
+        run: bun run vitest run tests/distribution-acceptance.test.ts tests/runtime-portability.test.ts --reporter=dot
+
+      - name: lint
+        run: bun run lint
+
+      - name: setup solo
+        run: bun src/cli.ts setup --solo
+
+      - name: setup smoke
+        run: bun .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke

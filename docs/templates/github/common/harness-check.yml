@@ -1,0 +1,20 @@
+# harness-check — UT-TDD 利用者チーム repo に配備する CI (要件 §6.9)。
+# Phase 0-A では Required 化しない / Phase 0-B で Required Status Checks に登録 (§6.5)。
+# typecheck + 全回帰を push/PR (main) で実行。biome lint / branch-type matrix は段階追加。
+name: harness-check
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  harness-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: typecheck
+        run: bun run typecheck
+      - name: test
+        run: bun run test
