@@ -269,6 +269,16 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     }
   });
 
+  it("U-SETUP-004b2: source docs template keeps consumer harness-check guard strength", () => {
+    const templates = loadTemplates(process.cwd());
+    const workflow = templates["common/harness-check.yml"];
+    expect(workflow).toContain("github guard");
+    expect(workflow).toContain("bun run typecheck");
+    expect(workflow).toContain("bun run test");
+    expect(workflow).toContain("audit quality --include-tests");
+    expect(workflow).toContain("ut-tdd.mjs doctor");
+  });
+
   it("U-SETUP-004c: built-in adapter templates ship enforced portable guard hooks", () => {
     const repo = mkdtempSync(join(tmpdir(), "ut-tdd-setup-templates-"));
     const templates = loadTemplates(repo);

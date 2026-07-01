@@ -1,12 +1,11 @@
-# harness-check — UT-TDD 利用者チーム repo に配備する CI (要件 §6.9)。
-# Phase 0-A では Required 化しない / Phase 0-B で Required Status Checks に登録 (§6.5)。
-# typecheck + 全回帰を push/PR (main) で実行。biome lint / branch-type matrix は段階追加。
 name: harness-check
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
 jobs:
   harness-check:
     runs-on: ubuntu-latest
@@ -14,7 +13,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - name: typecheck
-        run: bun run typecheck
-      - name: test
-        run: bun run test
+      - name: branch-type guard
+        env:
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
+          BASE_REF: ${{ github.base_ref || 'main' }}
+          PR_TITLE: ${{ github.event.pull_request.title || github.event.head_commit.message || '' }}
+          PR_BODY: ${{ github.event.pull_request.body || '' }}
+        run: |
+          printf '%s\n' "$PR_BODY" > .ut-tdd-pr-body.txt
+          git log --format=%s -n 20 > .ut-tdd-commit-subjects.txt
+          bun .ut-tdd/bin/ut-tdd.mjs github guard --head-ref "$HEAD_REF" --base-ref "$BASE_REF" --pr-title "$PR_TITLE" --pr-body-file .ut-tdd-pr-body.txt --commit-file .ut-tdd-commit-subjects.txt
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun .ut-tdd/bin/ut-tdd.mjs audit quality --include-tests --limit 20
+      - run: bun .ut-tdd/bin/ut-tdd.mjs doctor
