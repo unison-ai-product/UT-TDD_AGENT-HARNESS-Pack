@@ -602,6 +602,61 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(sync.checks).toContain("denylistViolations.length === 0");
   });
 
+  it("U-SETUP-011c2: source-only audit and design updates do not change Pack artifacts", () => {
+    const sourcePaths = [
+      ...walkRepoCandidatePaths(process.cwd()),
+      ".ut-tdd/audit/A-local-only.md",
+      "docs/plans/PLAN-L7-local-only.md",
+      "docs/design/harness/L6-function-design/local-only.md",
+      "docs/test-design/harness/L7-local-only.md",
+      "docs/handover/session-local-only.md",
+    ];
+    const filteredSourcePaths = sourcePaths.filter(
+      (path) =>
+        !path.startsWith(".ut-tdd/") &&
+        !path.startsWith("docs/plans/") &&
+        !path.startsWith("docs/design/harness/") &&
+        !path.startsWith("docs/test-design/") &&
+        !path.startsWith("docs/handover/"),
+    );
+
+    const withSourceOnlyDocs = buildCleanDistributionPlan({
+      sourceTag: "source-with-audit-docs",
+      paths: sourcePaths,
+    });
+    const withoutSourceOnlyDocs = buildCleanDistributionPlan({
+      sourceTag: "source-without-audit-docs",
+      paths: filteredSourcePaths,
+    });
+    const syncWithSourceOnlyDocs = buildPackSyncPlan({
+      exportPlan: withSourceOnlyDocs,
+      sourcePaths,
+      stagingDir: "/tmp/ut-tdd-pack",
+      branch: "main",
+    });
+    const syncWithoutSourceOnlyDocs = buildPackSyncPlan({
+      exportPlan: withoutSourceOnlyDocs,
+      sourcePaths: filteredSourcePaths,
+      stagingDir: "/tmp/ut-tdd-pack",
+      branch: "main",
+    });
+
+    expect(withSourceOnlyDocs.ok).toBe(true);
+    expect(withSourceOnlyDocs.artifactPaths).toEqual(withoutSourceOnlyDocs.artifactPaths);
+    expect(syncWithSourceOnlyDocs.copyPlan.map((entry) => entry.artifactPath)).toEqual(
+      syncWithoutSourceOnlyDocs.copyPlan.map((entry) => entry.artifactPath),
+    );
+    expect(withSourceOnlyDocs.excludedPaths).toEqual(
+      expect.arrayContaining([
+        ".ut-tdd/audit/A-local-only.md",
+        "docs/plans/PLAN-L7-local-only.md",
+        "docs/design/harness/L6-function-design/local-only.md",
+        "docs/test-design/harness/L7-local-only.md",
+        "docs/handover/session-local-only.md",
+      ]),
+    );
+  });
+
   it("U-SETUP-011d: clean Pack package.json points test to Pack-safe smoke tests", () => {
     const transformed = JSON.parse(
       transformCleanDistributionArtifact(
