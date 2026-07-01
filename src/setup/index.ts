@@ -188,12 +188,14 @@ const CLEAN_ALLOW_PREFIXES = [
   "docs/templates/adapter/",
   "docs/templates/github/",
   "scripts/",
+  "skills/",
   "src/",
   "tests/",
 ];
 const CLEAN_ALLOW_FILES = new Set([
   ".editorconfig",
   ".gitattributes",
+  ".gitignore",
   ".github/workflows/harness-check.yml",
   "LICENSE",
   "README.md",

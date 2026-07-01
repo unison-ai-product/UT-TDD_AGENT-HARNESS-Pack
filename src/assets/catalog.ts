@@ -80,11 +80,19 @@ interface AssetSource {
   root: string;
 }
 
-const SOURCES: AssetSource[] = [
-  { type: "skill", root: "docs/skills" },
-  { type: "roster", root: ".claude/agents" },
-  { type: "command", root: "docs/commands" },
-];
+const DEFAULT_SKILL_ROOTS = ["skills", "docs/skills"] as const;
+
+function defaultSkillRoot(repoRoot: string): string {
+  return DEFAULT_SKILL_ROOTS.find((root) => existsSync(join(repoRoot, root))) ?? "docs/skills";
+}
+
+function assetSources(repoRoot: string): AssetSource[] {
+  return [
+    { type: "skill", root: defaultSkillRoot(repoRoot) },
+    { type: "roster", root: ".claude/agents" },
+    { type: "command", root: "docs/commands" },
+  ];
+}
 
 function normalizeRel(path: string): string {
   return path.replaceAll("\\", "/");
@@ -188,20 +196,29 @@ function modelFamily(raw: string): RosterRegistryEntry["model_family"] {
   return hits.length === 1 ? hits[0] : "unknown";
 }
 
+function defaultRosterRoot(repoRoot: string): string {
+  return existsSync(join(repoRoot, ".claude", "agents"))
+    ? join(".claude", "agents")
+    : join("docs", "templates", "adapter", ".claude", "agents");
+}
+
 export function scanSkillCatalog(
   input: { repoRoot?: string; root?: string; optionalRoots?: string[] } = {},
 ): SkillCatalogResult {
   const repoRoot = input.repoRoot ?? process.cwd();
-  const root = input.root ?? "docs/skills";
+  const roots = input.root ? [input.root] : [defaultSkillRoot(repoRoot)];
+  const root = roots[0] ?? "docs/skills";
   const optionalRoots = [...(input.optionalRoots ?? [])].sort();
   const findings: AssetCatalogFinding[] = [];
   const entries: SkillCatalogEntry[] = [];
 
-  const requiredRoot = join(repoRoot, root);
-  for (const path of assetFiles(requiredRoot).filter((path) => /\.md$/i.test(path))) {
-    const entry = skillCatalogEntry(repoRoot, path);
-    if ("kind" in entry) findings.push(entry);
-    else entries.push(entry);
+  for (const scanRoot of roots) {
+    const requiredRoot = join(repoRoot, scanRoot);
+    for (const path of assetFiles(requiredRoot).filter((path) => /\.md$/i.test(path))) {
+      const entry = skillCatalogEntry(repoRoot, path);
+      if ("kind" in entry) findings.push(entry);
+      else entries.push(entry);
+    }
   }
 
   for (const optionalRoot of optionalRoots) {
@@ -255,7 +272,7 @@ export function scanSkillCatalog(
     findings: findings.sort(
       (a, b) => a.kind.localeCompare(b.kind) || a.subject_id.localeCompare(b.subject_id),
     ),
-    scannedRoots: [root],
+    scannedRoots: roots,
     optionalRoots,
   };
 }
@@ -309,12 +326,13 @@ export function catalogAutomationAssets(input: CatalogAutomationAssetsInput): As
   const indexedAt = new Date().toISOString();
   const assets: string[] = [];
   const findings: AssetCatalogFinding[] = [];
+  const sources = assetSources(repoRoot);
 
-  for (const source of SOURCES) {
+  for (const source of sources) {
     const root = join(repoRoot, source.root);
     for (const path of assetFiles(root)) {
       const rel = normalizeRel(relative(repoRoot, path));
-      if (!SOURCES.some((allowed) => rel === allowed.root || rel.startsWith(`${allowed.root}/`))) {
+      if (!sources.some((allowed) => rel === allowed.root || rel.startsWith(`${allowed.root}/`))) {
         const finding: AssetCatalogFinding = {
           kind: "invalid-root",
           severity: "error",
@@ -427,7 +445,7 @@ export function listRosterRegistry(input: {
 }): RosterListResult {
   const repoRoot = input.repoRoot ?? process.cwd();
   const allowlist = new Set(input.allowlist ?? []);
-  const root = join(repoRoot, ".claude", "agents");
+  const root = join(repoRoot, defaultRosterRoot(repoRoot));
   const entries = assetFiles(root)
     .filter((path) => /\.md$/i.test(path))
     .map((path): RosterRegistryEntry => {

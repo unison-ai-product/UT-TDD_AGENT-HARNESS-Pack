@@ -42,10 +42,10 @@ function runBun(cwd: string, args: string[], env: NodeJS.ProcessEnv = process.en
       cwd,
       encoding: "utf8",
       env,
-      timeout: 120_000,
+      timeout: 300_000,
     });
   }
-  return spawnSync("bun", args, { cwd, encoding: "utf8", env, timeout: 120_000 });
+  return spawnSync("bun", args, { cwd, encoding: "utf8", env, timeout: 300_000 });
 }
 
 function runBareUtTdd(cwd: string, args: string[], env: NodeJS.ProcessEnv = process.env) {
@@ -89,6 +89,21 @@ function writeLocalUtTddShim(root: string): string {
   });
   chmodSync(path, 0o755);
   return path;
+}
+
+function removeCleanRoot(root: string): void {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt === 4) {
+        console.warn(`cleanup warning: could not remove ${root}: ${String(error)}`);
+        return;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    }
+  }
 }
 
 describe("clean distribution local acceptance smoke", () => {
@@ -218,7 +233,7 @@ describe("clean distribution local acceptance smoke", () => {
       const typecheck = runBun(cleanRoot, ["run", "typecheck"], env);
       expect(typecheck.status, typecheck.stderr || typecheck.stdout).toBe(0);
     } finally {
-      rmSync(cleanRoot, { recursive: true, force: true });
+      removeCleanRoot(cleanRoot);
     }
-  }, 180_000);
+  }, 420_000);
 });

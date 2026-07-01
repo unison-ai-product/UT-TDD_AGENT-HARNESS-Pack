@@ -85,12 +85,17 @@ function loadAssetFiles(repoRoot: string, relDir: string, type: AssetType): Asse
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
+function defaultSkillRoot(repoRoot: string): string {
+  return existsSync(join(repoRoot, "skills")) ? "skills" : join("docs", "skills");
+}
+
 export function loadAssetDriftInput(repoRoot: string): AssetDriftInput {
   const agentRoot = join(repoRoot, ".claude", "agents");
   const agentMemoryRoot = join(repoRoot, ".claude", "agent-memory");
-  const skillRoot = join(repoRoot, "docs", "skills");
+  const skillRootRel = defaultSkillRoot(repoRoot);
+  const skillRoot = join(repoRoot, skillRootRel);
   const promptRoot = join(repoRoot, "docs", "templates", "prompts");
-  const skillDocs = loadAssetFiles(repoRoot, join("docs", "skills"), "skill");
+  const skillDocs = loadAssetFiles(repoRoot, skillRootRel, "skill");
   const extraSkillFiles = hasNonGitkeepFile(skillRoot) ? 1 : 0;
   return {
     assets: [
@@ -156,8 +161,8 @@ export function analyzeAssetDrift(input: AssetDriftInput): AssetDriftResult {
   if (!input.skillRootExists || input.skillDocCount === 0) {
     violations.push({
       kind: "empty-docs-skills",
-      path: "docs/skills",
-      detail: "docs/skills has no curated non-.gitkeep asset",
+      path: "skills",
+      detail: "skills or docs/skills has no curated non-.gitkeep asset",
     });
   }
 
