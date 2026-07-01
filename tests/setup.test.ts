@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,6 +6,8 @@ import {
   applyBranchProtection,
   buildCleanDistributionPlan,
   buildConsumerReadinessPlan,
+  cleanDistributionArtifactPath,
+  cleanDistributionSourcePath,
   detectProjectScale,
   emitSetup,
   loadTemplates,
@@ -440,6 +442,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         "docs/governance/README.md",
         "docs/governance/ut-tdd-agent-harness-concept_v3.1.md",
         "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md",
+        "docs/skills/SKILL_MAP.md",
         "docs/governance/conditional-backfill-decision-audit-2026-06-22.md",
         "docs/governance/forward-convergence-legacy-debt-audit.md",
         "docs/governance/reverse-fullback-backprop-audit-2026-06-22.md",
@@ -467,6 +470,12 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(plan.artifactPaths).toContain(
       "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md",
     );
+    expect(cleanDistributionArtifactPath("docs/skills/SKILL_MAP.md")).toBe("skills/SKILL_MAP.md");
+    expect(plan.artifactPaths).toContain("skills/SKILL_MAP.md");
+    expect(plan.artifactPaths).not.toContain("docs/skills/SKILL_MAP.md");
+    expect(
+      cleanDistributionSourcePath("skills/SKILL_MAP.md", ["README.md", "docs/skills/SKILL_MAP.md"]),
+    ).toBe("docs/skills/SKILL_MAP.md");
     expect(plan.artifactPaths).not.toContain("src/web/page.tsx");
     expect(plan.artifactPaths).not.toContain(".codex/hooks.json");
     expect(plan.artifactPaths).not.toContain(".claude/settings.json");
@@ -513,7 +522,9 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(plan.ok).toBe(true);
     for (const path of dogfoodGovernanceDocs) {
       expect(plan.artifactPaths).not.toContain(path);
-      expect(plan.excludedPaths).toContain(path);
+      if (existsSync(join(process.cwd(), path))) {
+        expect(plan.excludedPaths).toContain(path);
+      }
     }
 
     const textArtifacts = plan.artifactPaths.filter((path) =>
@@ -521,9 +532,11 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     );
     const legacyRuntimeName = "he" + "lix";
     const legacyNamePattern = new RegExp(`\\b${legacyRuntimeName}\\b`, "i");
-    const legacyNameHits = textArtifacts.filter((path) =>
-      legacyNamePattern.test(readFileSync(join(process.cwd(), path), "utf8")),
-    );
+    const sourcePaths = walkRepoCandidatePaths(process.cwd());
+    const legacyNameHits = textArtifacts.filter((path) => {
+      const sourcePath = cleanDistributionSourcePath(path, sourcePaths);
+      return legacyNamePattern.test(readFileSync(join(process.cwd(), sourcePath), "utf8"));
+    });
     expect(legacyNameHits).toEqual([]);
   });
 

@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildCleanDistributionPlan } from "../src/setup/index";
+import { buildCleanDistributionPlan, cleanDistributionSourcePath } from "../src/setup/index";
 
 const repoRoot = process.cwd();
 
@@ -118,8 +118,9 @@ describe("clean distribution local acceptance smoke", () => {
 
     const cleanRoot = mkdtempSync(join(tmpdir(), "ut-tdd-clean-acceptance-"));
     try {
+      const sourcePaths = walkCandidatePaths(repoRoot);
       for (const rel of plan.artifactPaths) {
-        const from = join(repoRoot, rel);
+        const from = join(repoRoot, cleanDistributionSourcePath(rel, sourcePaths));
         const to = join(cleanRoot, rel);
         mkdirSync(dirname(to), { recursive: true });
         cpSync(from, to, { recursive: true });
@@ -195,6 +196,8 @@ describe("clean distribution local acceptance smoke", () => {
         },
       });
       expect(distributionJson.export.artifactPaths).toContain("src/cli.ts");
+      expect(distributionJson.export.artifactPaths).toContain("skills/SKILL_MAP.md");
+      expect(distributionJson.export.artifactPaths).not.toContain("docs/skills/SKILL_MAP.md");
       expect(distributionJson.export.artifactPaths).toContain(
         "docs/templates/adapter/.codex/hooks.json",
       );

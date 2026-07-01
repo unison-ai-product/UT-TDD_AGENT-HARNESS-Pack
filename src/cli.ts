@@ -130,6 +130,7 @@ import { findReference } from "./search/index";
 import {
   buildCleanDistributionPlan,
   buildConsumerReadinessPlan,
+  cleanDistributionSourcePath,
   nodeSetupDeps,
   runSetup,
   type SetupArgs,
@@ -2943,8 +2944,10 @@ distribution
     let tarResult: ReturnType<typeof spawnSync> | null = null;
     try {
       mkdirSync(outDir, { recursive: true });
+      const sourcePaths = collectDistributionCandidatePaths(repoRoot);
       for (const rel of exportPlan.artifactPaths) {
-        const from = join(repoRoot, ...rel.split("/"));
+        const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
+        const from = join(repoRoot, ...sourceRel.split("/"));
         const to = join(stage, ...rel.split("/"));
         mkdirSync(dirname(to), { recursive: true });
         cpSync(from, to, { recursive: true });

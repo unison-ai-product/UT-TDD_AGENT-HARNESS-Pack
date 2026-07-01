@@ -391,6 +391,26 @@ function isAllowedCleanPath(path: string): boolean {
   return CLEAN_ALLOW_PREFIXES.some((prefix) => p.startsWith(prefix));
 }
 
+export function cleanDistributionArtifactPath(path: string): string {
+  const p = normalizeDistributionPath(path);
+  if (p.startsWith("docs/skills/")) return `skills/${p.slice("docs/skills/".length)}`;
+  return p;
+}
+
+export function cleanDistributionSourcePath(
+  artifactPath: string,
+  sourcePaths: Iterable<string>,
+): string {
+  const artifact = normalizeDistributionPath(artifactPath);
+  const sources = new Set([...sourcePaths].map(normalizeDistributionPath));
+  if (sources.has(artifact)) return artifact;
+  if (artifact.startsWith("skills/")) {
+    const legacy = `docs/skills/${artifact.slice("skills/".length)}`;
+    if (sources.has(legacy)) return legacy;
+  }
+  return artifact;
+}
+
 function hasMinimumBun(version: string, minimum = "1.3.0"): boolean {
   const parse = (v: string): number[] => {
     const match = v.match(/\d+(?:\.\d+){0,2}/)?.[0] ?? "0";
@@ -414,13 +434,15 @@ export function buildCleanDistributionPlan(input: {
   const sourceTag = input.sourceTag ?? "unreleased";
   const cleanRepo = input.cleanRepo ?? "UNISON-TECHNOLOGY/ut-tdd-agent-harness-clean";
   const normalized = [...new Set(input.paths.map(normalizeDistributionPath))].sort();
-  const artifactPaths = normalized.filter(
+  const includedSourcePaths = normalized.filter(
     (path) => isAllowedCleanPath(path) && !isDeniedCleanPath(path),
   );
+  const artifactPaths = [...new Set(includedSourcePaths.map(cleanDistributionArtifactPath))].sort();
   const artifactSet = new Set(artifactPaths);
   const missingRequired = CLEAN_REQUIRED_PATHS.filter((path) => !artifactSet.has(path));
   const denylistViolations = artifactPaths.filter(isDeniedCleanPath);
-  const excludedPaths = normalized.filter((path) => !artifactSet.has(path));
+  const includedSourceSet = new Set(includedSourcePaths);
+  const excludedPaths = normalized.filter((path) => !includedSourceSet.has(path));
   return {
     ok: missingRequired.length === 0 && denylistViolations.length === 0,
     channel: "clean-repo-plus-signed-tarball",

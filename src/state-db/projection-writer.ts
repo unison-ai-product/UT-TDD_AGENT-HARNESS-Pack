@@ -2137,8 +2137,11 @@ function assetFiles(dir: string, extensions: RegExp): string[] {
 
 function projectAutomationAssets(repoRoot: string, db: HarnessDb): void {
   const indexedAt = nowIso();
+  const skillRoot = existsSync(join(repoRoot, "skills"))
+    ? join(repoRoot, "skills")
+    : join(repoRoot, "docs", "skills");
   const sources = [
-    { type: "skill", root: join(repoRoot, "docs", "skills"), exts: /\.(md|ya?ml)$/i },
+    { type: "skill", root: skillRoot, exts: /\.(md|ya?ml)$/i },
     { type: "roster", root: join(repoRoot, ".claude", "agents"), exts: /\.md$/i },
     { type: "command", root: join(repoRoot, "docs", "commands"), exts: /\.md$/i },
   ] as const;
