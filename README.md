@@ -161,25 +161,24 @@ bun install
 
 # ハーネス状態を受け取りたい既存プロジェクトのディレクトリで
 powershell -NoProfile -ExecutionPolicy Bypass -File C:\path\to\UT-TDD-agent-harness\scripts\ut-tdd.ps1 setup --solo
-bun .ut-tdd\bin\ut-tdd.mjs doctor
+bun .ut-tdd\bin\ut-tdd.mjs doctor --setup-smoke
 ```
 
-The generated Claude/Codex hooks call `bun .ut-tdd/bin/ut-tdd.mjs ...`.
-That wrapper is projected into each consumer repository by `ut-tdd setup` and
-prefers that repository's pinned `node_modules/.bin/ut-tdd`, then the harness
-checkout that ran setup, before falling back to a global `ut-tdd`. This keeps
-multiple projects on one PC from fighting over one global harness version while
-still allowing a cloned harness checkout to bootstrap a consumer repo. Before
-treating setup as ready, verify the same shell that will run Claude/Codex hooks
-can execute:
+生成される Claude/Codex hook は `bun .ut-tdd/bin/ut-tdd.mjs ...` を呼びます。
+この wrapper は `ut-tdd setup` によって各 consumer リポジトリへ投影され、
+対象リポジトリの `node_modules/.bin/ut-tdd`、setup を実行した harness checkout、
+global `ut-tdd` の順に解決します。これにより、1 台の PC に複数プロジェクトが
+同居しても global harness version の取り合いにならず、clone した harness checkout
+から consumer repo を bootstrap できます。setup 済みと判定する前に、Claude/Codex hook
+が実際に動く shell で次を確認してください:
 
 ```powershell
 bun .ut-tdd\bin\ut-tdd.mjs --help
 ```
 
-On Windows, Bun itself must still resolve in the hook shell. If Bun was installed
-through npm shims, add the real Bun binary directory to PATH before treating setup
-as ready. For an npm-installed Bun on Windows, the local verification shape is:
+Windows では、hook shell から Bun 本体も解決できる必要があります。npm shim 経由で
+Bun を入れている場合は、setup 済みと判定する前に実 Bun binary directory を PATH に
+追加して確認します。Windows の npm-installed Bun では次の形です:
 
 ```powershell
 $env:PATH="$env:APPDATA\npm\node_modules\bun\bin;$env:PATH"
@@ -187,8 +186,6 @@ bun .ut-tdd\bin\ut-tdd.mjs --help
 ```
 
 ## ⚙️ セットアップ
-
-<!-- TODO(最終まとめ): ここに setup を集約。以下は正確なフラグ素材。 -->
 
 | シーン | コマンド |
 |---|---|
@@ -205,7 +202,8 @@ bun .ut-tdd\bin\ut-tdd.mjs --help
 |---|---|
 | `ut-tdd setup --solo` / `--team` | 対象リポジトリの初期化(ソロ / チーム) |
 | `ut-tdd status` | 実行モード検出(`standalone` / `claude-only` / `codex-only` / `hybrid`) |
-| `ut-tdd doctor` | ガバナンス一括検証(gate / trace / drift / roadmap) |
+| `ut-tdd doctor --setup-smoke` | setup 投影物と hook wrapper の最小検証 |
+| `ut-tdd doctor` | 設計/PLAN を持つ対象リポジトリのガバナンス一括検証(gate / trace / drift / roadmap) |
 | `ut-tdd db rebuild --json` | `harness.db` の再投影 |
 | `ut-tdd plan lint` | PLAN の schema / 依存検証 |
 | `ut-tdd vmodel lint` | V-model trace(設計 ⇔ テストの pair)の検証 |
@@ -262,6 +260,10 @@ scripts/setup-branch-protection.sh
 ```
 
 setup の経路には組み込みテンプレートがあるため、対象プロジェクトにこのリポジトリの `docs/templates/github` ツリーが存在する前でも実行できます。
+setup 直後の導通確認は `bun .ut-tdd\bin\ut-tdd.mjs doctor --setup-smoke` を使います。
+full `doctor` は、対象リポジトリに UT-TDD の設計 doc / PLAN / test-design が降下した後の
+ガバナンス検証です。ハーネス Pack そのものや、まだ設計文書を持たない consumer repo の
+初期導入判定には使いません。
 
 </details>
 
