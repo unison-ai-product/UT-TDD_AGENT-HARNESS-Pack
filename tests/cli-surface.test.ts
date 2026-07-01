@@ -509,6 +509,83 @@ describe("L7 CLI surface closure", () => {
     }
   }, 30_000);
 
+  it("updates a local Pack checkout and prunes non-Pack files only when requested", () => {
+    const packDir = mkdtempSync(join(tmpdir(), "ut-tdd-pack-repo-"));
+    let manifest: string | null = null;
+    try {
+      const stalePlan = join(packDir, "docs", "plans", "PLAN-L7-157-distribution-clean-pull.md");
+      mkdirSync(join(packDir, "docs", "plans"), { recursive: true });
+      writeFileSync(stalePlan, "dogfood plan should not ship\n", "utf8");
+
+      const blocked = runCliIn(repoRoot, [
+        "distribution",
+        "sync-pack",
+        "--tag",
+        "v0.1.0",
+        "--repo-dir",
+        packDir,
+        "--json",
+      ]);
+      const blockedPayload = JSON.parse(blocked.stdout);
+      manifest = blockedPayload.pack.manifest;
+
+      expect(blocked.status, blocked.stderr || blocked.stdout).toBe(1);
+      expect(blockedPayload).toMatchObject({
+        ok: false,
+        pack: {
+          repoDir: packDir,
+          repoExists: true,
+          pruneLocal: false,
+          unmanagedExistingPaths: ["docs/plans/PLAN-L7-157-distribution-clean-pull.md"],
+          localGitMutationExecuted: false,
+          destructiveRemoteMutation: false,
+          actualRemoteMutationRequiresPoApproval: true,
+        },
+      });
+      expect(existsSync(stalePlan)).toBe(true);
+
+      const pruned = runCliIn(repoRoot, [
+        "distribution",
+        "sync-pack",
+        "--tag",
+        "v0.1.0",
+        "--repo-dir",
+        packDir,
+        "--prune-local",
+        "--json",
+      ]);
+      const prunedPayload = JSON.parse(pruned.stdout);
+      manifest = prunedPayload.pack.manifest;
+
+      expect(pruned.status, pruned.stderr || pruned.stdout).toBe(0);
+      expect(prunedPayload).toMatchObject({
+        ok: true,
+        pack: {
+          repoDir: packDir,
+          repoExists: true,
+          pruneLocal: true,
+          prunedPaths: ["docs/plans/PLAN-L7-157-distribution-clean-pull.md"],
+          unmanagedExistingPaths: [],
+          localGitMutationExecuted: false,
+          destructiveRemoteMutation: false,
+          actualRemoteMutationRequiresPoApproval: true,
+        },
+      });
+      expect(existsSync(join(packDir, "skills", "SKILL_MAP.md"))).toBe(true);
+      expect(existsSync(stalePlan)).toBe(false);
+      expect(prunedPayload.pack.nextCommands).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("git -C "),
+          expect.stringContaining('commit -m "chore: sync clean pack v0.1.0"'),
+          expect.stringContaining("push origin main"),
+        ]),
+      );
+    } finally {
+      rmSync(packDir, { recursive: true, force: true });
+      if (manifest) rmSync(manifest, { force: true });
+    }
+  }, 40_000);
+
   it("exposes non-destructive release publication planning", () => {
     const run = runCliIn(repoRoot, [
       "distribution",

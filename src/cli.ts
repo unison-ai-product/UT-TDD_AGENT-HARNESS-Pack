@@ -3358,6 +3358,141 @@ distribution
   );
 
 distribution
+  .command("sync-pack")
+  .description(
+    "update a local Pack repository checkout with clean artifacts; never commits or pushes",
+  )
+  .option("--tag <tag>", "source/release tag", gitHead() ?? "unreleased")
+  .option(
+    "--clean-repo <name>",
+    "clean distribution repository",
+    "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
+  )
+  .option("--branch <name>", "Pack repository target branch", "main")
+  .requiredOption("--repo-dir <dir>", "local Pack repository checkout to update")
+  .option("--prune-local", "remove local files in repo-dir that are not part of the clean Pack")
+  .option("--json", "JSON output")
+  .action(
+    (opts: {
+      tag?: string;
+      cleanRepo?: string;
+      branch?: string;
+      repoDir: string;
+      pruneLocal?: boolean;
+      json?: boolean;
+    }) => {
+      const repoRoot = process.cwd();
+      const repoDir = isAbsolute(opts.repoDir) ? opts.repoDir : join(repoRoot, opts.repoDir);
+      const repoExists = existsSync(repoDir);
+      const sourcePaths = collectDistributionCandidatePaths(repoRoot);
+      const exportPlan = buildCleanDistributionPlan({
+        paths: sourcePaths,
+        sourceTag: opts.tag,
+        cleanRepo: opts.cleanRepo,
+      });
+      const sync = buildPackSyncPlan({
+        exportPlan,
+        sourcePaths,
+        stagingDir: repoDir,
+        branch: opts.branch,
+      });
+      const plannedArtifacts = new Set(exportPlan.artifactPaths);
+      const existingBefore = repoExists
+        ? collectDistributionCandidatePaths(repoDir).filter((path) => !plannedArtifacts.has(path))
+        : [];
+      const prunedPaths: string[] = [];
+      let copyError: string | null = null;
+      let pruneError: string | null = null;
+
+      if (repoExists && opts.pruneLocal) {
+        try {
+          for (const rel of existingBefore) {
+            rmSync(join(repoDir, ...rel.split("/")), { force: true });
+            prunedPaths.push(rel);
+          }
+        } catch (error) {
+          pruneError = error instanceof Error ? error.message : String(error);
+        }
+      }
+
+      if (repoExists && exportPlan.ok && pruneError === null) {
+        try {
+          for (const rel of exportPlan.artifactPaths) {
+            const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
+            const from = join(repoRoot, ...sourceRel.split("/"));
+            const to = join(repoDir, ...rel.split("/"));
+            mkdirSync(dirname(to), { recursive: true });
+            cpSync(from, to, { recursive: true });
+          }
+        } catch (error) {
+          copyError = error instanceof Error ? error.message : String(error);
+        }
+      }
+
+      const unmanagedExistingPaths =
+        repoExists && pruneError === null
+          ? collectDistributionCandidatePaths(repoDir).filter((path) => !plannedArtifacts.has(path))
+          : existingBefore;
+      const manifestDir = join(repoRoot, ".ut-tdd", "pack-sync");
+      mkdirSync(manifestDir, { recursive: true });
+      const manifest = join(
+        manifestDir,
+        `${exportPlan.sourceTag.replace(/[^A-Za-z0-9._-]+/g, "-")}.sync-pack.json`,
+      );
+      const output = {
+        ok:
+          repoExists &&
+          exportPlan.ok &&
+          pruneError === null &&
+          copyError === null &&
+          unmanagedExistingPaths.length === 0,
+        export: exportPlan,
+        sync,
+        pack: {
+          repoDir,
+          repoExists,
+          manifest,
+          copiedArtifacts:
+            repoExists && exportPlan.ok && pruneError === null && copyError === null
+              ? exportPlan.artifactPaths.length
+              : 0,
+          pruneLocal: Boolean(opts.pruneLocal),
+          prunedPaths,
+          unmanagedExistingPaths,
+          pruneError,
+          copyError,
+          localGitMutationExecuted: false,
+          destructiveRemoteMutation: false,
+          actualRemoteMutationRequiresPoApproval: true,
+          nextCommands: [
+            `git -C ${repoDir} status --short`,
+            `git -C ${repoDir} add --all`,
+            `git -C ${repoDir} commit -m "chore: sync clean pack ${exportPlan.sourceTag}"`,
+            `git -C ${repoDir} push origin ${opts.branch ?? "main"}`,
+          ],
+        },
+      };
+      writeFileSync(manifest, `${JSON.stringify(output, null, 2)}\n`, "utf8");
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+        process.exitCode = output.ok ? 0 : 1;
+        return;
+      }
+      process.stdout.write(
+        `distribution sync-pack: ${output.ok ? "ok" : "blocked"} tag=${exportPlan.sourceTag}\n`,
+      );
+      process.stdout.write(`  repo-dir: ${repoDir}\n`);
+      process.stdout.write(`  copied-artifacts: ${output.pack.copiedArtifacts}\n`);
+      process.stdout.write(`  unmanaged-existing: ${unmanagedExistingPaths.length}\n`);
+      process.stdout.write(`  pruned-local: ${prunedPaths.length}\n`);
+      process.stdout.write(
+        "  git commit/push: requires explicit human approval; commands were not executed\n",
+      );
+      process.exitCode = output.ok ? 0 : 1;
+    },
+  );
+
+distribution
   .command("release-plan")
   .description("emit non-destructive git tag and gh release commands for human-approved publishing")
   .requiredOption("--tag <tag>", "release tag, e.g. v0.1.0")
