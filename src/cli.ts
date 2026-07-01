@@ -148,6 +148,7 @@ import {
   nodeSetupDeps,
   runSetup,
   type SetupArgs,
+  transformCleanDistributionArtifact,
 } from "./setup/index";
 import {
   bucketRecommendations,
@@ -3271,6 +3272,26 @@ distribution
     },
   );
 
+function copyCleanDistributionArtifact(input: {
+  sourceRoot: string;
+  sourcePath: string;
+  targetRoot: string;
+  artifactPath: string;
+}): void {
+  const from = join(input.sourceRoot, ...input.sourcePath.split("/"));
+  const to = join(input.targetRoot, ...input.artifactPath.split("/"));
+  mkdirSync(dirname(to), { recursive: true });
+  if (input.artifactPath === "package.json") {
+    writeFileSync(
+      to,
+      transformCleanDistributionArtifact(input.artifactPath, readFileSync(from, "utf8")),
+      "utf8",
+    );
+    return;
+  }
+  cpSync(from, to, { recursive: true });
+}
+
 distribution
   .command("sync-stage")
   .description("materialize clean Pack artifacts into a local staging directory without publishing")
@@ -3313,10 +3334,12 @@ distribution
         try {
           for (const rel of exportPlan.artifactPaths) {
             const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
-            const from = join(repoRoot, ...sourceRel.split("/"));
-            const to = join(outDir, ...rel.split("/"));
-            mkdirSync(dirname(to), { recursive: true });
-            cpSync(from, to, { recursive: true });
+            copyCleanDistributionArtifact({
+              sourceRoot: repoRoot,
+              sourcePath: sourceRel,
+              targetRoot: outDir,
+              artifactPath: rel,
+            });
           }
         } catch (error) {
           copyError = error instanceof Error ? error.message : String(error);
@@ -3419,10 +3442,12 @@ distribution
         try {
           for (const rel of exportPlan.artifactPaths) {
             const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
-            const from = join(repoRoot, ...sourceRel.split("/"));
-            const to = join(repoDir, ...rel.split("/"));
-            mkdirSync(dirname(to), { recursive: true });
-            cpSync(from, to, { recursive: true });
+            copyCleanDistributionArtifact({
+              sourceRoot: repoRoot,
+              sourcePath: sourceRel,
+              targetRoot: repoDir,
+              artifactPath: rel,
+            });
           }
         } catch (error) {
           copyError = error instanceof Error ? error.message : String(error);
@@ -3556,10 +3581,12 @@ distribution
       const sourcePaths = collectDistributionCandidatePaths(repoRoot);
       for (const rel of exportPlan.artifactPaths) {
         const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
-        const from = join(repoRoot, ...sourceRel.split("/"));
-        const to = join(stage, ...rel.split("/"));
-        mkdirSync(dirname(to), { recursive: true });
-        cpSync(from, to, { recursive: true });
+        copyCleanDistributionArtifact({
+          sourceRoot: repoRoot,
+          sourcePath: sourceRel,
+          targetRoot: stage,
+          artifactPath: rel,
+        });
       }
       tarResult = spawnSync("tar", ["-czf", tarball, "-C", stage, "."], {
         encoding: "utf8",

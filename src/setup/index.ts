@@ -414,6 +414,23 @@ export function cleanDistributionSourcePath(
   return artifact;
 }
 
+export const PACK_SAFE_TEST_SCRIPT =
+  "vitest run tests/setup.test.ts tests/distribution-acceptance.test.ts tests/skill-recommend.test.ts tests/skill-scaffold.test.ts tests/dependency-drift.test.ts tests/readability.test.ts --reporter=dot";
+
+export function transformCleanDistributionArtifact(artifactPath: string, content: string): string {
+  const artifact = normalizeDistributionPath(artifactPath);
+  if (artifact !== "package.json") return content;
+  const parsed = JSON.parse(content) as {
+    scripts?: Record<string, string>;
+    [key: string]: unknown;
+  };
+  const scripts = { ...(parsed.scripts ?? {}) };
+  scripts["test:source"] ??= scripts.test ?? "vitest run";
+  scripts["test:pack"] = PACK_SAFE_TEST_SCRIPT;
+  scripts.test = PACK_SAFE_TEST_SCRIPT;
+  return `${JSON.stringify({ ...parsed, scripts }, null, 2)}\n`;
+}
+
 export interface PackSyncPlan {
   ok: boolean;
   mode: "non-destructive-sync-plan";

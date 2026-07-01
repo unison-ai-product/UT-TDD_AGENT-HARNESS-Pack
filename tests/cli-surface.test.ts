@@ -118,6 +118,16 @@ describe("L7 CLI surface closure", () => {
     expect(run.stdout).toContain("--strict-green-command-digest");
   }, 15_000);
 
+  it("exposes Pack sync commands as first-class distribution surfaces", () => {
+    const run = runCli(["distribution", "--help"]);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("sync-plan");
+    expect(run.stdout).toContain("sync-stage");
+    expect(run.stdout).toContain("sync-pack");
+    expect(run.stdout).toContain("release-plan");
+  }, 15_000);
+
   it("exposes skill injection as a provider-neutral JSON manifest", () => {
     const run = runCli([
       "skill",

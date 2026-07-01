@@ -12,7 +12,11 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildCleanDistributionPlan, cleanDistributionSourcePath } from "../src/setup/index";
+import {
+  buildCleanDistributionPlan,
+  cleanDistributionSourcePath,
+  transformCleanDistributionArtifact,
+} from "../src/setup/index";
 
 const repoRoot = process.cwd();
 
@@ -123,7 +127,11 @@ describe("clean distribution local acceptance smoke", () => {
         const from = join(repoRoot, cleanDistributionSourcePath(rel, sourcePaths));
         const to = join(cleanRoot, rel);
         mkdirSync(dirname(to), { recursive: true });
-        cpSync(from, to, { recursive: true });
+        if (rel === "package.json") {
+          writeFileSync(to, transformCleanDistributionArtifact(rel, readFileSync(from, "utf8")));
+        } else {
+          cpSync(from, to, { recursive: true });
+        }
       }
 
       const fakeCodex = writeFakeCodex(cleanRoot);
@@ -136,6 +144,12 @@ describe("clean distribution local acceptance smoke", () => {
 
       const install = runBun(cleanRoot, ["install", "--frozen-lockfile"], env);
       expect(install.status, install.stderr || install.stdout).toBe(0);
+      const packPackageJson = JSON.parse(readFileSync(join(cleanRoot, "package.json"), "utf8")) as {
+        scripts: Record<string, string>;
+      };
+      expect(packPackageJson.scripts.test).toContain("tests/distribution-acceptance.test.ts");
+      expect(packPackageJson.scripts.test).toContain("tests/readability.test.ts");
+      expect(packPackageJson.scripts["test:source"]).toBe("vitest run");
 
       const status = runBun(cleanRoot, ["src/cli.ts", "status", "--json"], env);
       expect(status.status, status.stderr || status.stdout).toBe(0);

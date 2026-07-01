@@ -17,12 +17,14 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check src tests",
     "format": "biome check --write src tests",
-    "test": "vitest run",
+    "test": "vitest run tests/setup.test.ts tests/distribution-acceptance.test.ts tests/skill-recommend.test.ts tests/skill-scaffold.test.ts tests/dependency-drift.test.ts tests/readability.test.ts --reporter=dot",
     "test:fast": "vitest run --exclude tests/cli-surface.test.ts --exclude tests/db-projection-ingestion.test.ts --exclude tests/distribution-acceptance.test.ts --exclude tests/doctor.test.ts --exclude tests/drive-db-registration.test.ts --exclude tests/projection-writer.test.ts --exclude tests/review-green-command-projection.test.ts --exclude tests/runtime-hook-entrypoints.test.ts",
     "test:db": "bun run src/cli.ts db rebuild && vitest run tests/db-projection-ingestion.test.ts tests/drive-db-registration.test.ts tests/projection-writer.test.ts tests/review-green-command-projection.test.ts",
     "test:cli": "vitest run tests/cli-surface.test.ts tests/distribution-acceptance.test.ts tests/runtime-hook-entrypoints.test.ts",
     "test:node-fallback": "vitest run tests/state-db.test.ts tests/runtime-portability.test.ts",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:source": "vitest run",
+    "test:pack": "vitest run tests/setup.test.ts tests/distribution-acceptance.test.ts tests/skill-recommend.test.ts tests/skill-scaffold.test.ts tests/dependency-drift.test.ts tests/readability.test.ts --reporter=dot"
   },
   "dependencies": {
     "commander": "^12.1.0",

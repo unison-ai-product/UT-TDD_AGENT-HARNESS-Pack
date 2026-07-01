@@ -19,6 +19,7 @@ import {
   runSetup,
   type SetupDeps,
   type SetupState,
+  transformCleanDistributionArtifact,
 } from "../src/setup/index";
 import { COMMON_FILES, type TemplateSet } from "../src/setup/templates";
 
@@ -599,6 +600,27 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       ]),
     );
     expect(sync.checks).toContain("denylistViolations.length === 0");
+  });
+
+  it("U-SETUP-011d: clean Pack package.json points test to Pack-safe smoke tests", () => {
+    const transformed = JSON.parse(
+      transformCleanDistributionArtifact(
+        "package.json",
+        JSON.stringify({
+          name: "ut-tdd-agent-harness",
+          scripts: {
+            test: "vitest run",
+            typecheck: "tsc --noEmit",
+          },
+        }),
+      ),
+    ) as { scripts: Record<string, string> };
+
+    expect(transformed.scripts.test).toContain("tests/distribution-acceptance.test.ts");
+    expect(transformed.scripts.test).toContain("tests/readability.test.ts");
+    expect(transformed.scripts["test:pack"]).toBe(transformed.scripts.test);
+    expect(transformed.scripts["test:source"]).toBe("vitest run");
+    expect(transformed.scripts.typecheck).toBe("tsc --noEmit");
   });
 
   it("U-SETUP-011b: real clean distribution artifact excludes dogfood governance audit documents", () => {
