@@ -489,6 +489,12 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(
       cleanDistributionSourcePath("skills/SKILL_MAP.md", ["README.md", "skills/SKILL_MAP.md"]),
     ).toBe("skills/SKILL_MAP.md");
+    expect(
+      cleanDistributionSourcePath(".github/workflows/harness-check.yml", [
+        ".github/workflows/harness-check.yml",
+        "docs/templates/github/common/pack-harness-check.yml",
+      ]),
+    ).toBe("docs/templates/github/common/pack-harness-check.yml");
     expect(plan.artifactPaths).not.toContain("src/web/page.tsx");
     expect(plan.artifactPaths).not.toContain(".codex/hooks.json");
     expect(plan.artifactPaths).not.toContain(".claude/settings.json");

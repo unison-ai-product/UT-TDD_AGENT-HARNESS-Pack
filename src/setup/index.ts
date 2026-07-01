@@ -401,6 +401,9 @@ export function cleanDistributionSourcePath(
   sourcePaths: Iterable<string>,
 ): string {
   const artifact = normalizeDistributionPath(artifactPath);
+  if (artifact === ".github/workflows/harness-check.yml") {
+    return "docs/templates/github/common/pack-harness-check.yml";
+  }
   const sources = new Set([...sourcePaths].map(normalizeDistributionPath));
   if (sources.has(artifact)) return artifact;
   if (artifact.startsWith("skills/")) {
