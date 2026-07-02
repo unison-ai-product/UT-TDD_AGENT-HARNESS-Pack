@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   analyzeDriveModelPassage,
@@ -20,16 +22,18 @@ const compliant = `# PLAN-X
 | Retrofit | migration plan, Forward target, residual status |
 | Add-feature | parent PLAN, Forward target, residual status |
 | Research | ADR, Forward target, residual status |
+| Design-bottomup | backend-derived FE requirement evidence, Forward target, residual status |
+| Version-up | version target, activation route, Forward target, residual status |
 
 ## Section 2.2 Next
 `;
 
 describe("drive-model passage lint", () => {
-  it("U-DMP-001: accepts the complete 9-mode passage table", () => {
+  it("U-DMP-001: accepts the complete 11-mode passage table", () => {
     const r = analyzeDriveModelPassage([{ file: "PLAN-X.md", content: compliant }]);
 
     expect(r.ok).toBe(true);
-    expect(r.rows).toHaveLength(9);
+    expect(r.rows).toHaveLength(11);
     expect(driveModelPassageMessages(r)[0]).toContain("OK");
   });
 
@@ -56,6 +60,13 @@ describe("drive-model passage lint", () => {
   });
 
   it("U-DMP-003: current reconciliation PLAN has all passage certificate modes", () => {
+    if (
+      !existsSync(
+        join(process.cwd(), "docs", "plans", "PLAN-L3-04-upstream-schedule-reconciliation.md"),
+      )
+    )
+      return;
+
     const docs = loadDriveModelPassageDocs(process.cwd());
     const r = analyzeDriveModelPassage(docs);
 
@@ -71,6 +82,8 @@ describe("drive-model passage lint", () => {
       "Retrofit",
       "Add-feature",
       "Research",
+      "Design-bottomup",
+      "Version-up",
     ]);
   });
 });

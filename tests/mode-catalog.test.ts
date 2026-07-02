@@ -15,6 +15,7 @@ import { analyzeDriveDbRegistration } from "../src/lint/drive-db-registration";
 import {
   MODE_CATALOG_DOC_FILES,
   ROUTE_MODE_DISPLAY,
+  routeModesWithoutCatalogDoc,
   unmappedModeCatalogDocs,
   workflowModeForPlan,
 } from "../src/schema/mode-catalog";
@@ -51,6 +52,13 @@ describe("PLAN-L7-243: mode catalog derivation", () => {
     for (const entry of ROUTE_SIGNAL_MAP) {
       expect(mappedTokens, `route-map mode ${entry.mode}`).toContain(entry.mode);
     }
+  });
+
+  it("every route-map mode token has a catalog doc unless it is Forward", () => {
+    expect(routeModesWithoutCatalogDoc(ROUTE_SIGNAL_MAP.map((entry) => entry.mode))).toEqual([]);
+    expect(routeModesWithoutCatalogDoc(["forward", "design-bottomup", "unknown-mode"])).toEqual([
+      "unknown-mode",
+    ]);
   });
 
   it("every mode doc in docs/process/modes is mapped (real-repo catalog sync)", () => {

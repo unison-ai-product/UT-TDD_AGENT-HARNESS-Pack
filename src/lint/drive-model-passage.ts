@@ -44,6 +44,9 @@ const EXPECTED_MODES = [
   "Retrofit",
   "Add-feature",
   "Research",
+  // PLAN-RECOVERY-07 (A-173 F-1): 正本 back-merge と同時に passage 要求へ登録。
+  "Design-bottomup",
+  "Version-up",
 ] as const;
 
 function section(content: string): string {
@@ -152,6 +155,6 @@ export function driveModelPassageMessages(result: DriveModelPassageResult): stri
     ];
   }
   return [
-    `drive-model-passage - OK (checked=${result.checked}, modes=${result.rows.length}, expected=9)`,
+    `drive-model-passage - OK (checked=${result.checked}, modes=${result.rows.length}, expected=${EXPECTED_MODES.length})`,
   ];
 }

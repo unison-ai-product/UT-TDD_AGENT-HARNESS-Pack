@@ -71,6 +71,7 @@ export function workflowModeForPlan(input: ModeDerivationInput): string {
  */
 export const MODE_CATALOG_DOC_FILES: Record<string, string> = {
   "add-feature.md": "Add-feature",
+  "design-bottomup.md": "Design-bottomup",
   "discovery.md": "Discovery",
   "incident.md": "Incident",
   "recovery.md": "Recovery",
@@ -87,5 +88,21 @@ export function unmappedModeCatalogDocs(docFileNames: string[]): string[] {
   return docFileNames
     .filter((name) => name.endsWith(".md") && name !== "README.md")
     .filter((name) => !(name in MODE_CATALOG_DOC_FILES))
+    .sort();
+}
+
+/**
+ * PLAN-RECOVERY-07: route-map の mode token のうち正本 doc を持たないもの
+ * (SSoT 突合: route-map の mode 集合 ⊆ modes カタログ)。Forward は docs/process/forward/
+ * 正本のため除外。空でなければ「routing だけ存在し正本 doc が無い mode」= A-173 F-1 class。
+ */
+export function routeModesWithoutCatalogDoc(routeModeTokens: string[]): string[] {
+  const documented = new Set(Object.values(MODE_CATALOG_DOC_FILES));
+  return [...new Set(routeModeTokens)]
+    .filter((token) => token !== "forward")
+    .filter((token) => {
+      const display = ROUTE_MODE_DISPLAY[token];
+      return !display || !documented.has(display);
+    })
     .sort();
 }

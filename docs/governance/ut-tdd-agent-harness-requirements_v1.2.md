@@ -1993,6 +1993,7 @@ skill pack は単独の助言文書ではなく、以下の gate に接続する
 | `production_incident` / `hotfix_required` / `regression_prod` | incident | env=prod 必須、human approval |
 | `feature_addition` / `scope_extension` | add-feature | §1.3 `kind=add-feature` と同じ正規表記 |
 | `version_deferral` | version-up | capability を将来版へ保全 (今スコープ外・破棄しない)。`version_target` 付き draft で起票、活性化時に add-feature で Forward 合流 (§2.5 version-up、PLAN-DISCOVERY-09) |
+| `screen_addition_to_backend` / `design_bottomup` / `backend_derived_screen` / `add_ui_to_backend` | design-bottomup | backend 先行から FE / 画面要件を導出し、Discovery 合成後に L1 screen / L2 へ Forward 合流 (§2.5 design-bottomup、PLAN-DISCOVERY-07 / PLAN-RECOVERY-07) |
 | `user_feedback_iteration` / `requirement_continuous_refinement` | scrum | |
 | `requirement_undefined` / `feasibility_unknown` / `success_condition_unclear` / `design_uncertain` | discovery | 4 象限 P2 (uncertainty 高×impact 低) で Discovery 先行。上流委譲。**`design_uncertain` = 確証なき設計** (紙上で実現性・妥当性が確定できない設計、concept §2.5 / PLAN-DISCOVERY-01 S4 confirmed)。**在層で閉じる `design_gap` (下記 interrupt 分岐 → Forward spot 修正) とは区別**: 設計の確証が PoC を要するなら Discovery、層内で確定できるなら Forward |
 | `tech_decision_required` / `option_comparison_needed` / `adr_required` | research | 机上調査で完結 (PoC 不要)。作れるか不明→discovery / 既存実装調査→reverse に切替 |
