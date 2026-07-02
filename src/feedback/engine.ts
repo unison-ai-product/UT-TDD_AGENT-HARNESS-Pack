@@ -1,5 +1,6 @@
 import type { HarnessDb } from "../state-db/index";
 import { upsertRow } from "../state-db/index";
+import { RUNTIME_SKILL_SOURCE_PREFIX } from "../state-db/skill-projections";
 
 export interface SkillMetric {
   plan_id: string;
@@ -33,7 +34,11 @@ function toBool(value: unknown): boolean {
 
 export function computeSkillMetrics(db: HarnessDb): SkillMetric[] {
   const recommendations = db.prepare("SELECT * FROM skill_recommendations").all();
-  const invocations = db.prepare("SELECT * FROM skill_invocations").all();
+  // PLAN-L7-262: metrics は実 runtime 発火のみを数える。auto-projection 由来の
+  // 間接推定 invocation を firing/acceptance に混ぜない (A-178 G-8)。
+  const invocations = db
+    .prepare("SELECT * FROM skill_invocations WHERE source LIKE ?")
+    .all(`${RUNTIME_SKILL_SOURCE_PREFIX}%`);
   const groups = new Map<
     string,
     { planId: string; skillId: string; rec: number; inv: number; acc: number }
@@ -70,7 +75,7 @@ export function computeSkillMetrics(db: HarnessDb): SkillMetric[] {
         primaryKey: "signal_id",
         row: {
           signal_id: metricKey(group.planId, group.skillId, "firing_rate"),
-          source: "skill-metrics",
+          source: "skill-metrics:runtime",
           subject_id: `${group.planId}:${group.skillId}`,
           metric: "skill_firing_rate",
           value: firing,
@@ -84,7 +89,7 @@ export function computeSkillMetrics(db: HarnessDb): SkillMetric[] {
         primaryKey: "signal_id",
         row: {
           signal_id: metricKey(group.planId, group.skillId, "acceptance_rate"),
-          source: "skill-metrics",
+          source: "skill-metrics:runtime",
           subject_id: `${group.planId}:${group.skillId}`,
           metric: "skill_acceptance_rate",
           value: acceptance,

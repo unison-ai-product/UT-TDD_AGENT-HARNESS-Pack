@@ -41,6 +41,7 @@ import {
   primaryKeyOf,
   type TableDef,
 } from "../schema/harness-db";
+import { workflowModeForPlan as catalogWorkflowModeForPlan } from "../schema/mode-catalog";
 import { deriveArtifactProgressDecision } from "./artifact-progress-decision";
 import {
   projectFeedbackEvents,
@@ -116,6 +117,8 @@ interface ProjectedPlan {
   drive: string;
   status: string;
   updatedAt: string;
+  // route_mode frontmatter (mode 第一級化、PLAN-L7-243)。legacy PLAN / fixture は未設定可。
+  routeMode?: string;
 }
 
 interface PlanDigestProjection {
@@ -331,19 +334,17 @@ function stringList(value: unknown): string[] {
   return [];
 }
 
-function workflowModeForPlan(planId: string): string {
-  if (planId.startsWith("PLAN-DISCOVERY-")) return "Discovery";
-  if (planId.startsWith("PLAN-REVERSE-")) return "Reverse";
-  if (planId.startsWith("PLAN-RECOVERY-")) return "Recovery";
-  if (planId.startsWith("PLAN-M-")) return "Verification";
-  return "Forward";
-}
-
-function skillDriveModelForPlan(planId: string): string {
-  if (planId.startsWith("PLAN-DISCOVERY-")) return "Discovery";
-  if (planId.startsWith("PLAN-REVERSE-")) return "Reverse";
-  if (planId.startsWith("PLAN-RECOVERY-")) return "Recovery";
-  return "Forward";
+// PLAN-L7-243: mode 導出は route_mode 正本 + legacy フォールバック (mode-catalog) へ置換。
+// plan_id prefix 4 分岐のみの旧導出 (kind=refactor/troubleshoot 等の Forward 落ち) は廃止。
+function planModeResolver(plans: Map<string, ProjectedPlan>): (planId: string) => string {
+  return (planId) => {
+    const plan = plans.get(planId);
+    return catalogWorkflowModeForPlan({
+      planId,
+      routeMode: plan?.routeMode,
+      kind: plan?.kind,
+    });
+  };
 }
 
 function readJson<T>(path: string): T | null {
@@ -372,7 +373,8 @@ function projectPlans(repoRoot: string, db: HarnessDb): Map<string, ProjectedPla
     // Stored as "" when absent so the column is always TEXT (single-source: harness-db.ts §plan_registry).
     const decisionOutcome =
       frontmatterValue(content, "decision_outcome") || frontmatterValue(content, "decision") || "";
-    plans.set(planId, { planId, kind, layer, drive, status, updatedAt });
+    const routeMode = frontmatterValue(content, "route_mode");
+    plans.set(planId, { planId, kind, layer, drive, status, updatedAt, routeMode });
     const relPath = normalizePath(relative(repoRoot, path));
     recordProjectionEvent(db, {
       table: "plan_registry",
@@ -384,6 +386,7 @@ function projectPlans(repoRoot: string, db: HarnessDb): Map<string, ProjectedPla
         drive,
         status,
         parent: "",
+        route_mode: routeMode,
         updated_at: updatedAt,
         decision_outcome: decisionOutcome,
         source_hash: sourceHash,
@@ -440,7 +443,11 @@ function projectDriveRuns(
           plan_id: plan.planId,
           session_id: sessionId,
           drive: plan.drive,
-          mode: workflowModeForPlan(plan.planId),
+          mode: catalogWorkflowModeForPlan({
+            planId: plan.planId,
+            routeMode: plan.routeMode,
+            kind: plan.kind,
+          }),
           layer: plan.layer,
           kind: plan.kind,
           started_at: plan.updatedAt || digest?.updated_at || "",
@@ -599,7 +606,8 @@ export function projectRuntimeSkillInvocationFromSessionEvent(
       stableId,
       resolvePlanId: (planId) => resolveProjectedPlanId(input.plans, planId),
       recordProjectionEvent,
-      skillScore: (plan, asset) => skillScore(plan, asset, { skillDriveModelForPlan }),
+      skillScore: (plan, asset) =>
+        skillScore(plan, asset, { skillDriveModelForPlan: planModeResolver(input.plans) }),
     },
   });
 }
@@ -617,7 +625,8 @@ function projectRuntimeSkillInvocationsFromSessionLogs(
       stableId,
       resolvePlanId: (planId) => resolveProjectedPlanId(plans, planId),
       recordProjectionEvent,
-      skillScore: (plan, asset) => skillScore(plan, asset, { skillDriveModelForPlan }),
+      skillScore: (plan, asset) =>
+        skillScore(plan, asset, { skillDriveModelForPlan: planModeResolver(plans) }),
     },
   });
 }
@@ -2173,7 +2182,12 @@ function projectSkillTelemetry(db: HarnessDb, plans: Map<string, ProjectedPlan>)
   projectSkillTelemetryCore({
     db,
     plans,
-    deps: { nowIso, stableId, recordProjectionEvent, skillDriveModelForPlan },
+    deps: {
+      nowIso,
+      stableId,
+      recordProjectionEvent,
+      skillDriveModelForPlan: planModeResolver(plans),
+    },
   });
 }
 

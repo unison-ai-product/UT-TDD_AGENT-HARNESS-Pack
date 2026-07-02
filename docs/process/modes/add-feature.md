@@ -101,6 +101,18 @@
 - `add-design` / `add-impl` どちらも `dependencies.parent` が null の場合 validator は exit 1 (§1.10 E)。
 - drive は親 PLAN と一致させる。不一致は §1.6 matrix 違反で fail-close。
 - 4 artifact (①②③④) の追補セットを新規 Forward と同じ規律で揃えること (AP-8 逆ピラミッド禁止)。
+
+### route_mode↔kind 整合 (PLAN-L7-263、fail-close)
+
+- `route_mode: add-feature` の PLAN は kind を **`add-design` / `add-impl` に限定**する。
+  `kind: impl` は `KIND_BACKFILL[impl]=none` のため back-fill 義務を機械免除してしまう
+  (A-178 G-14)。違反は plan lint `route_mode_kind_mismatch` で fail-close する。
+- draft 段階の add-impl と Reverse pairing は、REVERSE plan 側の `dependencies.parent` に
+  add-impl PLAN を指定して成立させる (`requires` は requires_not_ready のため landed 後に張る)。
+- 2026-07-02 以前の既存違反 37 本 (landed 5 + draft 32)は `docs/governance/route-mode-kind-debt-audit-2026-07-02.md`
+  に台帳固定。draft debt は**着手 (status が draft 以外へ遷移) 前に add-impl + Reverse pairing へ
+  昇格**しないと lint が fail する。
+
 ## CODING-RULE-WORKFLOW
 
 Coding-rule documentation is part of Add-feature, not only CI.

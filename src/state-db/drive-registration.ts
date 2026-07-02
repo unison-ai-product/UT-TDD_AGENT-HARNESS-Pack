@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DriveDbRegistrationStats } from "../lint/drive-db-registration";
 import { loadReviewPlans } from "../lint/review-evidence";
+import { unmappedModeCatalogDocs, workflowModeForPlan } from "../schema/mode-catalog";
 import { defaultHarnessDbPath, type HarnessDb, openHarnessDb } from "./index";
 import { migrate } from "./migration";
 import { rebuildHarnessDb } from "./projection-writer";
@@ -57,12 +58,45 @@ function collectProjectedPlanRegistryFingerprint(db: HarnessDb): string | undefi
   }
 }
 
-export function collectDriveDbRegistrationStats(db: HarnessDb): DriveDbRegistrationStats {
+export function collectDriveDbRegistrationStats(
+  db: HarnessDb,
+  repoRoot?: string,
+): DriveDbRegistrationStats {
   const modes = db
     .prepare("SELECT DISTINCT mode FROM drive_runs WHERE mode <> '' ORDER BY mode")
     .all()
     .map((row) => String(row.mode));
+  // PLAN-L7-243: 期待 mode 集合は plan_registry (route_mode 正本 + legacy フォールバック)
+  // から導出する (ハードコード 5 値の廃止)。mode doc カタログ ↔ 写像の差分も収集。
+  let expectedModes: string[] | undefined;
+  try {
+    const planRows = db
+      .prepare("SELECT plan_id, route_mode, kind FROM plan_registry")
+      .all() as Array<{ plan_id?: unknown; route_mode?: unknown; kind?: unknown }>;
+    expectedModes = [
+      ...new Set(
+        planRows.map((row) =>
+          workflowModeForPlan({
+            planId: String(row.plan_id ?? ""),
+            routeMode: String(row.route_mode ?? ""),
+            kind: String(row.kind ?? ""),
+          }),
+        ),
+      ),
+    ].sort();
+  } catch {
+    expectedModes = undefined; // legacy DB (route_mode 列なし) はフォールバック水準で検査
+  }
+  let unmappedCatalogDocs: string[] | undefined;
+  if (repoRoot) {
+    const modesDir = join(repoRoot, "docs", "process", "modes");
+    if (existsSync(modesDir)) {
+      unmappedCatalogDocs = unmappedModeCatalogDocs(readdirSync(modesDir));
+    }
+  }
   return {
+    expectedModes,
+    unmappedCatalogDocs,
     planCount: count(db, "SELECT COUNT(*) AS value FROM plan_registry"),
     planRegistryFingerprint: collectProjectedPlanRegistryFingerprint(db),
     driveRuns: count(db, "SELECT COUNT(*) AS value FROM drive_runs"),
@@ -135,7 +169,7 @@ export function loadDriveDbRegistrationStats(
   try {
     migrate(db);
     return {
-      ...collectDriveDbRegistrationStats(db),
+      ...collectDriveDbRegistrationStats(db, repoRoot),
       expectedPlanCount: loadReviewPlans(repoRoot).length,
       expectedPlanRegistryFingerprint: collectCurrentPlanRegistryFingerprint(repoRoot),
     };
@@ -159,7 +193,7 @@ export function loadOrBuildDriveDbRegistrationStats(
   try {
     rebuildHarnessDb({ repoRoot, db });
     return {
-      ...collectDriveDbRegistrationStats(db),
+      ...collectDriveDbRegistrationStats(db, repoRoot),
       expectedPlanCount: loadReviewPlans(repoRoot).length,
       expectedPlanRegistryFingerprint: collectCurrentPlanRegistryFingerprint(repoRoot),
     };

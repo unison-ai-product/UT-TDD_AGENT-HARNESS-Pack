@@ -114,7 +114,7 @@ describe("IT-SEARCH-01 / IT-DB-03 / IT-FEEDBACK-01", () => {
           layer: "L7",
           drive: "db",
           fired_at: "2026-06-11T00:01:00.000Z",
-          source: "codex",
+          source: "runtime-hook:skill-suggest",
           accepted: 1,
         },
       });

@@ -21,6 +21,7 @@ describe("skill recommendation telemetry", () => {
       layer: string;
       drive: string;
       status?: string;
+      route_mode?: string;
     },
   ): void {
     recordProjectionEvent(db, {
@@ -174,7 +175,7 @@ describe("skill recommendation telemetry", () => {
       expect(l7[0]).toMatchObject({
         plan_id: "PLAN-L7-99-skill-layer",
         skill_id: "skill:l7-fullstack-test",
-        reason: "layer=L7; technical_drive=fullstack; drive_model=Forward; kind=add-impl",
+        reason: "layer=L7; technical_drive=fullstack; drive_model=Add-feature; kind=add-impl",
       });
     } finally {
       db.close();
@@ -190,12 +191,14 @@ describe("skill recommendation telemetry", () => {
         kind: "add-impl",
         layer: "L7",
         drive: "reverse",
+        route_mode: "reverse",
       });
       seedPlan(db, {
         plan_id: "PLAN-L7-99-scrum-skill",
         kind: "add-impl",
         layer: "L7",
         drive: "scrum",
+        route_mode: "scrum",
       });
       seedSkill(db, {
         asset_id: "skill:l7-reverse-routing-review",

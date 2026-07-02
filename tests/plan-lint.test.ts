@@ -10,7 +10,11 @@ import {
   planGovernanceMessages,
   planScheduleMessages,
 } from "../src/plan/lint";
-import { READY_DEPENDENCY_STATUSES } from "../src/plan/lint-policy";
+import {
+  READY_DEPENDENCY_STATUSES,
+  ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS,
+  ROUTE_MODE_KIND_LEGACY_LANDED_PLAN_IDS,
+} from "../src/plan/lint-policy";
 import type { LintResult as SidecarLintResult } from "../src/plan/lint-types";
 
 const compliant = `---
@@ -908,6 +912,117 @@ dependencies:
 
     expect(reasons).not.toContain("route_certificate_missing");
     expect(reasons).not.toContain("route_certificate_mismatch");
+  });
+
+  it("U-PLANGOV-011u: route_mode=add-feature rejects kind=impl (route_mode_kind_mismatch)", () => {
+    const docs = [
+      planDoc("PLAN-L7-900-add-feature-impl", {
+        kind: "impl",
+        layer: "L7",
+        status: "draft",
+        subDoc: null,
+        parentDesign: "docs/design/harness/L6-function-design/function-spec.md",
+        extra: "route_mode: add-feature\n",
+      }),
+    ];
+
+    const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
+
+    expect(reasons).toContain("route_mode_kind_mismatch");
+  });
+
+  it("U-PLANGOV-011v: route_mode=add-feature allows kind=add-design/add-impl", () => {
+    const docs = [
+      planDoc("PLAN-L7-901-add-feature-add-impl", {
+        kind: "add-impl",
+        layer: "L7",
+        status: "draft",
+        subDoc: null,
+        parentDesign: "docs/design/harness/L6-function-design/function-spec.md",
+        extra: "route_mode: add-feature\n",
+      }),
+      planDoc("PLAN-L7-902-add-feature-add-design", {
+        kind: "add-design",
+        layer: "L6",
+        status: "draft",
+        subDoc: null,
+        extra: "route_mode: add-feature\n",
+      }),
+    ];
+
+    const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
+
+    expect(reasons).not.toContain("route_mode_kind_mismatch");
+  });
+
+  it("U-PLANGOV-011w: draft debt is exempt while draft and fails closed on start (着手時昇格)", () => {
+    const draftDebt = (status: string) =>
+      planDoc("PLAN-L7-262-skill-telemetry-provenance", {
+        kind: "impl",
+        layer: "L7",
+        status,
+        subDoc: null,
+        parentDesign: "docs/design/harness/L6-function-design/function-spec.md",
+        extra: "route_mode: add-feature\n",
+      });
+
+    const draftReasons = analyzePlanGovernance([draftDebt("draft")]).violations.map(
+      (v) => v.reason,
+    );
+    expect(draftReasons).not.toContain("route_mode_kind_mismatch");
+
+    const startedReasons = analyzePlanGovernance([draftDebt("confirmed")]).violations.map(
+      (v) => v.reason,
+    );
+    expect(startedReasons).toContain("route_mode_kind_mismatch");
+  });
+
+  it("U-PLANGOV-011x: legacy landed debt is permanently exempt", () => {
+    const docs = [
+      planDoc("PLAN-L7-212-route-certificate-governance", {
+        kind: "impl",
+        layer: "L7",
+        status: "confirmed",
+        subDoc: null,
+        parentDesign: "docs/design/harness/L6-function-design/function-spec.md",
+        extra: "route_mode: add-feature\n",
+      }),
+    ];
+
+    const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
+
+    expect(reasons).not.toContain("route_mode_kind_mismatch");
+  });
+
+  it("U-PLANGOV-011x2: removing route_mode from a ledgered debt plan fails closed (bypass guard)", () => {
+    const docs = [
+      planDoc("PLAN-L7-262-skill-telemetry-provenance", {
+        kind: "impl",
+        layer: "L7",
+        status: "draft",
+        subDoc: null,
+        parentDesign: "docs/design/harness/L6-function-design/function-spec.md",
+      }),
+    ];
+
+    const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
+
+    expect(reasons).toContain("route_mode_kind_mismatch");
+  });
+
+  it("U-PLANGOV-011y: route_mode_kind debt ledger doc stays in sync with lint allowlists", () => {
+    const ledger = readFileSync(
+      join(process.cwd(), "docs/governance/route-mode-kind-debt-audit-2026-07-02.md"),
+      "utf8",
+    );
+    const [, legacySection = "", draftSection = ""] = ledger.split(
+      /## (?:legacy landed|draft debt)[^\n]*\n/,
+    );
+    const idsOf = (section: string) =>
+      new Set([...section.matchAll(/^\|\s*(PLAN-[A-Za-z0-9-]+)\s*\|/gm)].map((m) => m[1]));
+
+    expect(idsOf(legacySection)).toEqual(ROUTE_MODE_KIND_LEGACY_LANDED_PLAN_IDS);
+    expect(idsOf(draftSection)).toEqual(ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS);
   });
 
   it("U-PLANGOV-012: docs/design generated artifacts must use design_doc", () => {

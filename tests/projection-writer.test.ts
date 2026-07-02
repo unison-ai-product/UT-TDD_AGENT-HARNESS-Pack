@@ -715,7 +715,7 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
           layer: "L7",
           drive: "db",
           fired_at: "2026-07-02T00:01:00.000Z",
-          source: "test",
+          source: "runtime-hook:skill-suggest",
           accepted: 1,
         },
       });
@@ -731,7 +731,7 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
 
       const rows = db
         .prepare("SELECT metric, value, status FROM quality_signals WHERE source = ?")
-        .all("skill-metrics");
+        .all("skill-metrics:runtime");
       expect(rows).toEqual(
         expect.arrayContaining([
           expect.objectContaining({

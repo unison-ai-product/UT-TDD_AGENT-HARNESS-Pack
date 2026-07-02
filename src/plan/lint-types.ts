@@ -50,7 +50,8 @@ type PlanGovernanceViolationReason =
   | "version_route_certificate_missing"
   | "version_route_certificate_mismatch"
   | "route_certificate_missing"
-  | "route_certificate_mismatch";
+  | "route_certificate_mismatch"
+  | "route_mode_kind_mismatch";
 
 interface PlanGovernanceViolation {
   file: string;

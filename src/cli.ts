@@ -112,6 +112,7 @@ import {
   dispatch,
   nodeDeps,
   parseSessionEvents,
+  recordSkillInjectionAttempt,
   resolveActivePlan,
   type SessionHookInput,
   safeName,
@@ -240,18 +241,44 @@ function resolveSkillContextInjection(
 ): AdapterContextInjection | undefined {
   if (!planId) return undefined;
   const repoRoot = process.cwd();
+  // PLAN-L7-262: 注入の成功/skip を session jsonl へ記録する (silent fail-open をやめ、
+  // 「握った事実の記録付き fail-open」へ)。記録自体は recordEvent の fail-open に従う。
+  const logDeps = nodeDeps(repoRoot, () => null);
   const db = openHarnessDb(":memory:", { repoRoot });
   try {
     try {
       rebuildHarnessDb({ repoRoot, db });
     } catch {
+      recordSkillInjectionAttempt(
+        { plan_id: planId, status: "skipped", reason: "rebuild-failed", required: 0, optional: 0 },
+        logDeps,
+      );
       return undefined;
     }
     const recommendations = recommendSkillsForPlan(db, planId);
     const injection = buildSkillInjectionSet(db, recommendations);
     if (injection.required_paths.length === 0 && injection.optional_paths.length === 0) {
+      recordSkillInjectionAttempt(
+        {
+          plan_id: planId,
+          status: "skipped",
+          reason: "no-matching-skills",
+          required: 0,
+          optional: 0,
+        },
+        logDeps,
+      );
       return undefined;
     }
+    recordSkillInjectionAttempt(
+      {
+        plan_id: planId,
+        status: "injected",
+        required: injection.required_paths.length,
+        optional: injection.optional_paths.length,
+      },
+      logDeps,
+    );
     return {
       required_paths: injection.required_paths,
       optional_paths: injection.optional_paths,

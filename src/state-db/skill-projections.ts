@@ -1,5 +1,12 @@
 import type { HarnessDb } from "./index";
 
+// PLAN-L7-262: provenance 分離。
+// - rebuild 由来の間接推定行は session 不明を明示する (空文字での偽装をやめる)。
+// - firing/acceptance metrics は実 runtime 発火 (source が RUNTIME_SKILL_SOURCE_PREFIX)
+//   のみから算出する。auto-projection 行は監査参照用に残るが metrics へ混ぜない。
+export const REBUILD_INDIRECT_SESSION_ID = "rebuild:indirect";
+export const RUNTIME_SKILL_SOURCE_PREFIX = "runtime-hook:";
+
 export interface SkillProjectedPlan {
   planId: string;
   kind: string;
@@ -89,7 +96,7 @@ export function projectSkillTelemetry(input: {
         id: recId,
         row: {
           skill_recommendation_id: recId,
-          session_id: "",
+          session_id: REBUILD_INDIRECT_SESSION_ID,
           plan_id: plan.planId,
           skill_id: skillId,
           rank: index + 1,
@@ -105,7 +112,7 @@ export function projectSkillTelemetry(input: {
           id: invId,
           row: {
             skill_invocation_id: invId,
-            session_id: "",
+            session_id: REBUILD_INDIRECT_SESSION_ID,
             plan_id: plan.planId,
             skill_id: skillId,
             layer: plan.layer,
@@ -135,9 +142,10 @@ export function projectSkillMetrics(input: {
        FROM skill_recommendations r
        LEFT JOIN skill_invocations i
          ON i.plan_id = r.plan_id AND i.skill_id = r.skill_id
+        AND i.source LIKE ?
        GROUP BY r.plan_id, r.skill_id`,
     )
-    .all();
+    .all(`${RUNTIME_SKILL_SOURCE_PREFIX}%`);
   for (const row of rows) {
     const rec = Number(row.rec ?? 0);
     const inv = Number(row.inv ?? 0);
@@ -156,7 +164,7 @@ export function projectSkillMetrics(input: {
         id: signalId,
         row: {
           signal_id: signalId,
-          source: "skill-metrics",
+          source: "skill-metrics:runtime",
           subject_id: `${planId}:${skillId}`,
           metric: metric.name,
           value: Number(metric.value.toFixed(4)),

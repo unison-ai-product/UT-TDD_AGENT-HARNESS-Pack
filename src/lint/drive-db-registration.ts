@@ -16,6 +16,12 @@ export interface DriveDbRegistrationStats {
   registeredHookEvents: number;
   hookOrphans: number;
   modes: string[];
+  // PLAN-L7-243: mode カタログ突合。
+  // expectedModes = plan_registry (route_mode/kind/plan_id) から mode-catalog 導出で
+  // 期待される mode 集合。unmappedCatalogDocs = docs/process/modes/ にあるが
+  // MODE_CATALOG_DOC_FILES 写像に無い mode doc (新 mode の取りこぼし)。
+  expectedModes?: string[];
+  unmappedCatalogDocs?: string[];
 }
 
 export interface DriveDbRegistrationViolation {
@@ -35,7 +41,8 @@ export interface DriveDbRegistrationViolation {
     | "missing_skill_invocations"
     | "skill_invocation_orphans"
     | "missing_registered_hook_events"
-    | "missing_required_mode";
+    | "missing_required_mode"
+    | "mode_catalog_unmapped";
   count?: number;
   mode?: string;
 }
@@ -46,7 +53,10 @@ export interface DriveDbRegistrationResult {
   ok: boolean;
 }
 
-const REQUIRED_CURRENT_MODES = ["Discovery", "Forward", "Recovery", "Reverse", "Verification"];
+// PLAN-L7-243: ハードコード 5 値 (REQUIRED_CURRENT_MODES) を廃止し、plan_registry から
+// mode-catalog 導出した期待集合 (stats.expectedModes) との突合に置換。legacy stats
+// (expectedModes 未提供) はこのフォールバックで従来水準を維持する。
+const LEGACY_REQUIRED_MODES = ["Discovery", "Forward", "Recovery", "Reverse", "Verification"];
 
 export function analyzeDriveDbRegistration(
   stats: DriveDbRegistrationStats | null,
@@ -101,8 +111,11 @@ export function analyzeDriveDbRegistration(
   if (stats.registeredHookEvents <= 0) {
     violations.push({ reason: "missing_registered_hook_events" });
   }
-  for (const mode of REQUIRED_CURRENT_MODES) {
+  for (const mode of stats.expectedModes ?? LEGACY_REQUIRED_MODES) {
     if (!stats.modes.includes(mode)) violations.push({ reason: "missing_required_mode", mode });
+  }
+  for (const doc of stats.unmappedCatalogDocs ?? []) {
+    violations.push({ reason: "mode_catalog_unmapped", mode: doc });
   }
 
   return { stats, violations, ok: violations.length === 0 };

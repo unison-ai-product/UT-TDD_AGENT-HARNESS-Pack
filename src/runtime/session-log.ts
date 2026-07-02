@@ -28,7 +28,8 @@ export type SessionEventType =
   | "plan_switch"
   | "session_end"
   | "forced_stop" // 強制停止 (推定、PLAN-L6-04/L7-02 forced-stop-feedback)
-  | "user_prompt"; // ユーザー入力 (dangling-turn 推定の活動 marker)
+  | "user_prompt" // ユーザー入力 (dangling-turn 推定の活動 marker)
+  | "skill_injection"; // skill context 注入の成功/skip (PLAN-L7-262、silent fail-open の可視化)
 
 export interface SessionEvent {
   ts: string; // ISO8601 (hook 受領時)
@@ -221,6 +222,48 @@ export function recordEvent(ev: SessionEvent, deps: SessionLogDeps): void {
   } catch {
     // fail-open: ログ失敗で作業を止めない
   }
+}
+
+// PLAN-L7-262: 注入実績/失敗の記録。session_id が引けない CLI 経路は
+// UT_TDD_SESSION_ID env、それも無ければ明示の不明 marker を使う (空文字での偽装をやめる)。
+export const SKILL_INJECTION_UNKNOWN_SESSION_ID = "cli:unknown-session";
+
+export interface SkillInjectionAttempt {
+  plan_id: string;
+  status: "injected" | "skipped";
+  reason?: string;
+  required: number;
+  optional: number;
+  session_id?: string;
+}
+
+/** skill context 注入の成功/skip を session jsonl へ記録する (fail-open は recordEvent 側)。 */
+export function recordSkillInjectionAttempt(
+  attempt: SkillInjectionAttempt,
+  deps: SessionLogDeps,
+): void {
+  const sessionId =
+    attempt.session_id?.trim() ||
+    process.env.UT_TDD_SESSION_ID?.trim() ||
+    SKILL_INJECTION_UNKNOWN_SESSION_ID;
+  const reason = attempt.reason ? ` reason=${attempt.reason}` : "";
+  // outcome=error は真の障害系 skip (reason が *-failed) のみ。no-matching-skills 等の
+  // 正常系 skip を PlanDigest failures へ混入させない (TL レビュー所見、PLAN-L7-262)。
+  const isFailure = attempt.status === "skipped" && (attempt.reason?.endsWith("-failed") ?? false);
+  recordEvent(
+    {
+      ts: deps.now(),
+      session_id: sessionId,
+      plan_id: attempt.plan_id || null,
+      event_type: "skill_injection",
+      tool: "skill-injection",
+      target: sanitize(
+        `${attempt.status} required=${attempt.required} optional=${attempt.optional}${reason}`,
+      ),
+      outcome: isFailure ? "error" : "ok",
+    },
+    deps,
+  );
 }
 
 /** session_id の jsonl ログ path (`.ut-tdd/logs/session/<safeName>.jsonl`)。 */

@@ -19,6 +19,9 @@ import {
   REVERSE_R4_ROUTE_BACKPROP_ENFORCEMENT_DATE,
   REVIEW_PATTERN,
   ROUTE_CERTIFICATE_ENFORCEMENT_DATE,
+  ROUTE_MODE_ALLOWED_KINDS,
+  ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS,
+  ROUTE_MODE_KIND_LEGACY_LANDED_PLAN_IDS,
   SERIAL_MODE_PATTERN,
   SERIAL_REASONS,
   VALID_REVERSE_FULLBACK_SCOPE_DECISIONS,
@@ -327,6 +330,49 @@ function routeCertificateViolations(raw: Record<string, unknown>): {
   return violations;
 }
 
+function routeModeKindViolations(
+  raw: Record<string, unknown>,
+  planId: string,
+): { reason: "route_mode_kind_mismatch"; detail: string }[] {
+  if (stringField(raw.status) === "archived") return [];
+
+  const mode = stringField(raw.route_mode);
+  if (!mode) {
+    // debt 台帳対象の PLAN は route_mode 行の削除で免除を bypass できないよう fail-close する。
+    if (
+      ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS.has(planId) ||
+      ROUTE_MODE_KIND_LEGACY_LANDED_PLAN_IDS.has(planId)
+    ) {
+      return [
+        {
+          reason: "route_mode_kind_mismatch",
+          detail: "route_mode removed from ledgered debt plan (bypass attempt fails closed)",
+        },
+      ];
+    }
+    return [];
+  }
+  const allowedKinds = ROUTE_MODE_ALLOWED_KINDS[mode];
+  if (!allowedKinds) return [];
+
+  const kind = stringField(raw.kind) ?? "";
+  if (allowedKinds.includes(kind)) return [];
+
+  if (ROUTE_MODE_KIND_LEGACY_LANDED_PLAN_IDS.has(planId)) return [];
+  const status = stringField(raw.status) ?? "";
+  if (ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS.has(planId) && status === "draft") return [];
+
+  const debtNote = ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS.has(planId)
+    ? " (debt plan must be promoted to add-impl + Reverse pairing before leaving draft)"
+    : "";
+  return [
+    {
+      reason: "route_mode_kind_mismatch",
+      detail: `route_mode=${mode} allows kind=${allowedKinds.join("|")} but kind=${kind}${debtNote}`,
+    },
+  ];
+}
+
 function expectedArtifactTypeForPath(path: string): string | null {
   if (path.startsWith("docs/design/")) return "design_doc";
   if (path.startsWith("docs/test-design/")) return "test_design";
@@ -578,6 +624,9 @@ export function analyzePlanGovernance(
       violations.push({ file: entry.file, ...violation });
     }
     for (const violation of routeCertificateViolations(raw)) {
+      violations.push({ file: entry.file, ...violation });
+    }
+    for (const violation of routeModeKindViolations(raw, planId)) {
       violations.push({ file: entry.file, ...violation });
     }
 
