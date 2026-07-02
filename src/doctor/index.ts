@@ -843,14 +843,7 @@ export function checkForwardConvergenceAudit(repoRoot: string): {
   }
 }
 
-export function runDoctor(
-  deps: DoctorDeps = nodeDoctorDeps(process.cwd()),
-  options: DoctorOptions = {},
-): LintResult {
-  if (options.setupSmoke === true) return checkSetupSmoke(deps);
-
-  const d = detectMode();
-  // handover / agent-slots are warning surfaces. Verification profile is a hard gate.
+function collectDoctorChecks(deps: DoctorDeps, options: DoctorOptions = {}) {
   const backfill = checkBackfillResult(deps.repoRoot);
   const scrumRev = checkScrumReverse(deps.repoRoot);
   const planSupersession = checkPlanSupersession(deps.repoRoot);
@@ -937,12 +930,6 @@ export function runDoctor(
   // fail-close: spine-外 kind=impl の NEW 未集約 landed を gate (PLAN-DISCOVERY-08 Step5)。legacy は grandfather。
   const forwardConvergence = checkForwardConvergence(deps.repoRoot);
   const forwardConvergenceAudit = checkForwardConvergenceAudit(deps.repoRoot);
-  const leadingMessages = [
-    `doctor: mode=${d.mode} (claude=${d.claude}, codex=${d.codex})`,
-    checkHandover(deps),
-    ...checkHandoverDisciplineMessages(deps).map((m) => `doctor: handover-discipline — ${m}`),
-    checkAgentSlots(doctorSlotsDeps(deps)),
-  ];
 
   const checks = [
     backfill,
@@ -1021,6 +1008,25 @@ export function runDoctor(
     forwardConvergence,
     forwardConvergenceAudit,
   ];
+
+  return checks;
+}
+
+export function runDoctor(
+  deps: DoctorDeps = nodeDoctorDeps(process.cwd()),
+  options: DoctorOptions = {},
+): LintResult {
+  if (options.setupSmoke === true) return checkSetupSmoke(deps);
+
+  const d = detectMode();
+  // handover / agent-slots are warning surfaces. Verification profile is a hard gate.
+  const leadingMessages = [
+    `doctor: mode=${d.mode} (claude=${d.claude}, codex=${d.codex})`,
+    checkHandover(deps),
+    ...checkHandoverDisciplineMessages(deps).map((m) => `doctor: handover-discipline — ${m}`),
+    checkAgentSlots(doctorSlotsDeps(deps)),
+  ];
+  const checks = collectDoctorChecks(deps, options);
 
   return buildDoctorResult({ leadingMessages, checks });
 }

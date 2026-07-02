@@ -777,6 +777,8 @@ describe("runDoctor", () => {
   it("keeps all hard gates wired into runDoctor hard-gate aggregation", () => {
     const source = readFileSync(join(process.cwd(), "src", "doctor", "index.ts"), "utf8");
     const checkAggregation = source.match(/const checks = \[([\s\S]*?)\];/)?.[1] ?? "";
+    expect(source).toContain("function collectDoctorChecks");
+    expect(source).toContain("const checks = collectDoctorChecks(deps, options)");
     const expectedHardGates = [
       "backfill",
       "scrumRev",
