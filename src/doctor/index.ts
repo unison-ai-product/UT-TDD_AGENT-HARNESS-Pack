@@ -30,14 +30,7 @@ import {
   cycleP4VerificationMessages,
   loadCycleP4VerificationDocs,
 } from "../lint/cycle-p4-verification";
-import {
-  analyzeDependencyDrift,
-  type DependencyDriftResult,
-  dependencyDriftMessages,
-  expandRegressionScope,
-  loadDependencyDriftInput,
-  regressionExpansionMessages,
-} from "../lint/dependency-drift";
+import { analyzeDependencyDrift, loadDependencyDriftInput } from "../lint/dependency-drift";
 import {
   analyzeDescentObligations,
   descentObligationMessages,
@@ -176,6 +169,7 @@ import {
 import { detectMode } from "../runtime/detect";
 import { loadOrBuildDriveDbRegistrationStats } from "../state-db/drive-registration";
 import { checkDbProjectionCoverage, checkDbProjectionIngestion } from "./db-projection";
+import { checkDependencyDrift, checkRegressionExpansion } from "./dependency-regression";
 import { checkDocConsistency, checkEntityCoverage, checkFrRegistryAudit } from "./doc-registry";
 import {
   checkBackfillResult,
@@ -218,6 +212,7 @@ import {
 } from "./workflow-quality";
 
 export { checkDbProjectionCoverage, checkDbProjectionIngestion } from "./db-projection";
+export { checkDependencyDrift, checkRegressionExpansion } from "./dependency-regression";
 export { checkDocConsistency, checkEntityCoverage, checkFrRegistryAudit } from "./doc-registry";
 export {
   checkBackfill,
@@ -497,14 +492,6 @@ export function checkChangeSetIntegrity(repoRoot: string): { messages: string[];
       messages: ["change-set-integrity - violation: change/dependency graph could not be read"],
       ok: false,
     };
-  }
-}
-
-function loadChangedFilesForDoctor(repoRoot: string): string[] {
-  try {
-    return loadChangedFiles(repoRoot);
-  } catch {
-    return [];
   }
 }
 
@@ -901,57 +888,6 @@ export function checkOracleTestTrace(repoRoot: string): { messages: string[]; ok
   } catch {
     return {
       messages: ["oracle-test-trace - violation: test-design/tests could not be read"],
-      ok: false,
-    };
-  }
-}
-
-export function checkDependencyDrift(repoRoot: string): {
-  messages: string[];
-  ok: boolean;
-  result: DependencyDriftResult | null;
-} {
-  if (!existsSync(repoRoot)) {
-    return {
-      messages: ["dependency-drift - violation: repo root could not be read"],
-      ok: false,
-      result: null,
-    };
-  }
-  try {
-    const result = analyzeDependencyDrift(loadDependencyDriftInput(repoRoot));
-    return { messages: dependencyDriftMessages(result), ok: result.ok, result };
-  } catch {
-    return {
-      messages: ["dependency-drift - violation: dependency graph could not be read"],
-      ok: false,
-      result: null,
-    };
-  }
-}
-
-export function checkRegressionExpansion(
-  repoRoot: string,
-  drift: DependencyDriftResult | null,
-): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return {
-      messages: ["regression-expansion - violation: repo root could not be read"],
-      ok: false,
-    };
-  }
-  if (drift == null) {
-    return {
-      messages: ["regression-expansion - violation: dependency drift result is unavailable"],
-      ok: false,
-    };
-  }
-  try {
-    const result = expandRegressionScope(drift, loadChangedFilesForDoctor(repoRoot));
-    return { messages: regressionExpansionMessages(result), ok: result.ok };
-  } catch {
-    return {
-      messages: ["regression-expansion - violation: regression scope could not be expanded"],
       ok: false,
     };
   }

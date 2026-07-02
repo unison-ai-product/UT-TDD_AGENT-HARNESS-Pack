@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  checkDependencyDrift as checkDependencyDriftAdapter,
+  checkRegressionExpansion as checkRegressionExpansionAdapter,
+} from "../src/doctor/dependency-regression";
+import {
   checkAgentSlots,
   checkAssetDrift,
   checkBackfillResult,
@@ -739,6 +743,20 @@ describe("runDoctor", () => {
     for (const [, result] of checks) {
       expect(result.messages.join("\n")).toMatch(/violation/i);
     }
+  });
+
+  it("keeps extracted dependency/regression doctor adapters fail-closed", () => {
+    const missingRoot = join(tmpdir(), `ut-tdd-doctor-dependency-missing-${Date.now()}-nope`);
+
+    expect(checkDependencyDriftAdapter(missingRoot)).toMatchObject({
+      ok: false,
+      result: null,
+      messages: ["dependency-drift - violation: repo root could not be read"],
+    });
+    expect(checkRegressionExpansionAdapter(missingRoot, null)).toMatchObject({
+      ok: false,
+      messages: ["regression-expansion - violation: repo root could not be read"],
+    });
   });
 
   it("skips change-impact / change-set-integrity in a non-git directory instead of failing closed", () => {

@@ -114,6 +114,7 @@ describe("L7 CLI surface closure", () => {
     const run = runCli(["doctor", "--help"]);
 
     expect(run.status).toBe(0);
+    expect(run.stdout).toContain("--setup-smoke");
     expect(run.stdout).toContain("--strict-telemetry-provenance");
     expect(run.stdout).toContain("--strict-green-command-digest");
   }, 15_000);
