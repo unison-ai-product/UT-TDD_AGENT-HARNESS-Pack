@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 統合検証 doctor (requirements_v1.2 §7 / §7.8.5)。
  * 多数の検出器 (back-fill / review-evidence / asset-drift / cycle-p4-verification / roadmap 等) を集約し、
  * gate 判定群を runDoctor.ok に連動させて fail-close する。handover / agent-slots は warning surface。
@@ -17,7 +17,6 @@ import {
   handoverStale,
 } from "../handover/index";
 import { analyzeAssetDrift, assetDriftMessages, loadAssetDriftInput } from "../lint/asset-drift";
-import { analyzeBackfill, backfillMessages, loadBackfillDocs } from "../lint/backfill-pairing";
 import { analyzeBranchKind, branchKindMessages, loadBranchKindInput } from "../lint/branch-kind";
 import {
   analyzeChangeImpact,
@@ -130,6 +129,11 @@ import {
   loadG10UxWorkflowInput,
 } from "../lint/g10-ux-workflow";
 import { analyzeGateConfirm, gateConfirmMessages, loadGateConfirmDocs } from "../lint/gate-confirm";
+import {
+  analyzeGithubCiPolicy,
+  githubCiPolicyMessages,
+  loadGithubCiPolicyDocs,
+} from "../lint/github-ci-policy";
 import { checkGreenCommandDigests } from "../lint/green-command-digest";
 import {
   analyzeImplPlanTrace,
@@ -183,28 +187,12 @@ import {
   loadPlanArtifactExistenceInput,
   planArtifactExistenceMessages,
 } from "../lint/plan-artifact-existence";
-import {
-  analyzePlanBodySubstance,
-  loadPlanBodySubstanceInput,
-  planBodySubstanceMessages,
-} from "../lint/plan-body-substance";
-import {
-  analyzePlanCompletionDrift,
-  loadPlanCompletionDriftInput,
-  planCompletionDriftMessages,
-} from "../lint/plan-completion-drift";
 import { analyzePlanDod, loadPlanDodDocs, planDodMessages } from "../lint/plan-dod";
-import {
-  analyzePlanSupersession,
-  loadSupersedePlans,
-  planSupersessionMessages,
-} from "../lint/plan-supersession";
 import {
   analyzeProjectHooks,
   loadProjectHookDocs,
   projectHookMessages,
 } from "../lint/project-hook";
-import { analyzePropagation, loadPropagationDocs, propagationMessages } from "../lint/propagation";
 import {
   analyzeProposalDocumentCoverage,
   loadProposalDocumentCoverageLintInput,
@@ -217,11 +205,6 @@ import {
   readabilityMessages,
   runtimeReadabilityMessages,
 } from "../lint/readability";
-import {
-  analyzeReviewEvidence,
-  loadReviewPlans,
-  reviewEvidenceMessages,
-} from "../lint/review-evidence";
 import {
   analyzeRightArmGatePlanning,
   loadRightArmGatePlanningInput,
@@ -252,7 +235,6 @@ import {
   loadScreenImplPairFreezeInput,
   screenImplPairFreezeMessages,
 } from "../lint/screen-impl-pair-freeze";
-import { analyzeScrumReverse, loadSrPlans, scrumReverseMessages } from "../lint/scrum-reverse";
 import { fmValue } from "../lint/shared";
 import {
   analyzeSkillAssignments,
@@ -297,10 +279,6 @@ import {
 } from "../runtime/agent-slots";
 import { detectMode } from "../runtime/detect";
 import { loadOrBuildDriveDbRegistrationStats } from "../state-db/drive-registration";
-import {
-  type GuardrailDecisionInput,
-  inspectGuardrailInvariants,
-} from "../state-db/guardrail-invariants";
 import type { HarnessDb } from "../state-db/index";
 import { openHarnessDb } from "../state-db/index";
 import { projectTokenUsage, rebuildHarnessDb } from "../state-db/projection-writer";
@@ -311,10 +289,35 @@ import {
   analyzeVerificationGroups,
   loadPairDocs,
   loadVerificationPlanEvidence,
-  pairFreezeMessages,
   verificationGroupMessages,
   verificationGroupsOk,
 } from "../vmodel/lint";
+import {
+  checkBackfillResult,
+  checkGuardrailInvariants,
+  checkPairFreeze,
+  checkPlanBodySubstance,
+  checkPlanCompletionDrift,
+  checkPlanSupersession,
+  checkPropagation,
+  checkReviewEvidence,
+  checkScrumReverse,
+} from "./plan-governance";
+
+export {
+  checkBackfill,
+  checkBackfillResult,
+  checkGuardrailInvariants,
+  checkPairFreeze,
+  checkPlanBodySubstance,
+  checkPlanCompletionDrift,
+  checkPlanSupersession,
+  checkPropagation,
+  checkReviewEvidence,
+  checkScrumReverse,
+} from "./plan-governance";
+
+import { checkSetupSmoke } from "./setup-smoke";
 
 /** I/O・clock 注入 (test 可能、handover staleness 検査用)。 */
 export interface DoctorDeps {
@@ -328,128 +331,6 @@ export interface DoctorOptions {
   strictTelemetryProvenance?: boolean;
   strictGreenCommandDigest?: boolean;
   setupSmoke?: boolean;
-}
-
-interface SetupSmokeCheck {
-  name: string;
-  ok: boolean;
-  message: string;
-}
-
-const SETUP_SMOKE_REQUIRED_FILES = [
-  ".ut-tdd/bin/ut-tdd.mjs",
-  "AGENTS.md",
-  "CLAUDE.md",
-  ".claude/CLAUDE.md",
-  ".claude/settings.json",
-  ".codex/config.toml",
-  ".codex/hooks.json",
-] as const;
-
-const SETUP_SMOKE_REQUIRED_COMMANDS = [
-  "bun .ut-tdd/bin/ut-tdd.mjs hook agent-guard",
-  "bun .ut-tdd/bin/ut-tdd.mjs hook work-guard",
-  "bun .ut-tdd/bin/ut-tdd.mjs session start",
-  "bun .ut-tdd/bin/ut-tdd.mjs hook post-tool-use",
-  "bun .ut-tdd/bin/ut-tdd.mjs session summary",
-] as const;
-
-const SETUP_SMOKE_CLAUDE_ONLY_COMMANDS = ["bun .ut-tdd/bin/ut-tdd.mjs hook subagent-stop"] as const;
-
-function collectHookCommands(raw: string | null): string[] | null {
-  if (raw === null) return null;
-  try {
-    const parsed = JSON.parse(raw) as {
-      hooks?: Record<string, { hooks?: { command?: string }[] }[]>;
-    };
-    return Object.values(parsed.hooks ?? {}).flatMap((entries) =>
-      (entries ?? []).flatMap((entry) =>
-        (entry.hooks ?? []).map((hook) => hook.command ?? "").filter(Boolean),
-      ),
-    );
-  } catch {
-    return null;
-  }
-}
-
-function checkSetupSmoke(deps: DoctorDeps): { ok: boolean; messages: string[] } {
-  const checks: SetupSmokeCheck[] = [];
-  for (const file of SETUP_SMOKE_REQUIRED_FILES) {
-    checks.push({
-      name: file,
-      ok: deps.readText(join(deps.repoRoot, file)) !== null,
-      message: file,
-    });
-  }
-
-  const wrapper = deps.readText(join(deps.repoRoot, ".ut-tdd/bin/ut-tdd.mjs"));
-  checks.push({
-    name: "wrapper-placeholder-free",
-    ok: wrapper !== null && !/UT_TDD_SOURCE_CLI_JSON|__UT_TDD|placeholder/i.test(wrapper),
-    message: "project-local wrapper has no template placeholder residue",
-  });
-
-  const claudeCommands = collectHookCommands(
-    deps.readText(join(deps.repoRoot, ".claude/settings.json")),
-  );
-  const codexCommands = collectHookCommands(
-    deps.readText(join(deps.repoRoot, ".codex/hooks.json")),
-  );
-  checks.push({
-    name: "claude-hooks-json",
-    ok: claudeCommands !== null,
-    message: "Claude adapter hook JSON parses",
-  });
-  checks.push({
-    name: "codex-hooks-json",
-    ok: codexCommands !== null,
-    message: "Codex adapter hook JSON parses",
-  });
-
-  for (const command of SETUP_SMOKE_REQUIRED_COMMANDS) {
-    checks.push({
-      name: `claude-hook:${command}`,
-      ok: (claudeCommands ?? []).includes(command),
-      message: command,
-    });
-    checks.push({
-      name: `codex-hook:${command}`,
-      ok: (codexCommands ?? []).includes(command),
-      message: command,
-    });
-  }
-  for (const command of SETUP_SMOKE_CLAUDE_ONLY_COMMANDS) {
-    checks.push({
-      name: `claude-hook:${command}`,
-      ok: (claudeCommands ?? []).includes(command),
-      message: command,
-    });
-  }
-  const combinedCommands = [...(claudeCommands ?? []), ...(codexCommands ?? [])];
-  checks.push({
-    name: "portable-hook-paths",
-    ok:
-      combinedCommands.length > 0 &&
-      combinedCommands.every(
-        (command) =>
-          command.includes(".ut-tdd/bin/ut-tdd.mjs") &&
-          !command.includes("$CLAUDE_PROJECT_DIR") &&
-          !/[\\/]\\.codex[\\/]/i.test(command),
-      ),
-    message: "hooks use project-local wrapper and avoid runtime/global paths",
-  });
-
-  const failed = checks.filter((check) => !check.ok);
-  const result = {
-    ok: failed.length === 0,
-    messages: [
-      `doctor: setup-smoke - ${failed.length === 0 ? "OK" : "violation"} (checked=${checks.length}, failed=${failed.length})`,
-      ...failed
-        .slice(0, 12)
-        .map((check) => `doctor: setup-smoke - missing ${check.name}: ${check.message}`),
-    ],
-  };
-  return result;
 }
 
 function handoverDeps(deps: DoctorDeps): HandoverDeps {
@@ -512,252 +393,6 @@ export function checkAgentSlots(deps: AgentSlotsDeps): string {
  * 駆動モデルの back-fill 完全性 (impl⇔Reverse / impl⇔glossary) を検査 (IMP-051、hard)。
  * Reverse 無き impl / §6 用語の glossary 未 merge を violation にして doctor.ok に連動する。
  */
-export function checkBackfillResult(repoRoot: string): { messages: string[]; ok: boolean } {
-  try {
-    const docs = loadBackfillDocs(repoRoot);
-    const r = analyzeBackfill(docs.plans, docs.glossaryText, docs.auditedLegacyIds);
-    return { messages: backfillMessages(r), ok: r.ok };
-  } catch {
-    return { messages: ["backfill - violation: PLAN/glossary could not be read"], ok: false };
-  }
-}
-
-/** 後方互換: messages のみ返す薄いラッパ。 */
-export function checkBackfill(repoRoot: string): string[] {
-  return checkBackfillResult(repoRoot).messages;
-}
-
-/**
- * PoC confirmed ⇔ Reverse 合流の整合を surface (IMP-064、hard fail)。
- * confirmed poc (redesign 除く) の Reverse 孤児 / reverse が confirmed でない poc を参照 → ok=false。
- * I/O 失敗も violation にして fail-close する。
- */
-export function checkScrumReverse(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return { messages: ["scrum-reverse - violation: repo root could not be read"], ok: false };
-  }
-  try {
-    const r = analyzeScrumReverse(loadSrPlans(repoRoot));
-    return { messages: scrumReverseMessages(r), ok: r.ok };
-  } catch {
-    return { messages: ["scrum-reverse - violation: PLAN could not be read"], ok: false };
-  }
-}
-
-/**
- * PLAN errata の双方向整合を surface (PLAN-L7-89、hard fail)。`supersedes` 宣言の先が実在しない /
- * 原 PLAN に訂正 back-reference が無い → ok=false。I/O 失敗も violation にして fail-close する。
- */
-export function checkPlanSupersession(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return { messages: ["plan-supersession - violation: repo root could not be read"], ok: false };
-  }
-  try {
-    const r = analyzePlanSupersession(loadSupersedePlans(repoRoot));
-    return { messages: planSupersessionMessages(r), ok: r.ok };
-  } catch {
-    return { messages: ["plan-supersession - violation: PLAN could not be read"], ok: false };
-  }
-}
-
-/**
- * PLAN 本文 substance を surface (PLAN-L7-92、hard fail)。frontmatter + タイトルのみで本文実体行 0 の
- * declare-only hollow PLAN (concept AP-13 無効) → ok=false。I/O 失敗も violation にして fail-close する。
- */
-export function checkPlanBodySubstance(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return {
-      messages: ["plan-body-substance - violation: repo root could not be read"],
-      ok: false,
-    };
-  }
-  try {
-    const r = analyzePlanBodySubstance(loadPlanBodySubstanceInput(repoRoot));
-    return { messages: planBodySubstanceMessages(r), ok: r.ok };
-  } catch {
-    return { messages: ["plan-body-substance - violation: PLAN could not be read"], ok: false };
-  }
-}
-
-/**
- * DoD 全消化済なのに status 非終端の PLAN を surface (PLAN-L7-93、hard fail)。完了 bookkeeping drift
- * (作業完了 + gated downstream confirmed なのに recovery/poc PLAN 自身が draft 放置) → ok=false。
- * I/O 失敗も violation にして fail-close する。
- */
-export function checkPlanCompletionDrift(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return {
-      messages: ["plan-completion-drift - violation: repo root could not be read"],
-      ok: false,
-    };
-  }
-  try {
-    const r = analyzePlanCompletionDrift(loadPlanCompletionDriftInput(repoRoot));
-    return { messages: planCompletionDriftMessages(r), ok: r.ok };
-  } catch {
-    return { messages: ["plan-completion-drift - violation: PLAN could not be read"], ok: false };
-  }
-}
-
-/**
- * concept §2.6 ⇔ requirements §7.8.1 の signal 語彙伝播を surface (IMP-065、hard fail)。
- * 上位正本 (concept) と機械 routing SSoT (requirements) の signal 集合が乖離 → ok=false。
- * I/O 失敗も violation にして fail-close する。
- */
-export function checkPropagation(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return { messages: ["propagation - violation: repo root could not be read"], ok: false };
-  }
-  try {
-    const d = loadPropagationDocs(repoRoot);
-    const r = analyzePropagation(d.conceptText, d.requirementsText);
-    return { messages: propagationMessages(r), ok: r.ok };
-  } catch {
-    return { messages: ["propagation - violation: governance docs could not be read"], ok: false };
-  }
-}
-
-/**
- * 設計層 pair freeze (design⇔test-design の pair_artifact 双方向・孤児0) を検査 (IMP-067、hard)。
- * 孤児 (pair-missing/ref-unresolved/trace-orphan) を violation にして doctor.ok に連動する。
- */
-export function checkPairFreeze(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return { messages: ["pair-freeze - violation: repo root could not be read"], ok: false };
-  }
-  try {
-    const r = analyzePairFreeze(loadPairDocs(repoRoot));
-    return { messages: pairFreezeMessages(r), ok: r.ok };
-  } catch {
-    return {
-      messages: ["pair-freeze - violation: design/test-design docs could not be read"],
-      ok: false,
-    };
-  }
-}
-
-/**
- * review 前置証跡 (review_evidence) の完全性を検査 (IMP-071、hard 判定)。
- * confirmed/completed の design/impl/add-* PLAN が review_evidence を持たない (review 前置スキップ) を検知する。
- * **hard 判定** (ok=false → runDoctor.ok 連動で fail-close、IMP-071 hard 化 2026-06-05)。実 repo 履歴 15 件の
- * back-fill 完了 (missing 0 安定) を確認してから hard へ昇格した。review-skip の silent 化を機械で塞ぐ。
- * I/O 失敗も violation にして fail-close する。
- */
-export function checkReviewEvidence(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return { messages: ["review-evidence - violation: repo root could not be read"], ok: false };
-  }
-  try {
-    const r = analyzeReviewEvidence(loadReviewPlans(repoRoot));
-    return { messages: reviewEvidenceMessages(r), ok: r.ok };
-  } catch {
-    return { messages: ["review-evidence - violation: PLAN could not be read"], ok: false };
-  }
-}
-
-/**
- * guardrail 不変条件の hard doctor gate (PLAN-L7-52 C-1 option A、warn-first Phase 0 →
- * hard Phase 2 昇格。PO /goal 承認 2026-06-15)。これまで projectGuardrailInvariantAdvisories
- * が severity=warn の非ブロック advisory として surface するだけだった同一ロジックを、ok=false の
- * fail-close gate に昇格する。
- * harness.db に依存せず、committed の PLAN frontmatter review_evidence から再計算する。
- * 各 entry に inspectGuardrailInvariants (state-db guardrail-invariants SSoT) を適用し、
- * violation (secret-evidence / same-model-self-review / human-required-without-evidence) が
- * あれば ok=false。空文字列の reviewer_model / worker_model は undefined に正規化して
- * same-model 誤検知を防ぐ (= 両 model が明示・同一のときだけ発火)。
- *
- * **review_kind scoping (concept §2.1.2.1)**: same-model-self-review は
- * `review_kind=cross_agent` (別 runtime/別モデルの独立性を僭称するレビュー) のみ hard-block する。
- * intra_runtime_subagent は単体 runtime (claude-only/codex-only) の正規 review tier で同一モデルが
- * 設計上許容される (cross-provider 要件に数えないだけ) ため block しない。secret-evidence /
- * human-required-without-evidence は review_kind 非依存で常に適用。
- *
- * checkReviewEvidence との関係: checkReviewEvidence も cross_agent entry の same-model/欠落を
- * crossReviewViolations で hard 判定する。本 gate は同じ cross_agent same-model を
- * guardrail-invariants SSoT 経由で defense-in-depth に再担保しつつ、SSoT が持つ secret-evidence /
- * human-required-without-evidence 不変条件 (recordGuardrailDecision 書込経路と共有) も review_evidence
- * 面で hard 化する。runtime guardrail decision (recordGuardrailDecision) 経路の本番配線は C-1 carry。
- */
-export function checkGuardrailInvariants(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return {
-      messages: ["guardrail-invariants - violation: repo root could not be read"],
-      ok: false,
-    };
-  }
-  try {
-    const plans = loadReviewPlans(repoRoot);
-    const violations: {
-      rule: string;
-      planId: string;
-      reviewerModel?: string;
-      workerModel?: string;
-    }[] = [];
-    for (const plan of plans) {
-      if (plan.status === "archived") continue;
-      // plan.crossEntries は parseReviewPlan → extractReviewEntries で既に populate 済み。
-      // re-read せず直接使う (loader 再利用方針、重複 I/O 回避)。
-      for (const entry of plan.crossEntries) {
-        const reviewerModel = entry.reviewer_model?.trim() || undefined;
-        const workerModel = entry.worker_model?.trim() || undefined;
-        const input: GuardrailDecisionInput = {
-          plan_id: plan.plan_id,
-          session_id: "",
-          guardrail: "review-evidence",
-          decision: "allow",
-          mode: "review",
-          evidence_path: plan.file,
-          reviewer_model: reviewerModel,
-          worker_model: workerModel,
-        };
-        const inspection = inspectGuardrailInvariants(input);
-        for (const v of inspection.violations) {
-          // same_model_approval: forbidden は concept §2.1.2.1 (line 181/1224) より
-          // **review_kind=cross_agent (独立性を僭称するレビュー) のみ**に適用する。
-          // intra_runtime_subagent は単体 runtime (claude-only / codex-only) の正規 fallback で
-          // 「同一モデルである事実を記録し cross-provider 要件に数えない」設計 (line 188 = codex-only は
-          // intra_runtime_subagent を hard 必須)。ここを全 review_kind に hard-block すると codex-only
-          // mode が永久に doctor を通れなくなる。cross_agent 限定は checkReviewEvidence の
-          // crossReviewViolations scoping とも一致 (核心ルール 1 の静的担保)。
-          // secret-evidence / human-required-without-evidence は review_kind 非依存で評価される
-          // (この review_evidence 経路では evidence_path=plan.file(非 secret) / decision=allow 固定の
-          //  ため発火条件を満たさないが、SSoT のロジック自体は適用されている)。
-          if (
-            (v.rule === "same-model-self-review" || v.rule === "same-provider-cross-review") &&
-            entry.review_kind !== "cross_agent"
-          ) {
-            continue;
-          }
-          violations.push({
-            rule: v.rule,
-            planId: plan.plan_id,
-            reviewerModel,
-            workerModel,
-          });
-        }
-      }
-    }
-    if (violations.length === 0) {
-      return {
-        messages: ["guardrail-invariants — OK (review_evidence 全 entry でインバリアント違反なし)"],
-        ok: true,
-      };
-    }
-    return {
-      messages: violations.map(
-        (v) =>
-          `guardrail-invariants - violation: rule=${v.rule} plan_id=${v.planId} reviewer=${v.reviewerModel ?? "(none)"} worker=${v.workerModel ?? "(none)"}`,
-      ),
-      ok: false,
-    };
-  } catch {
-    return {
-      messages: ["guardrail-invariants - violation: PLAN review_evidence could not be read"],
-      ok: false,
-    };
-  }
-}
-
 /**
  * architecture §3.1 設計 module 集合 ⊇ src/ 実在 module を検査 (IMP-075、hard)。
  * 実在するが設計 doc 未列挙 (= impl→design back-fill 漏れ) を violation にして doctor.ok に連動する。
@@ -1385,6 +1020,21 @@ export function checkProjectHooks(repoRoot: string): { messages: string[]; ok: b
   } catch {
     return {
       messages: ["project-hook - violation: project hook settings could not be read"],
+      ok: false,
+    };
+  }
+}
+
+export function checkGithubCiPolicy(repoRoot: string): { messages: string[]; ok: boolean } {
+  if (!existsSync(repoRoot)) {
+    return { messages: ["github-ci-policy - violation: repo root could not be read"], ok: false };
+  }
+  try {
+    const r = analyzeGithubCiPolicy(loadGithubCiPolicyDocs(repoRoot));
+    return { messages: githubCiPolicyMessages(r), ok: r.ok };
+  } catch {
+    return {
+      messages: ["github-ci-policy - violation: GitHub workflow policy could not be read"],
       ok: false,
     };
   }
@@ -2232,6 +1882,7 @@ export function runDoctor(
   const cycleP4Verification = checkCycleP4Verification(deps.repoRoot);
   const l14CloseAudit = checkL14CloseAudit(deps.repoRoot);
   const projectHooks = checkProjectHooks(deps.repoRoot);
+  const githubCiPolicy = checkGithubCiPolicy(deps.repoRoot);
   const codexHookAdapter = checkCodexHookAdapter(deps.repoRoot);
   const codexWrapperParity = checkCodexWrapperParity(deps);
   const l6FrCoverage = checkL6FrCoverage(deps.repoRoot);
@@ -2324,6 +1975,7 @@ export function runDoctor(
       runtimeReadability.ok &&
       feedbackLog.ok &&
       projectHooks.ok &&
+      githubCiPolicy.ok &&
       codexHookAdapter.ok &&
       codexWrapperParity.ok &&
       l6Completion.ok &&
@@ -2397,6 +2049,7 @@ export function runDoctor(
       ...cycleP4Verification.messages.map((m) => `doctor: ${m}`),
       ...l14CloseAudit.messages.map((m) => `doctor: ${m}`),
       ...projectHooks.messages.map((m) => `doctor: ${m}`),
+      ...githubCiPolicy.messages.map((m) => `doctor: ${m}`),
       ...codexHookAdapter.messages.map((m) => `doctor: ${m}`),
       ...codexWrapperParity.messages.map((m) => `doctor: ${m}`),
       ...l6FrCoverage.messages.map((m) => `doctor: ${m}`),

@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { buildBranchProtectionPayload } from "../src/setup/branch-protection";
 import {
   applyBranchProtection,
   buildCleanDistributionPlan,
@@ -976,6 +977,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       required_pull_request_reviews: { required_approving_review_count: 1 },
       restrictions: null,
     });
+    expect(payload).toEqual(buildBranchProtectionPayload());
   });
 
   it("U-SETUP-007: runSetup 優先順 (flag > confirm > fallback) + 非対話 apply 封鎖", () => {
