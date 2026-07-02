@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildReleasePublicationPlan, evaluateGithubOpsGuard } from "../src/github/ops-guard";
+import {
+  buildReleasePublicationPlan,
+  evaluateGithubOpsGuard,
+  normalizeBranchRef,
+} from "../src/github/ops-guard";
 
 describe("github ops guard", () => {
   it("blocks poc branches from merging directly to main", () => {
@@ -11,6 +15,35 @@ describe("github ops guard", () => {
 
     expect(result.ok).toBe(false);
     expect(result.findings).toContainEqual(expect.objectContaining({ code: "poc-no-main-merge" }));
+  });
+
+  it("normalizes local and GitHub branch refs before branch-type decisions", () => {
+    expect(normalizeBranchRef("refs/heads/poc/try-runtime")).toBe("poc/try-runtime");
+    expect(normalizeBranchRef("refs/remotes/origin/hotfix/prod-regression")).toBe(
+      "hotfix/prod-regression",
+    );
+    expect(normalizeBranchRef("remotes/origin/poc/try-runtime")).toBe("poc/try-runtime");
+    expect(normalizeBranchRef("origin/feature/github-ops")).toBe("feature/github-ops");
+
+    const poc = evaluateGithubOpsGuard({
+      headRef: "remotes/origin/poc/try-runtime",
+      baseRef: "refs/heads/main",
+      commitSubjects: ["feat: test runtime idea"],
+    });
+    expect(poc.branchType).toBe("poc");
+    expect(poc.findings).toContainEqual(expect.objectContaining({ code: "poc-no-main-merge" }));
+
+    const hotfix = evaluateGithubOpsGuard({
+      headRef: "refs/remotes/origin/hotfix/prod-regression",
+      baseRef: "origin/main",
+      prTitle: "fix: patch production regression",
+      prBody: "## Summary\nPatch only.",
+      commitSubjects: ["fix: patch production regression"],
+    });
+    expect(hotfix.branchType).toBe("hotfix");
+    expect(hotfix.findings).toContainEqual(
+      expect.objectContaining({ code: "hotfix-postmortem-missing" }),
+    );
   });
 
   it("requires postmortem evidence for hotfix branches to main", () => {

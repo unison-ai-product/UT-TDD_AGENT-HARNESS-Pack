@@ -71,6 +71,19 @@ const PACK_REQUIRED_STEPS = [
   { label: "setup smoke doctor", any: ["doctor --setup-smoke"] },
 ] as const;
 
+function inferGithubCiProfile(file: string, content: string): GithubWorkflowDoc["profile"] {
+  if (file.endsWith(join("common", "pack-harness-check.yml"))) return "pack";
+  if (file.endsWith(join("common", "harness-check.yml"))) return "source";
+  if (
+    content.includes("bun run test:pack") ||
+    content.includes("setup --solo") ||
+    content.includes("doctor --setup-smoke")
+  ) {
+    return "pack";
+  }
+  return "source";
+}
+
 function valuesContain(value: unknown, needle: string): boolean {
   if (typeof value === "string") return value.includes(needle);
   if (Array.isArray(value)) return value.some((entry) => valuesContain(entry, needle));
@@ -195,22 +208,21 @@ export function analyzeGithubCiPolicy(docs: GithubWorkflowDoc[]): GithubCiPolicy
 
 export function loadGithubCiPolicyDocs(repoRoot: string = process.cwd()): GithubWorkflowDoc[] {
   const candidates: GithubWorkflowDoc[] = [];
-  const source = join(repoRoot, ".github", "workflows", "harness-check.yml");
-  if (existsSync(source)) {
+  const addCandidate = (relativeFile: string) => {
+    const absoluteFile = join(repoRoot, relativeFile);
+    if (!existsSync(absoluteFile)) return;
+    const content = readFileSync(absoluteFile, "utf8");
+    const profile = inferGithubCiProfile(relativeFile, content);
+    if (candidates.some((candidate) => candidate.profile === profile)) return;
     candidates.push({
-      file: join(".github", "workflows", "harness-check.yml"),
-      content: readFileSync(source, "utf8"),
-      profile: "source",
+      file: relativeFile,
+      content,
+      profile,
     });
-  }
-  const pack = join(repoRoot, "docs", "templates", "github", "common", "pack-harness-check.yml");
-  if (existsSync(pack)) {
-    candidates.push({
-      file: join("docs", "templates", "github", "common", "pack-harness-check.yml"),
-      content: readFileSync(pack, "utf8"),
-      profile: "pack",
-    });
-  }
+  };
+  addCandidate(join(".github", "workflows", "harness-check.yml"));
+  addCandidate(join("docs", "templates", "github", "common", "harness-check.yml"));
+  addCandidate(join("docs", "templates", "github", "common", "pack-harness-check.yml"));
   return candidates;
 }
 

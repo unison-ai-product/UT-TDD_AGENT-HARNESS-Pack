@@ -38,8 +38,17 @@ export interface ReleasePublicationPlan {
 const CONVENTIONAL_COMMIT_RE =
   /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([a-z0-9._-]+\))?!?: .{1,200}$/;
 
+export function normalizeBranchRef(ref: string): string {
+  return ref
+    .trim()
+    .replace(/^refs\/heads\//, "")
+    .replace(/^refs\/remotes\//, "")
+    .replace(/^remotes\//, "")
+    .replace(/^origin\//, "");
+}
+
 function branchType(ref: string): string {
-  return ref.split("/", 1)[0] || "none";
+  return normalizeBranchRef(ref).split("/", 1)[0] || "none";
 }
 
 function hasPostmortem(text: string): boolean {
@@ -49,10 +58,11 @@ function hasPostmortem(text: string): boolean {
 export function evaluateGithubOpsGuard(input: GithubOpsGuardInput): GithubOpsGuardResult {
   const headRef = input.headRef.trim();
   const baseRef = input.baseRef.trim();
+  const normalizedBaseRef = normalizeBranchRef(baseRef);
   const type = branchType(headRef);
   const findings: GithubOpsGuardFinding[] = [];
 
-  if (type === "poc" && baseRef === "main") {
+  if (type === "poc" && normalizedBaseRef === "main") {
     findings.push({
       code: "poc-no-main-merge",
       severity: "error",
@@ -61,7 +71,7 @@ export function evaluateGithubOpsGuard(input: GithubOpsGuardInput): GithubOpsGua
     });
   }
 
-  if (type === "hotfix" && baseRef === "main") {
+  if (type === "hotfix" && normalizedBaseRef === "main") {
     const text = `${input.prTitle ?? ""}\n${input.prBody ?? ""}`;
     if (!hasPostmortem(text)) {
       findings.push({

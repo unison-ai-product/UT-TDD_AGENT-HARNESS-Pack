@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   analyzeGithubCiPolicy,
@@ -68,12 +71,66 @@ function docs(source = SOURCE_WORKFLOW, pack = PACK_WORKFLOW): GithubWorkflowDoc
 }
 
 describe("github-ci-policy lint", () => {
-  it("accepts the repository source and Pack harness-check workflows", () => {
-    const result = analyzeGithubCiPolicy(loadGithubCiPolicyDocs(process.cwd()));
+  it("accepts canonical source and Pack harness-check workflows", () => {
+    const result = analyzeGithubCiPolicy(docs());
 
     expect(result.ok).toBe(true);
     expect(result.violations).toEqual([]);
     expect(githubCiPolicyMessages(result)[0]).toContain("source+pack harness-check gates");
+  });
+
+  it("loads source checkouts where .github contains the source workflow", () => {
+    const repo = mkdtempSync(join(tmpdir(), "ut-tdd-github-ci-policy-"));
+    try {
+      mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+      mkdirSync(join(repo, "docs", "templates", "github", "common"), { recursive: true });
+      writeFileSync(join(repo, ".github", "workflows", "harness-check.yml"), SOURCE_WORKFLOW);
+      writeFileSync(
+        join(repo, "docs", "templates", "github", "common", "pack-harness-check.yml"),
+        PACK_WORKFLOW,
+      );
+
+      const docs = loadGithubCiPolicyDocs(repo);
+      const result = analyzeGithubCiPolicy(docs);
+
+      expect(docs.map((doc) => [doc.file, doc.profile])).toEqual([
+        [join(".github", "workflows", "harness-check.yml"), "source"],
+        [join("docs", "templates", "github", "common", "pack-harness-check.yml"), "pack"],
+      ]);
+      expect(result.ok).toBe(true);
+      expect(result.violations).toEqual([]);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("loads Pack checkouts where .github contains the Pack workflow", () => {
+    const repo = mkdtempSync(join(tmpdir(), "ut-tdd-github-ci-policy-"));
+    try {
+      mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+      mkdirSync(join(repo, "docs", "templates", "github", "common"), { recursive: true });
+      writeFileSync(join(repo, ".github", "workflows", "harness-check.yml"), PACK_WORKFLOW);
+      writeFileSync(
+        join(repo, "docs", "templates", "github", "common", "harness-check.yml"),
+        SOURCE_WORKFLOW,
+      );
+      writeFileSync(
+        join(repo, "docs", "templates", "github", "common", "pack-harness-check.yml"),
+        PACK_WORKFLOW,
+      );
+
+      const docs = loadGithubCiPolicyDocs(repo);
+      const result = analyzeGithubCiPolicy(docs);
+
+      expect(docs.map((doc) => [doc.file, doc.profile])).toEqual([
+        [join(".github", "workflows", "harness-check.yml"), "pack"],
+        [join("docs", "templates", "github", "common", "harness-check.yml"), "source"],
+      ]);
+      expect(result.ok).toBe(true);
+      expect(result.violations).toEqual([]);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it("requires source CI to keep full doctor in the required status check", () => {
