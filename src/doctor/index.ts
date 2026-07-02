@@ -123,15 +123,6 @@ import {
 } from "../lint/plan-artifact-existence";
 import { analyzePlanDod, loadPlanDodDocs, planDodMessages } from "../lint/plan-dod";
 import {
-  analyzeProgramCoverage,
-  checkSpanExistence,
-  computeGateProgress,
-  computeProgramRollup,
-  loadRoadmaps,
-  PARKED_BANDS,
-  programCoverageMessages,
-} from "../lint/roadmap-registry";
-import {
   analyzeRuleAutomationClosure,
   loadRuleAutomationClosureDocs,
   ruleAutomationClosureMessages,
@@ -141,7 +132,6 @@ import {
   loadScreenImplPairFreezeInput,
   screenImplPairFreezeMessages,
 } from "../lint/screen-impl-pair-freeze";
-import { fmValue } from "../lint/shared";
 import {
   analyzeSkillAssignments,
   loadSkillAssignmentDocs,
@@ -185,14 +175,6 @@ import {
 } from "../runtime/agent-slots";
 import { detectMode } from "../runtime/detect";
 import { loadOrBuildDriveDbRegistrationStats } from "../state-db/drive-registration";
-import {
-  analyzePairFreeze,
-  analyzeVerificationGroups,
-  loadPairDocs,
-  loadVerificationPlanEvidence,
-  verificationGroupMessages,
-  verificationGroupsOk,
-} from "../vmodel/lint";
 import { checkDbProjectionCoverage, checkDbProjectionIngestion } from "./db-projection";
 import { checkDocConsistency, checkEntityCoverage, checkFrRegistryAudit } from "./doc-registry";
 import {
@@ -206,6 +188,7 @@ import {
   checkReviewEvidence,
   checkScrumReverse,
 } from "./plan-governance";
+import { checkRoadmap, checkVerificationGroupsResult } from "./roadmap-verification";
 import {
   checkCodingRules,
   checkDddTddRules,
@@ -247,6 +230,11 @@ export {
   checkReviewEvidence,
   checkScrumReverse,
 } from "./plan-governance";
+export {
+  checkRoadmap,
+  checkVerificationGroups,
+  checkVerificationGroupsResult,
+} from "./roadmap-verification";
 export {
   checkCodingRules,
   checkDddTddRules,
@@ -917,74 +905,6 @@ export function checkOracleTestTrace(repoRoot: string): { messages: string[]; ok
   }
 }
 
-/** 工程表 (登録 roadmap) の span 実在 + 層内ゲート進捗を hard gate として検査する。 */
-export function checkRoadmap(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return { messages: ["roadmap - violation: repo root could not be read"], ok: false };
-  }
-  try {
-    const records = loadRoadmaps(repoRoot);
-    // 全プログラム被覆 (program coverage): 登録工程表が forward 全バンドを被覆するか。
-    // PLAN-RECOVERY-04 工程表定義 = 人間向け全プログラム台帳。登録 0 は hard violation。
-    const coverageMessages = programCoverageMessages(
-      analyzeProgramCoverage(records, new Set(PARKED_BANDS.keys())),
-    );
-    if (records.length === 0) {
-      return {
-        messages: [
-          "roadmap - violation: 登録工程表なし (master-hub roadmap block 未使用)",
-          ...coverageMessages,
-        ],
-        ok: false,
-      };
-    }
-    // I-1: 各 PLAN を 1 回だけ読み id→status を構築 (二重 readFile 解消)。
-    const dir = join(repoRoot, "docs", "plans");
-    const known = new Set<string>();
-    const statusMap = new Map<string, string>();
-    for (const f of readdirSync(dir).filter((x) => x.endsWith(".md"))) {
-      const content = readFileSync(join(dir, f), "utf8");
-      const id = fmValue(content, "plan_id");
-      if (id) {
-        known.add(id);
-        statusMap.set(id, fmValue(content, "status") ?? "draft");
-      }
-    }
-    const messages: string[] = [];
-    let issueCount = 0;
-    for (const rec of records) {
-      const spanIssues = checkSpanExistence(rec.roadmap, known);
-      issueCount += spanIssues.length + rec.errors.length;
-      const progress = computeGateProgress(rec.roadmap, (id) => statusMap.get(id) ?? null);
-      const reached = progress.filter((g) => g.reached).length;
-      messages.push(
-        `roadmap — ${rec.planId} [${rec.roadmap.layer}]: gates ${reached}/${progress.length} 到達, spans ${rec.roadmap.spans.length}, 孤児 span ${spanIssues.length}, 構造 issue ${rec.errors.length}`,
-      );
-      for (const gi of progress) {
-        messages.push(
-          `  ${gi.gateId}: ${gi.reached ? "✅ reached" : "pending"} (${gi.confirmedSpans}/${gi.totalSpans} span reached: confirmed/completed)`,
-        );
-      }
-      for (const si of spanIssues) messages.push(`  ⚠ ${si}`);
-      for (const e of rec.errors) messages.push(`  ⚠ 構造: ${e}`);
-    }
-    const rollup = computeProgramRollup(
-      records,
-      (id) => statusMap.get(id) ?? null,
-      new Set(PARKED_BANDS.keys()),
-    );
-    messages.push(
-      `roadmap-rollup — bands ${rollup.coveredBands}/${rollup.totalBands} covered (park ${rollup.parkedBands}, uncovered ${rollup.uncoveredBands}) / gates ${rollup.reachedGates}/${rollup.totalGates} reached / spans ${rollup.confirmedSpans}/${rollup.totalSpans} / frontier: ${rollup.frontier.length ? rollup.frontier.join(", ") : "なし"}`,
-    );
-    messages.push(...coverageMessages);
-    const coverageOk =
-      analyzeProgramCoverage(records, new Set(PARKED_BANDS.keys())).uncovered.length === 0;
-    return { messages, ok: issueCount === 0 && coverageOk };
-  } catch {
-    return { messages: ["roadmap - violation: 工程表を読めず検査できない"], ok: false };
-  }
-}
-
 export function checkDependencyDrift(repoRoot: string): {
   messages: string[];
   ok: boolean;
@@ -1034,27 +954,6 @@ export function checkRegressionExpansion(
       ok: false,
     };
   }
-}
-
-export function checkVerificationGroupsResult(repoRoot: string): {
-  messages: string[];
-  ok: boolean;
-} {
-  try {
-    const docs = loadPairDocs(repoRoot);
-    const { orphans } = analyzePairFreeze(docs);
-    const groups = analyzeVerificationGroups(docs, orphans, loadVerificationPlanEvidence(repoRoot));
-    return { messages: verificationGroupMessages(groups), ok: verificationGroupsOk(groups) };
-  } catch {
-    return {
-      messages: ["verification — violation: verification group lint could not run"],
-      ok: false,
-    };
-  }
-}
-
-export function checkVerificationGroups(repoRoot: string): string[] {
-  return checkVerificationGroupsResult(repoRoot).messages;
 }
 
 /** doctor 用に agent-slots deps を node I/O で構築 (now 固定は test 注入)。 */
