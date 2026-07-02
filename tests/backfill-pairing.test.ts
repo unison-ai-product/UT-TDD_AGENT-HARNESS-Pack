@@ -23,6 +23,7 @@ function plan(over: Partial<ParsedPlan> = {}): ParsedPlan {
     updated: "2026-06-21",
     backpropDecision: "",
     backpropDecisionReason: "",
+    parent: "",
     requires: [],
     glossaryTerms: [],
     ...over,
@@ -207,6 +208,51 @@ describe("U-BACKFILL-004a required backfill bidirectional pairing", () => {
     expect(r.reverseOrphans).toEqual([]);
     expect(r.reverseLinkMissing).toEqual([]);
     expect(r.ok).toBe(true);
+  });
+
+  it("new required add-impl can be paired by Reverse parent without draft requires deadlock", () => {
+    const plans = [
+      plan({
+        plan_id: "PLAN-L7-263-route-mode-kind-certificate",
+        kind: "add-impl",
+        status: "draft",
+        updated: "2026-07-02",
+      }),
+      plan({
+        plan_id: "PLAN-REVERSE-263-route-mode-kind-backfill",
+        kind: "reverse",
+        status: "draft",
+        updated: "2026-07-02",
+        parent: "docs/plans/PLAN-L7-263-route-mode-kind-certificate.md",
+      }),
+    ];
+    const r = analyzeBackfill(plans, glossary);
+    expect(r.reverseOrphans).toEqual([]);
+    expect(r.reverseLinkMissing).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it("Reverse parent must point at the add-impl plan to count as pairing", () => {
+    const plans = [
+      plan({
+        plan_id: "PLAN-L7-263-route-mode-kind-certificate",
+        kind: "add-impl",
+        status: "draft",
+        updated: "2026-07-02",
+      }),
+      plan({
+        plan_id: "PLAN-REVERSE-263-route-mode-kind-backfill",
+        kind: "reverse",
+        status: "draft",
+        updated: "2026-07-02",
+        parent: "docs/plans/PLAN-L7-999-other.md",
+      }),
+    ];
+    const r = analyzeBackfill(plans, glossary);
+    expect(r.reverseOrphans).toEqual([
+      { plan_id: "PLAN-L7-263-route-mode-kind-certificate", kind: "add-impl" },
+    ]);
+    expect(r.ok).toBe(false);
   });
 });
 

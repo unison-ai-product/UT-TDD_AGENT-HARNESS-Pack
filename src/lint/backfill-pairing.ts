@@ -58,6 +58,7 @@ export interface ParsedPlan {
   updated: string;
   backpropDecision: string;
   backpropDecisionReason: string;
+  parent: string;
   requires: string[];
   glossaryTerms: string[];
 }
@@ -91,6 +92,12 @@ export function parseRequires(content: string): string[] {
   return [...m[1].matchAll(/-\s+(.+?)\s*$/gm)].map((x) => x[1]).filter((s) => s && s !== "[]");
 }
 
+export function parseParent(content: string): string {
+  const m = content.match(/^\s*parent:\s*(.+?)\s*$/m);
+  const parent = m?.[1]?.trim() ?? "";
+  return parent === "null" ? "" : parent;
+}
+
 export function parseGlossaryTerms(content: string): string[] {
   const sec = content.match(
     /(?:^|\n)#{2,}\s*(?:§|ﾂｧ)?6\b[^\n]*(?:用語更新|逕ｨ隱樊峩譁ｰ)[^\n]*\n([\s\S]*?)(?=\n#{1,6}\s|$)/,
@@ -114,6 +121,7 @@ export function parsePlan(file: string, content: string): ParsedPlan {
     updated: fmValue(content, "updated") ?? fmValue(content, "created") ?? "",
     backpropDecision: fmValue(content, "backprop_decision") ?? "",
     backpropDecisionReason: fmValue(content, "backprop_decision_reason") ?? "",
+    parent: parseParent(content),
     requires: parseRequires(content),
     glossaryTerms: parseGlossaryTerms(content),
   };
@@ -160,7 +168,7 @@ export function analyzeBackfill(
 
   for (const p of active) {
     if (p.kind !== "reverse") continue;
-    for (const r of p.requires) {
+    for (const r of [p.parent, ...p.requires].filter(Boolean)) {
       reverseRequires.add(r);
       const refId = normalizedPlanRef(r);
       reverseBackfillers.set(refId, [...(reverseBackfillers.get(refId) ?? []), p.plan_id]);
@@ -183,7 +191,11 @@ export function analyzeBackfill(
       if (req === "required" && requiresBidirectionalBackfillLink(p)) {
         const ownRequires = new Set(p.requires.map(normalizedPlanRef));
         for (const reverseId of reverseBackfillers.get(p.plan_id) ?? []) {
-          if (!ownRequires.has(reverseId)) {
+          const reversePlan = active.find((candidate) => candidate.plan_id === reverseId);
+          const reverseParentMatches = reversePlan?.parent
+            ? refMatchesPlan(reversePlan.parent, p)
+            : false;
+          if (!reverseParentMatches && !ownRequires.has(reverseId)) {
             reverseLinkMissing.push({ plan_id: p.plan_id, reverse_plan_id: reverseId });
           }
         }

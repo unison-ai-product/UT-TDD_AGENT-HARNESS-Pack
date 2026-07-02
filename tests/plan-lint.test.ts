@@ -319,6 +319,104 @@ describe("plan schedule lint (IMP-081)", () => {
     }
   });
 
+  it("allows draft add-impl / draft Reverse pairing through parent without requires_not_ready", () => {
+    const docs = [
+      planDoc("PLAN-L7-263-route-kind", {
+        kind: "add-impl",
+        layer: "L7",
+        drive: "be",
+        status: "draft",
+        dependencies:
+          "  parent: docs/plans/PLAN-L7-212-route-governance.md\n  requires: []\n  blocks: []",
+      }),
+      planDoc("PLAN-L7-212-route-governance", {
+        kind: "refactor",
+        layer: "L7",
+        drive: "be",
+        status: "confirmed",
+      }),
+      {
+        file: "PLAN-REVERSE-263-route-kind.md",
+        content: `---
+plan_id: PLAN-REVERSE-263-route-kind
+title: "PLAN-REVERSE-263: route kind backfill"
+kind: reverse
+layer: cross
+workflow_phase: R0
+confirmed_reverse_type: design
+drive: be
+status: draft
+created: 2026-07-02
+updated: 2026-07-02
+agent_slots:
+  - role: tl
+    slot_label: "TL - fixture"
+dependencies:
+  parent: docs/plans/PLAN-L7-263-route-kind.md
+  requires: []
+  blocks: []
+---
+
+## body
+`,
+      },
+    ];
+
+    const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
+
+    expect(reasons).not.toContain("requires_not_ready");
+    expect(reasons).not.toContain("parent_missing");
+    expect(READY_DEPENDENCY_STATUSES.has("draft")).toBe(false);
+  });
+
+  it("keeps draft Reverse references in dependencies.requires blocked as not ready", () => {
+    const docs = [
+      planDoc("PLAN-L7-263-route-kind", {
+        kind: "add-impl",
+        layer: "L7",
+        drive: "be",
+        status: "draft",
+        dependencies:
+          "  parent: docs/plans/PLAN-L7-212-route-governance.md\n  requires:\n    - docs/plans/PLAN-REVERSE-263-route-kind.md\n  blocks: []",
+      }),
+      planDoc("PLAN-L7-212-route-governance", {
+        kind: "refactor",
+        layer: "L7",
+        drive: "be",
+        status: "confirmed",
+      }),
+      {
+        file: "PLAN-REVERSE-263-route-kind.md",
+        content: `---
+plan_id: PLAN-REVERSE-263-route-kind
+title: "PLAN-REVERSE-263: route kind backfill"
+kind: reverse
+layer: cross
+workflow_phase: R0
+confirmed_reverse_type: design
+drive: be
+status: draft
+created: 2026-07-02
+updated: 2026-07-02
+agent_slots:
+  - role: tl
+    slot_label: "TL - fixture"
+dependencies:
+  parent: docs/plans/PLAN-L7-263-route-kind.md
+  requires: []
+  blocks: []
+---
+
+## body
+`,
+      },
+    ];
+
+    const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
+
+    expect(reasons).toContain("requires_not_ready");
+  });
+
   it("U-PLANGOV-005: --gate governance runs strict PLAN governance lint", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-plan-governance-cli-"));
     try {
