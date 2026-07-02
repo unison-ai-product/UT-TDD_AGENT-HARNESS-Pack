@@ -54,6 +54,7 @@ import {
   type DoctorDeps,
   runDoctor,
 } from "../src/doctor/index";
+import { buildDoctorResult } from "../src/doctor/result";
 import type { AgentSlotsDeps, Slot } from "../src/runtime/agent-slots";
 
 const NOW = "2026-06-04T00:00:00.000Z";
@@ -61,6 +62,25 @@ const pointerPath = join("/repo", ".ut-tdd", "handover", "CURRENT.json");
 const slotStatePath = join("/repo", ".ut-tdd", "state", "agent-slots.json");
 const currentPlanPath = join("/repo", ".ut-tdd", "state", "current-plan");
 const digestDir = join("/repo", ".ut-tdd", "logs", "plan");
+
+describe("buildDoctorResult", () => {
+  it("preserves leading messages, prefixes check messages, and fails closed on any failed check", () => {
+    const result = buildDoctorResult({
+      leadingMessages: ["doctor: mode=standalone"],
+      checks: [
+        { ok: true, messages: ["alpha - OK"] },
+        { ok: false, messages: ["beta - violation"] },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.messages).toEqual([
+      "doctor: mode=standalone",
+      "doctor: alpha - OK",
+      "doctor: beta - violation",
+    ]);
+  });
+});
 
 function codexWrapperParityFiles(root: string, overrides: Record<string, string> = {}) {
   const file = (relativePath: string) => join(root, ...relativePath.split("/"));
@@ -738,8 +758,7 @@ describe("runDoctor", () => {
 
   it("keeps all hard gates wired into runDoctor hard-gate aggregation", () => {
     const source = readFileSync(join(process.cwd(), "src", "doctor", "index.ts"), "utf8");
-    // The first `return { ok, messages }` must remain the normal doctor aggregation, not a profile shortcut.
-    const okExpression = source.match(/return\s+\{\s+ok:([\s\S]*?),\s+messages:\s+\[/)?.[1] ?? "";
+    const checkAggregation = source.match(/const checks = \[([\s\S]*?)\];/)?.[1] ?? "";
     const expectedHardGates = [
       "backfill",
       "scrumRev",
@@ -792,6 +811,6 @@ describe("runDoctor", () => {
       "greenCommandDigest",
     ];
 
-    expect(expectedHardGates.filter((name) => !okExpression.includes(`${name}.ok`))).toEqual([]);
+    expect(expectedHardGates.filter((name) => !checkAggregation.includes(name))).toEqual([]);
   });
 });

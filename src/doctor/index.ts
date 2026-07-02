@@ -188,6 +188,7 @@ import {
   checkReviewEvidence,
   checkScrumReverse,
 } from "./plan-governance";
+import { buildDoctorResult } from "./result";
 import { checkRoadmap, checkVerificationGroupsResult } from "./roadmap-verification";
 import {
   checkCodingRules,
@@ -1103,163 +1104,90 @@ export function runDoctor(
   // fail-close: spine-外 kind=impl の NEW 未集約 landed を gate (PLAN-DISCOVERY-08 Step5)。legacy は grandfather。
   const forwardConvergence = checkForwardConvergence(deps.repoRoot);
   const forwardConvergenceAudit = checkForwardConvergenceAudit(deps.repoRoot);
-  return {
-    ok:
-      backfill.ok &&
-      scrumRev.ok &&
-      planSupersession.ok &&
-      planBodySubstance.ok &&
-      planCompletionDrift.ok &&
-      propagation.ok &&
-      reviewEvidence.ok &&
-      guardrailInvariants.ok &&
-      pairFreeze.ok &&
-      moduleDrift.ok &&
-      mergedPlanStatus.ok &&
-      planArtifactExistence.ok &&
-      assetDrift.ok &&
-      skillAssignment.ok &&
-      descentObligation.ok &&
-      changeImpact.ok &&
-      changeSetIntegrity.ok &&
-      verificationProfile.ok &&
-      branchKind.ok &&
-      codingRules.ok &&
-      designLanguage.ok &&
-      dddTddRules.ok &&
-      runtimePortability.ok &&
-      ruleDrift.ok &&
-      gateConfirm.ok &&
-      planSchedule.ok &&
-      planGovernance.ok &&
-      planDod.ok &&
-      placeholderDeps.ok &&
-      g1Trace.ok &&
-      g3Trace.ok &&
-      ruleAutomationClosure.ok &&
-      driveModelPassage.ok &&
-      driveDbRegistration.ok &&
-      frRoadmapCoverage.ok &&
-      telemetryClosure.ok &&
-      cycleP4Verification.ok &&
-      l14CloseAudit.ok &&
-      l6FrCoverage.ok &&
-      readability.ok &&
-      runtimeReadability.ok &&
-      feedbackLog.ok &&
-      projectHooks.ok &&
-      githubCiPolicy.ok &&
-      codexHookAdapter.ok &&
-      codexWrapperParity.ok &&
-      l6Completion.ok &&
-      l7Completion.ok &&
-      verificationGroups.ok &&
-      roadmap.ok &&
-      implPlanTrace.ok &&
-      oracleTestTrace.ok &&
-      trackedCanonical.ok &&
-      subDocCatalogDrift.ok &&
-      subDocSectionStructure.ok &&
-      screenImplPairFreeze.ok &&
-      dependencyDrift.ok &&
-      regressionExpansion.ok &&
-      dbProjectionCoverage.ok &&
-      dbProjectionIngestion.ok &&
-      docConsistency.ok &&
-      entityCoverage.ok &&
-      frRegistryAudit.ok &&
-      improvementBacklog.ok &&
-      rightArmGatePlanning.ok &&
-      g8IntegrationWorkflow.ok &&
-      g9SystemWorkflow.ok &&
-      g10UxWorkflow.ok &&
-      lintWiring.ok &&
-      proposalDocumentCoverage.ok &&
-      frontendDesignCoverage.ok &&
-      greenCommandDigest.ok &&
-      forwardConvergence.ok &&
-      forwardConvergenceAudit.ok &&
-      handoverOutstanding.ok,
-    messages: [
-      `doctor: mode=${d.mode} (claude=${d.claude}, codex=${d.codex})`,
-      checkHandover(deps),
-      ...checkHandoverDisciplineMessages(deps).map((m) => `doctor: handover-discipline — ${m}`),
-      checkAgentSlots(doctorSlotsDeps(deps)),
-      ...backfill.messages.map((m) => `doctor: ${m}`),
-      ...scrumRev.messages.map((m) => `doctor: ${m}`),
-      ...planSupersession.messages.map((m) => `doctor: ${m}`),
-      ...planBodySubstance.messages.map((m) => `doctor: ${m}`),
-      ...planCompletionDrift.messages.map((m) => `doctor: ${m}`),
-      ...propagation.messages.map((m) => `doctor: ${m}`),
-      ...pairFreeze.messages.map((m) => `doctor: ${m}`),
-      ...moduleDrift.messages.map((m) => `doctor: ${m}`),
-      ...mergedPlanStatus.messages.map((m) => `doctor: ${m}`),
-      ...planArtifactExistence.messages.map((m) => `doctor: ${m}`),
-      ...assetDrift.messages.map((m) => `doctor: ${m}`),
-      ...skillAssignment.messages.map((m) => `doctor: ${m}`),
-      ...descentObligation.messages.map((m) => `doctor: ${m}`),
-      ...changeImpact.messages.map((m) => `doctor: ${m}`),
-      ...changeSetIntegrity.messages.map((m) => `doctor: ${m}`),
-      ...verificationProfile.messages.map((m) => `doctor: ${m}`),
-      ...branchKind.messages.map((m) => `doctor: ${m}`),
-      ...codingRules.messages.map((m) => `doctor: ${m}`),
-      ...designLanguage.messages.map((m) => `doctor: ${m}`),
-      ...dddTddRules.messages.map((m) => `doctor: ${m}`),
-      ...runtimePortability.messages.map((m) => `doctor: ${m}`),
-      ...ruleDrift.messages.map((m) => `doctor: ${m}`),
-      ...gateConfirm.messages.map((m) => `doctor: ${m}`),
-      ...planSchedule.messages.map((m) => `doctor: ${m}`),
-      ...planGovernance.messages.map((m) => `doctor: ${m}`),
-      ...planDod.messages.map((m) => `doctor: ${m}`),
-      ...placeholderDeps.messages.map((m) => `doctor: ${m}`),
-      ...g1Trace.messages.map((m) => `doctor: ${m}`),
-      ...g3Trace.messages.map((m) => `doctor: ${m}`),
-      ...ruleAutomationClosure.messages.map((m) => `doctor: ${m}`),
-      ...driveModelPassage.messages.map((m) => `doctor: ${m}`),
-      ...driveDbRegistration.messages.map((m) => `doctor: ${m}`),
-      ...frRoadmapCoverage.messages.map((m) => `doctor: ${m}`),
-      ...telemetryClosure.messages.map((m) => `doctor: ${m}`),
-      ...cycleP4Verification.messages.map((m) => `doctor: ${m}`),
-      ...l14CloseAudit.messages.map((m) => `doctor: ${m}`),
-      ...projectHooks.messages.map((m) => `doctor: ${m}`),
-      ...githubCiPolicy.messages.map((m) => `doctor: ${m}`),
-      ...codexHookAdapter.messages.map((m) => `doctor: ${m}`),
-      ...codexWrapperParity.messages.map((m) => `doctor: ${m}`),
-      ...l6FrCoverage.messages.map((m) => `doctor: ${m}`),
-      ...readability.messages.map((m) => `doctor: ${m}`),
-      ...runtimeReadability.messages.map((m) => `doctor: ${m}`),
-      ...feedbackLog.messages.map((m) => `doctor: ${m}`),
-      ...l6Completion.messages.map((m) => `doctor: ${m}`),
-      ...l7Completion.messages.map((m) => `doctor: ${m}`),
-      ...reviewEvidence.messages.map((m) => `doctor: ${m}`),
-      ...guardrailInvariants.messages.map((m) => `doctor: ${m}`),
-      ...verificationGroups.messages.map((m) => `doctor: ${m}`),
-      ...roadmap.messages.map((m) => `doctor: ${m}`),
-      ...implPlanTrace.messages.map((m) => `doctor: ${m}`),
-      ...oracleTestTrace.messages.map((m) => `doctor: ${m}`),
-      ...trackedCanonical.messages.map((m) => `doctor: ${m}`),
-      ...subDocCatalogDrift.messages.map((m) => `doctor: ${m}`),
-      ...subDocSectionStructure.messages.map((m) => `doctor: ${m}`),
-      ...screenImplPairFreeze.messages.map((m) => `doctor: ${m}`),
-      ...dependencyDrift.messages.map((m) => `doctor: ${m}`),
-      ...regressionExpansion.messages.map((m) => `doctor: ${m}`),
-      ...dbProjectionCoverage.messages.map((m) => `doctor: ${m}`),
-      ...dbProjectionIngestion.messages.map((m) => `doctor: ${m}`),
-      ...docConsistency.messages.map((m) => `doctor: ${m}`),
-      ...entityCoverage.messages.map((m) => `doctor: ${m}`),
-      ...frRegistryAudit.messages.map((m) => `doctor: ${m}`),
-      ...improvementBacklog.messages.map((m) => `doctor: ${m}`),
-      ...rightArmGatePlanning.messages.map((m) => `doctor: ${m}`),
-      ...g8IntegrationWorkflow.messages.map((m) => `doctor: ${m}`),
-      ...g9SystemWorkflow.messages.map((m) => `doctor: ${m}`),
-      ...g10UxWorkflow.messages.map((m) => `doctor: ${m}`),
-      ...lintWiring.messages.map((m) => `doctor: ${m}`),
-      ...proposalDocumentCoverage.messages.map((m) => `doctor: ${m}`),
-      ...frontendDesignCoverage.messages.map((m) => `doctor: ${m}`),
-      ...handoverOutstanding.messages.map((m) => `doctor: ${m}`),
-      ...greenCommandDigest.messages.map((m) => `doctor: ${m}`),
-      ...forwardConvergence.messages.map((m) => `doctor: ${m}`),
-      ...forwardConvergenceAudit.messages.map((m) => `doctor: ${m}`),
-    ],
-  };
+  const leadingMessages = [
+    `doctor: mode=${d.mode} (claude=${d.claude}, codex=${d.codex})`,
+    checkHandover(deps),
+    ...checkHandoverDisciplineMessages(deps).map((m) => `doctor: handover-discipline — ${m}`),
+    checkAgentSlots(doctorSlotsDeps(deps)),
+  ];
+
+  const checks = [
+    backfill,
+    scrumRev,
+    planSupersession,
+    planBodySubstance,
+    planCompletionDrift,
+    propagation,
+    pairFreeze,
+    moduleDrift,
+    mergedPlanStatus,
+    planArtifactExistence,
+    assetDrift,
+    skillAssignment,
+    descentObligation,
+    changeImpact,
+    changeSetIntegrity,
+    verificationProfile,
+    branchKind,
+    codingRules,
+    designLanguage,
+    dddTddRules,
+    runtimePortability,
+    ruleDrift,
+    gateConfirm,
+    planSchedule,
+    planGovernance,
+    planDod,
+    placeholderDeps,
+    g1Trace,
+    g3Trace,
+    ruleAutomationClosure,
+    driveModelPassage,
+    driveDbRegistration,
+    frRoadmapCoverage,
+    telemetryClosure,
+    cycleP4Verification,
+    l14CloseAudit,
+    projectHooks,
+    githubCiPolicy,
+    codexHookAdapter,
+    codexWrapperParity,
+    l6FrCoverage,
+    readability,
+    runtimeReadability,
+    feedbackLog,
+    l6Completion,
+    l7Completion,
+    reviewEvidence,
+    guardrailInvariants,
+    verificationGroups,
+    roadmap,
+    implPlanTrace,
+    oracleTestTrace,
+    trackedCanonical,
+    subDocCatalogDrift,
+    subDocSectionStructure,
+    screenImplPairFreeze,
+    dependencyDrift,
+    regressionExpansion,
+    dbProjectionCoverage,
+    dbProjectionIngestion,
+    docConsistency,
+    entityCoverage,
+    frRegistryAudit,
+    improvementBacklog,
+    rightArmGatePlanning,
+    g8IntegrationWorkflow,
+    g9SystemWorkflow,
+    g10UxWorkflow,
+    lintWiring,
+    proposalDocumentCoverage,
+    frontendDesignCoverage,
+    handoverOutstanding,
+    greenCommandDigest,
+    forwardConvergence,
+    forwardConvergenceAudit,
+  ];
+
+  return buildDoctorResult({ leadingMessages, checks });
 }
