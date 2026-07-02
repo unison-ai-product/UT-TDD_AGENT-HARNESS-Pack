@@ -174,6 +174,8 @@ export function cleanDistributionSourcePath(
   return artifact;
 }
 
+// Clean Pack excludes source-only governance docs, so its default `test` script
+// must stay on this distributable smoke suite instead of raw `vitest run`.
 export const PACK_SAFE_TEST_SCRIPT =
   "vitest run tests/setup.test.ts tests/distribution-acceptance.test.ts tests/skill-recommend.test.ts tests/skill-scaffold.test.ts tests/dependency-drift.test.ts tests/readability.test.ts --reporter=dot";
 

@@ -389,6 +389,9 @@ bun run test
 
 Pack の `test` は `test:pack` と同じ配布安全 smoke に固定されています。source repo 専用の
 governance docs、PLAN、`.ut-tdd` runtime state、harness DB を必要とするフル検証は含みません。
+Pack CI や consumer repo では raw `vitest run` を直接使わず、`bun run test` または
+`bun run test:pack` を使います。raw `vitest run` / source `bun run test` の全量回帰は
+source development repo 専用です。
 
 Source development repo での追加検証:
 

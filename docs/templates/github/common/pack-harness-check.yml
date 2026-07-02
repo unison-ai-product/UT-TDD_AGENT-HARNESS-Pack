@@ -4,6 +4,8 @@
 # .ut-tdd runtime state, and persisted DB files. This workflow therefore checks
 # the distributable CLI/setup surface instead of source-repo governance gates
 # that require docs/design or docs/plans.
+# Do not replace test:pack with raw `vitest run`; full source-regression tests
+# intentionally require source-only governance artifacts that Pack excludes.
 name: harness-check
 
 on:

@@ -19,7 +19,8 @@ export interface GithubCiPolicyViolation {
     | "missing_permission"
     | "missing_concurrency"
     | "missing_step"
-    | "forbidden_full_doctor";
+    | "forbidden_full_doctor"
+    | "forbidden_raw_vitest";
   detail: string;
 }
 
@@ -180,6 +181,18 @@ export function analyzeGithubCiPolicy(docs: GithubWorkflowDoc[]): GithubCiPolicy
           reason: "forbidden_full_doctor",
           detail:
             "Pack CI must use doctor --setup-smoke because Pack excludes source-only governance docs",
+        });
+      }
+      const rawVitest = steps.some((step) => {
+        const run = step.run ?? "";
+        return /\bvitest\s+run\b/.test(run);
+      });
+      if (rawVitest) {
+        pushViolation({
+          violations,
+          doc,
+          reason: "forbidden_raw_vitest",
+          detail: "Pack CI must use bun run test:pack instead of raw vitest run",
         });
       }
     }

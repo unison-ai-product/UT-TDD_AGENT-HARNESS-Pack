@@ -169,4 +169,23 @@ describe("github-ci-policy lint", () => {
         "Pack CI must use doctor --setup-smoke because Pack excludes source-only governance docs",
     });
   });
+
+  it("rejects raw vitest run in Pack CI because source-only tests need governance docs", () => {
+    const pack = PACK_WORKFLOW.replace("bun run test:pack", "bun run vitest run");
+    const result = analyzeGithubCiPolicy(docs(SOURCE_WORKFLOW, pack));
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContainEqual({
+      file: "docs/templates/github/common/pack-harness-check.yml",
+      profile: "pack",
+      reason: "missing_step",
+      detail: "pack tests",
+    });
+    expect(result.violations).toContainEqual({
+      file: "docs/templates/github/common/pack-harness-check.yml",
+      profile: "pack",
+      reason: "forbidden_raw_vitest",
+      detail: "Pack CI must use bun run test:pack instead of raw vitest run",
+    });
+  });
 });
