@@ -20,6 +20,7 @@ import {
   REFACTOR_POLICY_TERMS,
 } from "../src/state-db/refactor-candidate-policy";
 import { analyzeRefactorCandidates } from "../src/state-db/refactor-candidates";
+import { projectRuntimeTestRunFromSessionEvent as projectRuntimeTestRunFromSessionEventCore } from "../src/state-db/runtime-projections";
 
 interface VerificationWorkflowRow {
   phase: string;
@@ -613,6 +614,71 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
         exit_code: 0,
         status: "passed",
         evidence_path: ".ut-tdd/logs/session/session-runtime-1.jsonl",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps extracted runtime projection helpers behind injected dependencies", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      recordProjectionEvent(db, {
+        table: "plan_registry",
+        id: "PLAN-L7-230-runtime-projection-extraction",
+        row: {
+          plan_id: "PLAN-L7-230-runtime-projection-extraction",
+          kind: "refactor",
+          layer: "L7",
+          drive: "db",
+          status: "confirmed",
+          title: "runtime projection extraction",
+          source_path: "docs/plans/PLAN-L7-230-runtime-projection-extraction.md",
+          source_hash: "sha256:test",
+          updated_at: "2026-07-02T00:00:00Z",
+        },
+      });
+      const plans = new Map([
+        [
+          "PLAN-L7-230-runtime-projection-extraction",
+          {
+            planId: "PLAN-L7-230-runtime-projection-extraction",
+            kind: "refactor",
+            layer: "L7",
+            drive: "db",
+            status: "confirmed",
+            updatedAt: "2026-07-02T00:00:00Z",
+          },
+        ],
+      ]);
+
+      projectRuntimeTestRunFromSessionEventCore({
+        db,
+        plans,
+        event: {
+          ts: "2026-07-02T00:01:00Z",
+          session_id: "session-runtime-core",
+          plan_id: "PLAN-L7-230-runtime-projection-extraction:alias",
+          event_type: "tool_use",
+          tool: "Bash",
+          target: "Bash (doctor)",
+          outcome: "error",
+        },
+        evidencePath: ".ut-tdd/logs/session/session-runtime-core.jsonl",
+        deps: {
+          stableId: (prefix, value) => `${prefix}:${value}`,
+          resolvePlanId: () => "PLAN-L7-230-runtime-projection-extraction",
+          recordProjectionEvent,
+        },
+      });
+
+      const row = db.prepare("SELECT plan_id, runner, exit_code, status FROM test_runs").get();
+      expect(row).toMatchObject({
+        plan_id: "PLAN-L7-230-runtime-projection-extraction",
+        runner: "ut-tdd",
+        exit_code: 1,
+        status: "failed",
       });
     } finally {
       db.close();

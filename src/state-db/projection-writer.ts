@@ -60,6 +60,12 @@ import {
   upsertRow,
 } from "./index";
 import { migrate, rowCounts } from "./migration";
+import {
+  projectRuntimeGuardrailDecisionFromSessionEvent as projectRuntimeGuardrailDecisionFromSessionEventCore,
+  projectRuntimeSkillInvocationFromSessionEvent as projectRuntimeSkillInvocationFromSessionEventCore,
+  projectRuntimeSkillInvocationsFromSessionLogs as projectRuntimeSkillInvocationsFromSessionLogsCore,
+  projectRuntimeTestRunFromSessionEvent as projectRuntimeTestRunFromSessionEventCore,
+} from "./runtime-projections";
 import type { RunUsage } from "./token-tracker";
 
 export interface ProjectionEvent {
@@ -532,14 +538,6 @@ function projectHookEvents(
   }
 }
 
-function verificationVerbFromSessionTarget(event: SessionLogProjection): string | null {
-  if (event.event_type !== "tool_use" || event.tool !== "Bash") return null;
-  const match = String(event.target ?? "").match(/^Bash \(([^)]+)\)$/);
-  if (!match) return null;
-  const verb = match[1];
-  return ["doctor", "eslint", "lint", "test", "tsc", "vitest"].includes(verb) ? verb : null;
-}
-
 export interface RuntimeTestRunProjectionInput {
   db: HarnessDb;
   plans: Map<string, ProjectedPlan>;
@@ -562,36 +560,12 @@ export interface RuntimeSkillInvocationProjectionInput {
 }
 
 export function projectRuntimeTestRunFromSessionEvent(input: RuntimeTestRunProjectionInput): void {
-  const { db, plans, event, evidencePath } = input;
-  if (!event.session_id || !event.plan_id || !event.ts) return;
-  const verb = verificationVerbFromSessionTarget(event);
-  if (!verb) return;
-  const planId = resolveProjectedPlanId(plans, event.plan_id);
-  const status = event.outcome === "error" ? "failed" : "passed";
-  const testRunId = stableId(
-    "test-run-runtime",
-    `${event.session_id}:${planId}:${event.ts}:${verb}:${event.outcome ?? ""}`,
-  );
-  recordProjectionEvent(db, {
-    table: "test_runs",
-    id: testRunId,
-    row: {
-      test_run_id: testRunId,
-      session_id: event.session_id,
-      plan_id: planId,
-      command: event.target ?? `Bash (${verb})`,
-      runner: verb === "doctor" ? "ut-tdd" : "bun",
-      runtime: "hook-session-log",
-      os: "",
-      shell: "bash",
-      scope: "runtime-hook",
-      started_at: event.ts,
-      completed_at: event.ts,
-      exit_code: status === "passed" ? 0 : 1,
-      evidence_path: evidencePath,
-      output_digest: "",
-      green_definition_id: "",
-      status,
+  projectRuntimeTestRunFromSessionEventCore({
+    ...input,
+    deps: {
+      stableId,
+      resolvePlanId: (planId) => resolveProjectedPlanId(input.plans, planId),
+      recordProjectionEvent,
     },
   });
 }
@@ -599,81 +573,28 @@ export function projectRuntimeTestRunFromSessionEvent(input: RuntimeTestRunProje
 export function projectRuntimeGuardrailDecisionFromSessionEvent(
   input: RuntimeGuardrailDecisionProjectionInput,
 ): void {
-  const { db, plans, event, evidencePath } = input;
-  if (!event.session_id || !event.plan_id || !event.ts) return;
-  if (event.event_type !== "forced_stop") return;
-  const planId = resolveProjectedPlanId(plans, event.plan_id);
-  const guardrailDecisionId = stableId(
-    "guardrail-runtime",
-    `${event.session_id}:${planId}:${event.ts}:forced-stop:${event.outcome ?? ""}`,
-  );
-  recordProjectionEvent(db, {
-    table: "guardrail_decisions",
-    id: guardrailDecisionId,
-    row: {
-      guardrail_decision_id: guardrailDecisionId,
-      plan_id: planId,
-      session_id: event.session_id,
-      guardrail: "forced-stop",
-      decision: "block",
-      mode: "runtime-hook",
-      human_signoff_required: 0,
-      evidence_path: evidencePath,
-      decided_at: event.ts,
+  projectRuntimeGuardrailDecisionFromSessionEventCore({
+    ...input,
+    deps: {
+      stableId,
+      resolvePlanId: (planId) => resolveProjectedPlanId(input.plans, planId),
+      recordProjectionEvent,
     },
   });
-}
-
-function skillVerbFromSessionTarget(event: SessionLogProjection): boolean {
-  return (
-    event.event_type === "tool_use" && event.tool === "Bash" && event.target === "Bash (skill)"
-  );
 }
 
 export function projectRuntimeSkillInvocationFromSessionEvent(
   input: RuntimeSkillInvocationProjectionInput,
 ): void {
-  const { db, plans, event } = input;
-  if (!event.session_id || !event.plan_id || !event.ts) return;
-  if (!skillVerbFromSessionTarget(event)) return;
-  const planId = resolveProjectedPlanId(plans, event.plan_id);
-  const plan = plans.get(planId);
-  if (!plan) return;
-  const assets = db
-    .prepare("SELECT * FROM automation_assets WHERE asset_type = ? ORDER BY asset_id")
-    .all("skill")
-    .filter((asset) => !String(asset.skill_type ?? "").startsWith("skill-map"));
-  const ranked = assets
-    .map((asset) => ({ asset, score: skillScore(plan, asset) }))
-    .filter((entry) => entry.score > 0)
-    .sort(
-      (a, b) =>
-        b.score - a.score ||
-        String(a.asset.asset_id ?? "").localeCompare(String(b.asset.asset_id ?? "")),
-    )
-    .slice(0, 5);
-  for (const entry of ranked) {
-    const skillId = String(entry.asset.asset_id ?? "");
-    const invId = stableId(
-      "skill-inv-runtime",
-      `${event.session_id}:${planId}:${event.ts}:${skillId}`,
-    );
-    recordProjectionEvent(db, {
-      table: "skill_invocations",
-      id: invId,
-      row: {
-        skill_invocation_id: invId,
-        session_id: event.session_id,
-        plan_id: planId,
-        skill_id: skillId,
-        layer: plan.layer,
-        drive: plan.drive,
-        fired_at: event.ts,
-        source: "runtime-hook:skill-suggest",
-        accepted: event.outcome === "error" ? 0 : 1,
-      },
-    });
-  }
+  projectRuntimeSkillInvocationFromSessionEventCore({
+    ...input,
+    deps: {
+      stableId,
+      resolvePlanId: (planId) => resolveProjectedPlanId(input.plans, planId),
+      recordProjectionEvent,
+      skillScore,
+    },
+  });
 }
 
 function projectRuntimeSkillInvocationsFromSessionLogs(
@@ -681,24 +602,17 @@ function projectRuntimeSkillInvocationsFromSessionLogs(
   db: HarnessDb,
   plans: Map<string, ProjectedPlan>,
 ): void {
-  const sessionDir = join(repoRoot, ".ut-tdd", "logs", "session");
-  if (!existsSync(sessionDir)) return;
-  for (const file of readdirSync(sessionDir)
-    .filter((name) => name.endsWith(".jsonl"))
-    .sort()) {
-    const path = join(sessionDir, file);
-    const relPath = normalizePath(relative(repoRoot, path));
-    for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      let event: SessionLogProjection;
-      try {
-        event = JSON.parse(line) as SessionLogProjection;
-      } catch {
-        continue;
-      }
-      projectRuntimeSkillInvocationFromSessionEvent({ db, plans, event, evidencePath: relPath });
-    }
-  }
+  projectRuntimeSkillInvocationsFromSessionLogsCore({
+    repoRoot,
+    db,
+    plans,
+    deps: {
+      stableId,
+      resolvePlanId: (planId) => resolveProjectedPlanId(plans, planId),
+      recordProjectionEvent,
+      skillScore,
+    },
+  });
 }
 
 function runtimeForModel(model: string): string {
