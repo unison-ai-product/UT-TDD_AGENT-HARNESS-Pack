@@ -26,13 +26,10 @@ import {
 import { loadBranchAudit, renderBranchAudit } from "./audit/branches";
 import { renderQualityAudit, runQualityAudit } from "./audit/quality";
 import { registerDistributionCommands } from "./cli/distribution";
+import { registerFeedbackCommands } from "./cli/feedback";
 import { runDoctor } from "./doctor";
-import { computeSkillMetrics, emitFeedbackEvents } from "./feedback/engine";
-import {
-  renderFeedbackEventRows,
-  renderTakeoverFeedback,
-  selectTakeoverFeedback,
-} from "./feedback/surface";
+import { computeSkillMetrics } from "./feedback/engine";
+import { renderTakeoverFeedback, selectTakeoverFeedback } from "./feedback/surface";
 import { evaluateGateReview, loadReviewChecklistIfPresent } from "./gate/review-tier";
 import { evaluateStaticGate } from "./gate/static";
 import { evaluateGithubOpsGuard, renderGithubOpsGuard } from "./github/ops-guard";
@@ -98,14 +95,7 @@ import {
   selectPrecedingSessionFile,
 } from "./runtime/attempt-escalation";
 import { detectMode, nextActionForMode, type RuntimeDetection } from "./runtime/detect";
-import {
-  type ClassifyResult,
-  emitClassifyRequest,
-  type FeedbackCtx,
-  pendingRecoveryProposals,
-  recordFeedback,
-  scanDanglingStops,
-} from "./runtime/forced-stop";
+import { scanDanglingStops } from "./runtime/forced-stop";
 import {
   nodeProviderHandoverDeps,
   type ProviderRuntime,
@@ -2857,89 +2847,7 @@ github
     },
   );
 
-const feedback = program
-  .command("feedback")
-  .description("強制停止フィードバック (forced-stop-feedback, PLAN-L7-02)");
-
-feedback
-  .command("list")
-  .description("emit/list harness.db feedback events")
-  .option("--json", "JSON output")
-  .option(
-    "--emit",
-    "compute feedback events from current findings and quality signals before listing",
-  )
-  .action((opts: { json?: boolean; emit?: boolean }) => {
-    const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
-    try {
-      if (opts.emit) emitFeedbackEvents(db);
-      const rows = db
-        .prepare("SELECT * FROM feedback_events WHERE status = 'open' ORDER BY created_at")
-        .all();
-      if (opts.json) process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
-      else process.stdout.write(renderFeedbackEventRows(rows));
-    } finally {
-      db.close();
-    }
-  });
-
-feedback
-  .command("classify")
-  .description(
-    "停止後メッセージを分類。既定=managed pmo-haiku への分類リクエスト emit / --apply で結果記録",
-  )
-  .option("--text <text>", "対象テキスト (省略時 stdin)")
-  .option("--session <id>", "session_id")
-  .option("--plan <id>", "plan_id (省略時 branch/state から解決)")
-  .option("--apply <json>", "ClassifyResult JSON を渡して recordFeedback (是正のみ記録)")
-  .action((opts: { text?: string; session?: string; plan?: string; apply?: string }) => {
-    const text = opts.text ?? readStdin();
-    if (!opts.apply) {
-      // 既定: 分類リクエストを emit (raw API なし、agent が pmo-haiku に渡す)
-      process.stdout.write(`${emitClassifyRequest(text)}\n`);
-      return;
-    }
-    let result: ClassifyResult;
-    try {
-      result = JSON.parse(opts.apply) as ClassifyResult;
-    } catch {
-      process.stderr.write("--apply は ClassifyResult JSON である必要があります\n");
-      process.exitCode = 1;
-      return;
-    }
-    const deps = nodeDeps(process.cwd(), gitBranch);
-    const ctx: FeedbackCtx = {
-      session_id: opts.session ?? "unknown",
-      plan_id: opts.plan ?? resolveActivePlan(deps), // 省略時 state/branch から解決
-      summary: text,
-    };
-    recordFeedback(result, ctx, deps);
-    process.stdout.write(
-      result.category === "feedback" && ctx.plan_id
-        ? `recorded: feedback (attention=${result.attention})\n`
-        : "skipped (mistake or plan_id 未解決)\n",
-    );
-  });
-
-feedback
-  .command("pending")
-  .description("Recovery 起票候補 (recovery_proposed && 未対応) を出力。agent 起動時に参照")
-  .option("--json", "JSON で出力")
-  .action((opts: { json?: boolean }) => {
-    const deps = nodeDeps(process.cwd(), gitBranch);
-    const pending = pendingRecoveryProposals(deps);
-    if (opts.json) {
-      process.stdout.write(`${JSON.stringify(pending, null, 2)}\n`);
-      return;
-    }
-    if (pending.length === 0) {
-      process.stdout.write("Recovery 起票候補なし\n");
-      return;
-    }
-    for (const p of pending) {
-      process.stdout.write(`[${p.attention}] ${p.plan_id} ${p.ts} — ${p.summary}\n`);
-    }
-  });
+registerFeedbackCommands(program);
 
 program
   .command("setup")

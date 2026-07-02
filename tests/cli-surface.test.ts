@@ -128,6 +128,23 @@ describe("L7 CLI surface closure", () => {
     expect(run.stdout).toContain("release-plan");
   }, 15_000);
 
+  it("exposes feedback commands through the extracted registrar", () => {
+    const help = runCli(["feedback", "--help"]);
+    const classify = runCli(["feedback", "classify", "--text", "please review this regression"]);
+    const payload = JSON.parse(classify.stdout);
+
+    expect(help.status).toBe(0);
+    expect(help.stdout).toContain("list");
+    expect(help.stdout).toContain("classify");
+    expect(help.stdout).toContain("pending");
+    expect(classify.status).toBe(0);
+    expect(payload).toMatchObject({
+      role: "pmo-haiku",
+      text: "please review this regression",
+    });
+    expect(payload.output_schema.category).toContain("feedback");
+  }, 15_000);
+
   it("exposes skill injection as a provider-neutral JSON manifest", () => {
     const run = runCli([
       "skill",
