@@ -10,6 +10,10 @@ import {
 import { AGENT_GUARD_BYPASS_HINT, AGENT_TOOL_NAME } from "../src/runtime/agent-guard-policy";
 
 const FAMILIES: Record<string, ResolvedFamily> = {
+  "be-api": "sonnet",
+  "be-logic": "sonnet",
+  "db-schema": "sonnet",
+  "devops-deploy": "sonnet",
   "pmo-sonnet": "sonnet",
   "pmo-haiku": "haiku",
   "refactor-scout": "haiku",
@@ -95,7 +99,7 @@ describe("evaluateAgentGuard", () => {
   });
 
   it("blocks non-allowlisted subagent even with valid model", () => {
-    const d = evaluateAgentGuard(agent({ subagent_type: "be-logic", model: "sonnet" }), ctx());
+    const d = evaluateAgentGuard(agent({ subagent_type: "rogue-agent", model: "sonnet" }), ctx());
     expect(d.code).toBe(2);
     expect(d.message).toContain("not allowlisted");
     expect(d.message).toContain("ut-tdd codex --role");
@@ -118,6 +122,9 @@ describe("evaluateAgentGuard", () => {
   });
 
   it("allows explicit model matching the agent's frontmatter family", () => {
+    expect(
+      evaluateAgentGuard(agent({ subagent_type: "be-logic", model: "sonnet" }), ctx()).code,
+    ).toBe(0);
     expect(
       evaluateAgentGuard(agent({ subagent_type: "pmo-sonnet", model: "sonnet" }), ctx()).code,
     ).toBe(0);
@@ -153,7 +160,10 @@ describe("evaluateAgentGuard", () => {
   });
 
   it("bypasses block when allowRaw is set", () => {
-    const d = evaluateAgentGuard(agent({ subagent_type: "be-logic", model: "sonnet" }), ctx(true));
+    const d = evaluateAgentGuard(
+      agent({ subagent_type: "rogue-agent", model: "sonnet" }),
+      ctx(true),
+    );
     expect(d.code).toBe(0);
     expect(d.bypassed).toBe(true);
   });

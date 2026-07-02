@@ -142,6 +142,7 @@ export interface SetupDeps {
 const CODEOWNERS_TARGET = join(".github", "CODEOWNERS");
 const STATE_PATH = join(".ut-tdd", "state", "setup.json");
 const BP_SCRIPT = join("scripts", "setup-branch-protection.sh");
+const BP_PAYLOAD_PATH = join(".ut-tdd", "tmp", "branch-protection.json");
 const MANAGED_START = "<!-- UT-TDD:managed:start -->";
 const MANAGED_END = "<!-- UT-TDD:managed:end -->";
 const PACK_REPO = "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack";
@@ -743,6 +744,20 @@ export function applyBranchProtection(
   ) {
     return { applied: false, reason: "declined" };
   }
+  const payloadPath = join(deps.repoRoot, BP_PAYLOAD_PATH);
+  deps.writeText(
+    payloadPath,
+    `${JSON.stringify(
+      {
+        required_status_checks: { strict: true, checks: [{ context: "harness-check" }] },
+        enforce_admins: true,
+        required_pull_request_reviews: { required_approving_review_count: 1 },
+        restrictions: null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
   // emit-only script と同じ PUT を gh 経由で適用 (token は gh 認証に委譲、harness は保持しない)
   const r = deps.gh([
     "api",
@@ -751,16 +766,8 @@ export function applyBranchProtection(
     "repos/{owner}/{repo}/branches/main/protection",
     "-H",
     "Accept: application/vnd.github+json",
-    "-F",
-    "required_status_checks[strict]=true",
-    "-f",
-    "required_status_checks[checks][][context]=harness-check",
-    "-F",
-    "enforce_admins=true",
-    "-F",
-    "required_pull_request_reviews[required_approving_review_count]=1",
-    "-F",
-    "restrictions=null",
+    "--input",
+    payloadPath,
   ]);
   return r.ok ? { applied: true, reason: "applied" } : { applied: false, reason: "gh-failed" };
 }

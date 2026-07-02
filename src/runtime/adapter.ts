@@ -285,6 +285,16 @@ export function buildProviderInvocation(input: ProviderInvocationInput): Provide
   return { command: resolved, args, shell: false };
 }
 
+export function normalizeProviderEffort(
+  provider: AdapterProvider,
+  effort: string | undefined,
+): string | undefined {
+  if (provider !== "claude" || !effort) return effort;
+  if (effort === "middle") return "medium";
+  if (effort === "xhigh") return "high";
+  return effort;
+}
+
 export function isProviderCommandSpawnable(
   provider: AdapterProvider,
   opts: ProviderProbeOptions = {},
@@ -315,6 +325,7 @@ export function isProviderCommandSpawnable(
 export function buildAdapterPlan(intent: AdapterIntent, mode: ExecutionMode): AdapterPlan {
   const available = providerAvailable(intent.provider, mode);
   const isCodex = intent.provider === "codex";
+  const providerEffort = normalizeProviderEffort(intent.provider, intent.effort);
   // Current contract: both providers receive task text via stdin. Args carry only
   // fixed flags, model/effort metadata, and provider-specific stdin sentinels.
   // Codex uses `codex exec -`; Claude uses `claude --print --input-format text`.
@@ -328,7 +339,7 @@ export function buildAdapterPlan(intent: AdapterIntent, mode: ExecutionMode): Ad
     : [
         ...CLAUDE_STDIN_ARGS,
         ...(intent.model ? [CLAUDE_MODEL_FLAG, intent.model] : []),
-        ...(intent.effort ? [CLAUDE_EFFORT_FLAG, intent.effort] : []),
+        ...(providerEffort ? [CLAUDE_EFFORT_FLAG, providerEffort] : []),
       ];
   return {
     provider: intent.provider,
@@ -336,13 +347,13 @@ export function buildAdapterPlan(intent: AdapterIntent, mode: ExecutionMode): Ad
     command: isCodex ? "codex" : "claude",
     args,
     stdin: formatAdapterPrompt(intent.task, intent.contextInjection),
-    ...(intent.provider === "claude" && intent.effort
-      ? { env: { [CLAUDE_EFFORT_ENV]: intent.effort } }
+    ...(intent.provider === "claude" && providerEffort
+      ? { env: { [CLAUDE_EFFORT_ENV]: providerEffort } }
       : {}),
     dry_run: !intent.execute,
     plan_id: intent.planId,
     model: intent.model,
-    effort: intent.effort,
+    effort: providerEffort,
     context_injection: intent.contextInjection,
     messages: available
       ? [intent.execute ? ADAPTER_AVAILABLE_MESSAGE : ADAPTER_DRY_RUN_MESSAGE]

@@ -38,14 +38,7 @@ jobs:
         run: bun run typecheck
 
       - name: pack smoke tests
-        run: >
-          bun run vitest run
-          tests/setup.test.ts
-          tests/distribution-acceptance.test.ts
-          tests/skill-recommend.test.ts
-          tests/skill-scaffold.test.ts
-          tests/dependency-drift.test.ts
-          --reporter=dot
+        run: bun run test:pack
 
       - name: lint (biome)
         run: bun run lint

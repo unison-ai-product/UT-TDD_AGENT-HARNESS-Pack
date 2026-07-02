@@ -1,4 +1,13 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -413,7 +422,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     const wrapper = deps.files.get(join("/repo", ".ut-tdd", "bin", "ut-tdd.mjs"));
     expect(wrapper).toContain('const setupSourceCli = "');
     expect(wrapper).toContain(
-      'existsSync(setupSourceCli) ? "bun" : existsSync(localBin) ? localBin : "ut-tdd"',
+      'existsSync(localBin) ? localBin : existsSync(setupSourceCli) ? "bun" : "ut-tdd"',
     );
     expect(wrapper).toContain("[setupSourceCli, ...process.argv.slice(2)]");
     expect(wrapper).not.toContain("{{UT_TDD_SOURCE_CLI_JSON}}");
@@ -424,6 +433,70 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(claudeSettings).toContain("hook agent-guard");
     expect(() => JSON.parse(codexHooks ?? "")).not.toThrow();
     expect(() => JSON.parse(claudeSettings ?? "")).not.toThrow();
+  });
+
+  it("U-SETUP-009b2: generated wrapper prefers consumer local bin when local and setup source both exist", () => {
+    const repo = mkdtempSync(join(tmpdir(), "ut-tdd-wrapper-local-"));
+    try {
+      const deps = mockDeps({ repoRoot: repo });
+      const plan = planSetup("0-A", { dryRun: false });
+      emitSetup(plan, {}, deps);
+      const wrapper = deps.files.get(join(repo, ".ut-tdd", "bin", "ut-tdd.mjs"));
+      expect(wrapper).toBeTruthy();
+
+      const wrapperPath = join(repo, ".ut-tdd", "bin", "ut-tdd.mjs");
+      const localBin = join(
+        repo,
+        "node_modules",
+        ".bin",
+        process.platform === "win32" ? "ut-tdd.cmd" : "ut-tdd",
+      );
+      mkdirSync(join(repo, ".ut-tdd", "bin"), { recursive: true });
+      mkdirSync(join(repo, "node_modules", ".bin"), { recursive: true });
+      writeFileSync(wrapperPath, wrapper ?? "");
+      writeFileSync(
+        localBin,
+        process.platform === "win32"
+          ? "@echo off\r\necho local-bin %*\r\nexit /b 0\r\n"
+          : '#!/usr/bin/env sh\necho local-bin "$@"\n',
+      );
+      if (process.platform !== "win32") chmodSync(localBin, 0o755);
+
+      const result = spawnSync(process.execPath, [wrapperPath, "status", "--json"], {
+        cwd: repo,
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe("local-bin status --json");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("U-SETUP-009b3: generated wrapper falls back to setup source through bun when local bin is absent", () => {
+    const repo = mkdtempSync(join(tmpdir(), "ut-tdd-wrapper-source-"));
+    try {
+      const deps = mockDeps({ repoRoot: repo });
+      const plan = planSetup("0-A", { dryRun: false });
+      emitSetup(plan, {}, deps);
+      const wrapper = deps.files.get(join(repo, ".ut-tdd", "bin", "ut-tdd.mjs"));
+      expect(wrapper).toBeTruthy();
+
+      const wrapperPath = join(repo, ".ut-tdd", "bin", "ut-tdd.mjs");
+      mkdirSync(join(repo, ".ut-tdd", "bin"), { recursive: true });
+      writeFileSync(wrapperPath, wrapper ?? "");
+
+      const result = spawnSync(process.execPath, [wrapperPath, "status"], {
+        cwd: repo,
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("mode:");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it("U-SETUP-010: emitSetup preserves consumer-owned adapter files and merges only managed blocks", () => {
@@ -678,6 +751,19 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(transformed.scripts.typecheck).toBe("tsc --noEmit");
   });
 
+  it("U-SETUP-011e: clean Pack workflow reuses the package test:pack script", () => {
+    const transformed = transformCleanDistributionArtifact(
+      ".github/workflows/harness-check.yml",
+      readFileSync(
+        join(process.cwd(), "docs", "templates", "github", "common", "pack-harness-check.yml"),
+        "utf8",
+      ),
+    );
+
+    expect(transformed).toContain("run: bun run test:pack");
+    expect(transformed).not.toContain("tests/distribution-acceptance.test.ts");
+  });
+
   it("U-SETUP-011b: real clean distribution artifact excludes dogfood governance audit documents", () => {
     const plan = buildCleanDistributionPlan({
       sourceTag: "v0.1.0",
@@ -853,6 +939,42 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(applyBranchProtection(plan, d3, { apply: true })).toEqual({
       applied: false,
       reason: "not-admin",
+    });
+
+    const ghAdminCalls: string[][] = [];
+    const ghAdmin = (args: string[]) => {
+      ghAdminCalls.push(args);
+      const key = args.join(" ");
+      if (key === "auth status") return { ok: true, stdout: "" };
+      if (key === "api repos/{owner}/{repo}")
+        return { ok: true, stdout: JSON.stringify({ permissions: { admin: true } }) };
+      if (
+        key.startsWith(
+          "api -X PUT repos/{owner}/{repo}/branches/main/protection -H Accept: application/vnd.github+json --input ",
+        )
+      )
+        return { ok: true, stdout: "" };
+      return { ok: false, stdout: "" };
+    };
+    const d4 = mockDeps({ isInteractive: true, gh: ghAdmin, confirm: () => true });
+    expect(applyBranchProtection(plan, d4, { apply: true })).toEqual({
+      applied: true,
+      reason: "applied",
+    });
+    const applyCall = ghAdminCalls.at(-1) ?? [];
+    expect(applyCall).toContain("--input");
+    expect(applyCall).not.toContain("-F");
+    expect(applyCall).not.toContain("-f");
+    const payload = JSON.parse(
+      Array.from(d4.files.entries()).find(([path]) =>
+        path.endsWith(join(".ut-tdd", "tmp", "branch-protection.json")),
+      )?.[1] ?? "{}",
+    );
+    expect(payload).toMatchObject({
+      required_status_checks: { strict: true, checks: [{ context: "harness-check" }] },
+      enforce_admins: true,
+      required_pull_request_reviews: { required_approving_review_count: 1 },
+      restrictions: null,
     });
   });
 

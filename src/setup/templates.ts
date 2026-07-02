@@ -195,7 +195,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "const repoRoot = process.cwd();",
     'const localBin = join(repoRoot, "node_modules", ".bin", process.platform === "win32" ? "ut-tdd.cmd" : "ut-tdd");',
     "const setupSourceCli = {{UT_TDD_SOURCE_CLI_JSON}};",
-    'const command = existsSync(setupSourceCli) ? "bun" : existsSync(localBin) ? localBin : "ut-tdd";',
+    'const command = existsSync(localBin) ? localBin : existsSync(setupSourceCli) ? "bun" : "ut-tdd";',
     'const args = command === "bun" ? [setupSourceCli, ...process.argv.slice(2)] : process.argv.slice(2);',
     "const result = spawnSync(command, args, {",
     '  stdio: "inherit",',

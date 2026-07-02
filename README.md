@@ -312,7 +312,7 @@ members:
 
 - `difficulty`: `trivial`、`simple`、`standard`、`complex`、`critical` のいずれか
 - `model`: 明示的な model 上書き。受け付ける値は provider の ID / ファミリ: `gpt-*`、`claude-*`、`codex-*`、`haiku`、`sonnet`、`opus`、`local`
-- `effort`: `low`、`medium`、`high` のいずれか
+- `effort`: `low`、`medium`、`middle`、`high`、`xhigh` のいずれか。Claude 実行時は provider 境界で `middle` は `medium`、`xhigh` は `high` に正規化します。
 
 省略した場合、ハーネスはタスクテキストから難易度を推論し、launch plan に `model_selection` を記録します。`serialize_after` は依存制御で、ランナーは依存先を先に並べ、依存先が失敗したら依存元をスキップします。
 
@@ -348,7 +348,7 @@ scripts/ut-tdd team suggest --task "subagent runtime adapter refactor" --json
 
 通常の入口は `ut-tdd codex` / `ut-tdd claude`(`--role` 委譲ラッパ)です。raw な `codex exec` / `claude --print` を直接の常用経路にはしません。以下は、そのラッパが内部で起動する provider CLI の形です。
 
-model が選択されている場合、Codex は `codex exec <task> -m <model>` として起動します。Claude は `claude --print --model <model> --effort <low|medium|high> -p <prompt>` として起動し、同じ effort 値を `CLAUDE_CODE_EFFORT_LEVEL` でも受け取ります。Codex の reasoning effort は決定論的に選択され、対応する Codex CLI の effort フラグが確定するまでは証跡 / プロンプトのメタデータに記録されます。
+model が選択されている場合、Codex は `codex exec - -m <model>` として起動し、Claude は `claude --print --input-format text --model <model> --effort <low|medium|high>` として起動します。どちらもタスク本文は argv ではなく stdin で渡します。Claude は provider-safe な effort 値を `CLAUDE_CODE_EFFORT_LEVEL` でも受け取ります。Codex の reasoning effort は決定論的に選択され、対応する Codex CLI の effort フラグが確定するまでは証跡 / プロンプトのメタデータに記録されます。
 
 managed なアダプタ呼び出しでは、ハーネスは legacy の raw-provider ガード環境マーカーを provider 実行前に**剥がし、それらを渡しません**。provider の認証情報は各公式 CLI のログインが保持し続けます。
 
@@ -378,6 +378,19 @@ notice are included in all copies or substantial portions of the software. See
 [`LICENSE`](./LICENSE) for the full license text.
 
 ## ✅ 検証
+
+Pack / consumer checkout での既定検証:
+
+```sh
+bun run typecheck
+bun run lint
+bun run test
+```
+
+Pack の `test` は `test:pack` と同じ配布安全 smoke に固定されています。source repo 専用の
+governance docs、PLAN、`.ut-tdd` runtime state、harness DB を必要とするフル検証は含みません。
+
+Source development repo での追加検証:
 
 ```sh
 bun run typecheck

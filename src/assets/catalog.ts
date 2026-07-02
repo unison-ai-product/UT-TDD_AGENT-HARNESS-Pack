@@ -490,7 +490,11 @@ export function checkRosterConsistency(input: {
   const allowlistedPresent = allowlist.length - missingFromRoster.length;
   return {
     ...listed,
-    ok: listed.ok && missingFromRoster.length === 0 && nameMismatches.length === 0,
+    ok:
+      listed.ok &&
+      missingFromRoster.length === 0 &&
+      nameMismatches.length === 0 &&
+      nonAllowlisted.length === 0,
     allowlistedPresent,
     missingFromRoster,
     nameMismatches,

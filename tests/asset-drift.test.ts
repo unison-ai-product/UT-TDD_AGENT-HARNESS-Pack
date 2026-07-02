@@ -83,6 +83,22 @@ describe("asset-drift lint (U-FR-L1-49)", () => {
     expect(r.violations.map((v) => v.kind)).toContain("missing-allowlisted-agent");
   });
 
+  it("detects generated or enrolled agent docs that are not guard allowlisted", () => {
+    const r = analyzeAssetDrift(
+      input({
+        assets: [agent("pmo-sonnet"), agent("be-logic"), skill("review-checklist")],
+        allowlist: ["pmo-sonnet"],
+      }),
+    );
+
+    expect(r.ok).toBe(false);
+    expect(r.violations).toContainEqual({
+      kind: "non-allowlisted-agent",
+      path: ".claude/agents/be-logic.md",
+      detail: "agent definition is generated/enrolled but not accepted by agent-guard",
+    });
+  });
+
   it("passes when enrolled assets are UT-TDD local and guard allowlist resolves", () => {
     const r = analyzeAssetDrift(input({}));
     expect(r.ok).toBe(true);

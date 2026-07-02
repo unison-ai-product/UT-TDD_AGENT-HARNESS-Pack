@@ -351,6 +351,10 @@ describe("IT-ASSET-01/02: roster registry and guard consistency", () => {
         "pmo-tech-fork",
         "pmo-tech-news",
         "refactor-scout",
+        "be-api",
+        "be-logic",
+        "db-schema",
+        "devops-deploy",
         "pdm-tech-innovation",
         "pdm-marketing-innovation",
         "pdm-innovation-manager",
@@ -364,7 +368,7 @@ describe("IT-ASSET-01/02: roster registry and guard consistency", () => {
     expect(result.ok).toBe(true);
     expect(result.missingFromRoster).toEqual([]);
     expect(result.nameMismatches).toEqual([]);
-    expect(result.allowlistedPresent).toBe(15);
-    expect(result.nonAllowlisted).toEqual(["be-api", "be-logic", "db-schema", "devops-deploy"]);
+    expect(result.allowlistedPresent).toBe(19);
+    expect(result.nonAllowlisted).toEqual([]);
   });
 });

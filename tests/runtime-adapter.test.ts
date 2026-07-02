@@ -7,6 +7,7 @@ import {
   buildProviderInvocation,
   isProviderCommandSpawnable,
   normalizeInvokeResult,
+  normalizeProviderEffort,
   providerAvailable,
   resolveClaudeNativeCommand,
   resolveCodexNativeCommand,
@@ -118,6 +119,29 @@ describe("runtime adapter plan", () => {
     expect(plan.args).not.toContain("--task");
     expect(plan.args).not.toContain("PLAN-L4-99-x");
     expect(plan.plan_id).toBe("PLAN-L4-99-x");
+  });
+
+  it("normalizes extended UT-TDD effort values at the Claude provider boundary", () => {
+    expect(normalizeProviderEffort("claude", "middle")).toBe("medium");
+    expect(normalizeProviderEffort("claude", "xhigh")).toBe("high");
+    expect(normalizeProviderEffort("codex", "xhigh")).toBe("xhigh");
+
+    const plan = buildAdapterPlan(
+      {
+        provider: "claude",
+        role: "pmo-sonnet",
+        task: "review",
+        model: "claude-sonnet-4-6",
+        effort: "xhigh",
+      },
+      "hybrid",
+    );
+
+    expect(plan.args).toContain("--effort");
+    expect(plan.args).toContain("high");
+    expect(plan.args).not.toContain("xhigh");
+    expect(plan.effort).toBe("high");
+    expect(plan.env).toEqual({ [CLAUDE_EFFORT_ENV]: "high" });
   });
 
   it("U-ADAPTER-002: honors UT_TDD_CODEX_BIN before PATH lookup", () => {

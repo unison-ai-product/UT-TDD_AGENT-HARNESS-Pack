@@ -24,7 +24,8 @@ export interface AssetDriftViolation {
     | "legacy-command-residue"
     | "legacy-runtime-name-residue"
     | "empty-docs-skills"
-    | "missing-allowlisted-agent";
+    | "missing-allowlisted-agent"
+    | "non-allowlisted-agent";
   path?: string;
   detail: string;
 }
@@ -176,6 +177,21 @@ export function analyzeAssetDrift(input: AssetDriftInput): AssetDriftResult {
     }
   }
 
+  if (input.allowlist.length > 0) {
+    const allowlist = new Set(input.allowlist);
+    for (const asset of input.assets.filter(
+      (a) => a.type === "agent" && a.path.startsWith(".claude/agents/"),
+    )) {
+      if (!allowlist.has(asset.id)) {
+        violations.push({
+          kind: "non-allowlisted-agent",
+          path: asset.path,
+          detail: "agent definition is generated/enrolled but not accepted by agent-guard",
+        });
+      }
+    }
+  }
+
   return {
     ok: violations.length === 0,
     checkedAssets: input.assets.length,
@@ -186,7 +202,7 @@ export function analyzeAssetDrift(input: AssetDriftInput): AssetDriftResult {
 export function assetDriftMessages(result: AssetDriftResult): string[] {
   if (result.ok) {
     return [
-      `asset-drift - OK (agent/skill/prompt docs=${result.checkedAssets}, legacy_source_path_residue=0, legacy_command_residue=0, legacy_runtime_name_residue=0, allowlist_missing=0)`,
+      `asset-drift - OK (agent/skill/prompt docs=${result.checkedAssets}, legacy_source_path_residue=0, legacy_command_residue=0, legacy_runtime_name_residue=0, allowlist_missing=0, non_allowlisted=0)`,
     ];
   }
   return result.violations.map((v) => {

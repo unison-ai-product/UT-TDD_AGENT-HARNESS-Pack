@@ -1,5 +1,9 @@
 /** Allowed subagent_type values for Claude Code Agent calls. */
 export const SUBAGENT_ALLOWLIST: ReadonlySet<string> = new Set([
+  "be-api",
+  "be-logic",
+  "db-schema",
+  "devops-deploy",
   "pmo-sonnet",
   "pmo-haiku",
   "pmo-project-explorer",
