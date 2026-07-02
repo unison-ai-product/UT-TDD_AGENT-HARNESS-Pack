@@ -670,9 +670,13 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
           "git clone https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git",
         ),
         expect.stringContaining("git -C /tmp/ut-tdd-pack status --short"),
+        expect.stringContaining("git -C /tmp/ut-tdd-pack add -- "),
         expect.stringContaining("git -C /tmp/ut-tdd-pack push origin main --follow-tags"),
       ]),
     );
+    expect(sync.commands.find((command) => command.includes(" add -- "))).toContain('"src/cli.ts"');
+    expect(sync.commands.join("\n")).not.toContain(" add -- .");
+    expect(sync.commands.join("\n")).not.toContain(" add --all");
     expect(sync.checks).toContain("denylistViolations.length === 0");
   });
 
@@ -848,6 +852,18 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         "monorepo package root -> adapter paths remain repo-root scoped",
       ]),
     );
+
+    const customRepo = buildConsumerReadinessPlan({
+      bunVersion: "1.3.0",
+      hasGit: true,
+      hasGh: true,
+      hasClaude: false,
+      hasCodex: true,
+      repoRoot: tmpdir(),
+      tag: "v9.9.9",
+      cleanRepo: "example/custom-pack",
+    });
+    expect(customRepo.contracts.tagPin).toBe("github:example/custom-pack#v9.9.9");
 
     const blocked = buildConsumerReadinessPlan({
       bunVersion: "1.2.9",

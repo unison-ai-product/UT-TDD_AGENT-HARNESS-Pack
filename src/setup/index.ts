@@ -29,6 +29,8 @@ export {
   buildPackSyncPlan,
   cleanDistributionArtifactPath,
   cleanDistributionSourcePath,
+  DEFAULT_PACK_REPO,
+  gitAddPathspecCommands,
   PACK_SAFE_TEST_SCRIPT,
   transformCleanDistributionArtifact,
 } from "./distribution";

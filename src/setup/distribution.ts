@@ -60,7 +60,7 @@ export interface PackSyncPlan {
   destructiveRemoteMutation: false;
 }
 
-const PACK_REPO = "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack";
+export const DEFAULT_PACK_REPO = "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack";
 const CLEAN_REQUIRED_PATHS = [
   "README.md",
   "LICENSE",
@@ -191,6 +191,26 @@ export function transformCleanDistributionArtifact(artifactPath: string, content
   return `${JSON.stringify({ ...parsed, scripts }, null, 2)}\n`;
 }
 
+function shellQuotePath(path: string): string {
+  return `"${path.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+export function gitAddPathspecCommands(
+  repoDir: string,
+  artifactPaths: readonly string[],
+): string[] {
+  const commands: string[] = [];
+  const chunkSize = 80;
+  for (let i = 0; i < artifactPaths.length; i += chunkSize) {
+    const chunk = artifactPaths
+      .slice(i, i + chunkSize)
+      .map(shellQuotePath)
+      .join(" ");
+    commands.push(`git -C ${repoDir} add -- ${chunk}`);
+  }
+  return commands;
+}
+
 function hasMinimumBun(version: string, minimum = "1.3.0"): boolean {
   const parse = (v: string): number[] => {
     const match = v.match(/\d+(?:\.\d+){0,2}/)?.[0] ?? "0";
@@ -212,7 +232,7 @@ export function buildCleanDistributionPlan(input: {
   cleanRepo?: string;
 }): CleanDistributionPlan {
   const sourceTag = input.sourceTag ?? "unreleased";
-  const cleanRepo = input.cleanRepo ?? PACK_REPO;
+  const cleanRepo = input.cleanRepo ?? DEFAULT_PACK_REPO;
   const normalized = [...new Set(input.paths.map(normalizeDistributionPath))].sort();
   const includedSourcePaths = normalized.filter(
     (path) => isAllowedCleanPath(path) && !isDeniedCleanPath(path),
@@ -250,6 +270,7 @@ export function buildConsumerReadinessPlan(input: {
   repoRoot: string;
   packageRoot?: string;
   tag?: string;
+  cleanRepo?: string;
 }): ConsumerReadinessPlan {
   const bunOk = Boolean(input.bunVersion && hasMinimumBun(input.bunVersion));
   const mode =
@@ -303,6 +324,7 @@ export function buildConsumerReadinessPlan(input: {
   ];
   const packageRoot = input.packageRoot ?? input.repoRoot;
   const tag = input.tag ?? "v0.1.0";
+  const cleanRepo = input.cleanRepo ?? DEFAULT_PACK_REPO;
   return {
     ok: bunOk && input.hasGit && (input.hasUtTddCli ?? true) && runtimeOk,
     checks,
@@ -338,7 +360,7 @@ export function buildConsumerReadinessPlan(input: {
     },
     contracts: {
       semver: "0.x may add capabilities; breaking public contract changes require migration notes",
-      tagPin: `github:${PACK_REPO}#${tag}`,
+      tagPin: `github:${cleanRepo}#${tag}`,
       stable: [
         "CLI surface",
         "adapter managed markers",
@@ -389,7 +411,7 @@ export function buildPackSyncPlan(input: {
       `git -C ${input.stagingDir} switch ${branch}`,
       "copy only copyPlan.sourcePath files from source repo to copyPlan.artifactPath in the staging repo",
       `git -C ${input.stagingDir} status --short`,
-      `git -C ${input.stagingDir} add -- .`,
+      ...gitAddPathspecCommands(input.stagingDir, input.exportPlan.artifactPaths),
       `git -C ${input.stagingDir} commit -m "chore: sync clean pack ${input.exportPlan.sourceTag}"`,
       `git -C ${input.stagingDir} tag -a ${input.exportPlan.sourceTag} -m "${input.exportPlan.sourceTag}"`,
       `git -C ${input.stagingDir} push origin ${branch} --follow-tags`,

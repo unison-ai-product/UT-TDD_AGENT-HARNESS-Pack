@@ -20,10 +20,10 @@ import {
   buildConsumerReadinessPlan,
   buildPackSyncPlan,
   cleanDistributionSourcePath,
+  DEFAULT_PACK_REPO,
+  gitAddPathspecCommands,
   transformCleanDistributionArtifact,
 } from "../setup/index";
-
-const PACK_REPO = "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack";
 
 function gitHead(): string | null {
   try {
@@ -79,7 +79,7 @@ export function registerDistributionCommands(program: Command): void {
     .command("plan")
     .description("emit the clean export, preflight, rollback, and contract plan")
     .option("--tag <tag>", "source/release tag", gitHead() ?? "unreleased")
-    .option("--clean-repo <name>", "clean distribution repository", PACK_REPO)
+    .option("--clean-repo <name>", "clean distribution repository", DEFAULT_PACK_REPO)
     .option("--package-root <path>", "consumer package root; defaults to repo root")
     .option("--json", "JSON output")
     .action((opts: { tag?: string; cleanRepo?: string; packageRoot?: string; json?: boolean }) => {
@@ -144,6 +144,7 @@ export function registerDistributionCommands(program: Command): void {
         repoRoot,
         packageRoot,
         tag: opts.tag,
+        cleanRepo: opts.cleanRepo,
       });
       const output = {
         ok: exportPlan.ok && readiness.ok,
@@ -172,7 +173,7 @@ export function registerDistributionCommands(program: Command): void {
     .command("sync-plan")
     .description("emit a non-destructive clean Pack repository sync plan")
     .option("--tag <tag>", "source/release tag", gitHead() ?? "unreleased")
-    .option("--clean-repo <name>", "clean distribution repository", PACK_REPO)
+    .option("--clean-repo <name>", "clean distribution repository", DEFAULT_PACK_REPO)
     .option("--branch <name>", "Pack repository target branch", "main")
     .option("--staging-dir <path>", "local Pack staging clone path")
     .option("--json", "JSON output")
@@ -232,7 +233,7 @@ export function registerDistributionCommands(program: Command): void {
       "materialize clean Pack artifacts into a local staging directory without publishing",
     )
     .option("--tag <tag>", "source/release tag", gitHead() ?? "unreleased")
-    .option("--clean-repo <name>", "clean distribution repository", PACK_REPO)
+    .option("--clean-repo <name>", "clean distribution repository", DEFAULT_PACK_REPO)
     .option("--branch <name>", "Pack repository target branch", "main")
     .option("--out <dir>", "local staging directory", ".ut-tdd/pack-stage")
     .option("--json", "JSON output")
@@ -324,7 +325,7 @@ export function registerDistributionCommands(program: Command): void {
       "update a local Pack repository checkout with clean artifacts; never commits or pushes",
     )
     .option("--tag <tag>", "source/release tag", gitHead() ?? "unreleased")
-    .option("--clean-repo <name>", "clean distribution repository", PACK_REPO)
+    .option("--clean-repo <name>", "clean distribution repository", DEFAULT_PACK_REPO)
     .option("--branch <name>", "Pack repository target branch", "main")
     .requiredOption("--repo-dir <dir>", "local Pack repository checkout to update")
     .option("--prune-local", "remove local files in repo-dir that are not part of the clean Pack")
@@ -427,7 +428,7 @@ export function registerDistributionCommands(program: Command): void {
             actualRemoteMutationRequiresPoApproval: true,
             nextCommands: [
               `git -C ${repoDir} status --short`,
-              `git -C ${repoDir} add --all`,
+              ...gitAddPathspecCommands(repoDir, exportPlan.artifactPaths),
               `git -C ${repoDir} commit -m "chore: sync clean pack ${exportPlan.sourceTag}"`,
               `git -C ${repoDir} push origin ${opts.branch ?? "main"}`,
             ],
@@ -459,12 +460,12 @@ export function registerDistributionCommands(program: Command): void {
       "emit non-destructive git tag and gh release commands for human-approved publishing",
     )
     .requiredOption("--tag <tag>", "release tag, e.g. v0.1.0")
-    .option("--repo <name>", "GitHub repository for release publication", PACK_REPO)
+    .option("--repo <name>", "GitHub repository for release publication", DEFAULT_PACK_REPO)
     .option("--json", "JSON output")
     .action((opts: { tag: string; repo?: string; json?: boolean }) => {
       const plan = buildReleasePublicationPlan({
         tag: opts.tag,
-        repo: opts.repo ?? PACK_REPO,
+        repo: opts.repo ?? DEFAULT_PACK_REPO,
         dryRun: true,
       });
       if (opts.json) {
@@ -484,7 +485,7 @@ export function registerDistributionCommands(program: Command): void {
     .command("package")
     .description("create a local clean tarball and sha256 checksum without publishing")
     .option("--tag <tag>", "source/release tag", gitHead() ?? "unreleased")
-    .option("--clean-repo <name>", "clean distribution repository", PACK_REPO)
+    .option("--clean-repo <name>", "clean distribution repository", DEFAULT_PACK_REPO)
     .option("--out <dir>", "output directory for local release artifacts", ".ut-tdd/release")
     .option("--json", "JSON output")
     .action((opts: { tag?: string; cleanRepo?: string; out?: string; json?: boolean }) => {

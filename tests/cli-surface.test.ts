@@ -604,10 +604,14 @@ describe("L7 CLI surface closure", () => {
       expect(prunedPayload.pack.nextCommands).toEqual(
         expect.arrayContaining([
           expect.stringContaining("git -C "),
+          expect.stringContaining(" add -- "),
+          expect.stringContaining('"src/cli.ts"'),
           expect.stringContaining('commit -m "chore: sync clean pack v0.1.0"'),
           expect.stringContaining("push origin main"),
         ]),
       );
+      expect(prunedPayload.pack.nextCommands.join("\n")).not.toContain("git add --all");
+      expect(prunedPayload.pack.nextCommands.join("\n")).not.toContain(" add --all");
     } finally {
       rmSync(packDir, { recursive: true, force: true });
       if (manifest) rmSync(manifest, { force: true });
