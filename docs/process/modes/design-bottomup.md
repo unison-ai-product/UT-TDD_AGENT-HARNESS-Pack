@@ -1,54 +1,51 @@
-> **正本化済** (PLAN-RECOVERY-07 で PLAN-DISCOVERY-07 Step 5 の back-merge として正本化、2026-07-02。PO サインオフ = PO /chat 指示 2026-07-02)。docs/process は forward/modes/gates の運用正本。規範変更は concept/requirements (上位正本) 先行 → 本 dir へ反映する。
+> **正本化済** (PLAN-RECOVERY-07 で PLAN-DISCOVERY-07 Step 5 back-merge、2026-07-02。PO サインオフ = PO /goal 指示 + RECOVERY-07 実行承認)。
 
 # design-bottomup 駆動モデル (画面後付け駆動)
 
-出典: PLAN-DISCOVERY-07 (S4 confirmed、① elicitation engine + Discovery 合成) / concept v3.1 §2.5 / `src/workflow/design-elicitation.ts` / `src/schema/route-map.ts` (design-bottomup 系 signal)
+出典: PLAN-DISCOVERY-07 (S4 confirmed、① elicitation engine + Discovery 合成) / concept v3.1 §2.5 (11-mode 化) / `src/schema/route-map.ts` (`design-bottomup`) / `src/workflow/design-elicitation.ts`
 
 ---
 
 ## 1. 概要
 
-**backend 実装が先行し、画面/FE 要件が後付けになる**状況の駆動モデル。既存 backend の実装事実から
-FE 要件 (画面・操作・表示) を機械的に洗い出し (① elicitation engine)、② mock 具体化 → ③ Forward 降下
-は **Discovery 合成で再利用**する (`composeDesignBottomupDiscovery` が discovery routing に乗る =
-mode の再発明をしない)。
+**backend 実装が先行し、画面 / FE 要件が後付けになる**状況の入口 mode。backend の実体
+(API / データ / 状態遷移) から FE 要件を機械的に洗い出し (① elicitation engine)、mock 具体化 (②)
+を経て Forward の画面設計文脈へ降下する (③)。②③ は Discovery 合成
+(`composeDesignBottomupDiscovery` が discovery routing を再利用) であり、mode を再発明しない。
 
 | 項目 | 値 |
 |------|-----|
-| kind | `poc` (Discovery 合成に乗る。エンジン出力は L2/L3 設計材料) |
-| drive | 専門職継承 (対象 work、多くは `fe` / `fullstack`) |
+| kind | `poc` (Discovery 合成。elicitation → mock → 検証 → 確定) |
+| drive | 専門職継承 (対象 work、多くは fe / fullstack) |
 | layer | `cross` |
-| workflow_phase | **S0-S4** (Discovery 合成) |
+| workflow_phase | **S0-S4** |
 | owner | aim + uiux |
-| 承認者 | — (Forward 降下時の pair-freeze gate は通常どおり) |
+| 承認者 | — (人間サインオフ不要) |
 | 自動 routing signal | `screen_addition_to_backend` / `design_bottomup` / `backend_derived_screen` / `add_ui_to_backend` |
 
-## 2. 入口条件
-
-- backend (API/データ/ロジック) が先に存在し、対応する画面要件 (L1 screen / L2) が空いている。
-- 「何の画面が要るか」を人手で列挙する前に、実装事実 (エンドポイント・エンティティ・状態) から
-  FE 要件候補を機械導出したい。
-
-## 3. フロー
+## 2. フロー
 
 ```
-backend 実装事実 → ① detectFeDesignGaps / elicitation engine (FE 要件候補 + gap warn)
-  → ② mock 具体化 (screen-design 工程専門を流用)
-  → ③ Discovery 合成 (S0-S4) で妥当性検証 → Forward 降下 (L2 画面設計 / L3 要件へ back-merge)
+backend 実体 → ① FE 要件 elicitation (design-elicitation.ts) → ② mock 具体化 (S2)
+  → ③ 検証 (S3) → S4 decide → Forward 合流 (L2 画面設計 / L3 画面要件 back-fill)
 ```
 
-- derive 不能な画面は warn で可視化する (absence-blindness 対策、DISCOVERY-07 レビュー PASS 済)。
-- 出口は必ず Forward 合流: 確定した FE 要件は L1 screen requirements / L2 設計へ着地させる。
+- ① は `detectFeDesignGaps` で「画面 doc の実体 (has_body) が無い backend 機能」を warn 可視化する
+  (absence-blindness 対策。derive 不能画面も warn)。
+- ② mock を飛ばして実装へ降りない (中央 UI と同じ「L2 設計から降ろす」規律)。
+
+## 3. exit 条件
+
+| 条件 | 検証方法 |
+|------|---------|
+| FE 要件が L3 画面要件 / L2 画面設計へ back-fill 済 | screen requirements / screen trace の差分確認 |
+| S4 decision 記録 (`decision_outcome`) | plan lint / poc S4 規律 |
+| V-model 整合 (画面 doc 孤児なし) | doctor (screen 系 gate) |
 
 ## 4. 他 mode との区別
 
 | mode | 違い |
 |------|------|
-| Discovery | 要件未確定一般。design-bottomup は「backend 実装済 + FE 後付け」に限定した入口で、検証サイクルは Discovery 合成を再利用 |
-| Add-feature | 既存 V-model doc 体系への差分追補。design-bottomup は screen 要件そのものが不在の状態から機械導出する |
-| screen-design (工程専門) | Forward L2 内の工程。design-bottomup は L2 に入る前の要件導出入口 |
-
-## 5. exit 条件
-
-- 導出 FE 要件が L1 screen requirements / L2 設計へ back-merge されている (Forward 合流)。
-- derive 不能 gap が warn として記録され、放置されていない (PO 判断 or 起票)。
+| Discovery | 要件そのものが未確定。design-bottomup は backend 実体が既にあり、FE 要件が後付けの点で入口が異なる (エンジンで機械導出可能) |
+| Add-feature | 既存システムへの差分追加。design-bottomup は「作った backend に UI を与える」画面駆動の逆向き |
+| screen-design (工程専門) | Forward L2 内の設計工程。design-bottomup は L2 へ**入る前**の要件洗い出し入口 |
