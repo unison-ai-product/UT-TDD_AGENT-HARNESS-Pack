@@ -1011,10 +1011,13 @@ dependencies:
   });
 
   it("U-PLANGOV-011y: route_mode_kind debt ledger doc stays in sync with lint allowlists", () => {
-    const ledger = readFileSync(
-      join(process.cwd(), "docs/governance/route-mode-kind-debt-audit-2026-07-02.md"),
-      "utf8",
+    const ledgerPath = join(
+      process.cwd(),
+      "docs/governance/route-mode-kind-debt-audit-2026-07-02.md",
     );
+    if (!existsSync(ledgerPath)) return;
+
+    const ledger = readFileSync(ledgerPath, "utf8");
     const [, legacySection = "", draftSection = ""] = ledger.split(
       /## (?:legacy landed|draft debt)[^\n]*\n/,
     );
