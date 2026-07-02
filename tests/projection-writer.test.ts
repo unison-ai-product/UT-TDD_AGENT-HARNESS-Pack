@@ -21,6 +21,7 @@ import {
 } from "../src/state-db/refactor-candidate-policy";
 import { analyzeRefactorCandidates } from "../src/state-db/refactor-candidates";
 import { projectRuntimeTestRunFromSessionEvent as projectRuntimeTestRunFromSessionEventCore } from "../src/state-db/runtime-projections";
+import { projectSkillMetrics as projectSkillMetricsCore } from "../src/state-db/skill-projections";
 
 interface VerificationWorkflowRow {
   phase: string;
@@ -680,6 +681,71 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
         exit_code: 1,
         status: "failed",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps extracted skill metric helpers behind injected dependencies", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      recordProjectionEvent(db, {
+        table: "skill_recommendations",
+        id: "skill-rec-core",
+        row: {
+          skill_recommendation_id: "skill-rec-core",
+          session_id: "",
+          plan_id: "PLAN-L7-231-skill-projection-extraction",
+          skill_id: "skill:review-checklist",
+          rank: 1,
+          score: 1,
+          reason: "test",
+          recommended_at: "2026-07-02T00:00:00.000Z",
+        },
+      });
+      recordProjectionEvent(db, {
+        table: "skill_invocations",
+        id: "skill-inv-core",
+        row: {
+          skill_invocation_id: "skill-inv-core",
+          session_id: "",
+          plan_id: "PLAN-L7-231-skill-projection-extraction",
+          skill_id: "skill:review-checklist",
+          layer: "L7",
+          drive: "db",
+          fired_at: "2026-07-02T00:01:00.000Z",
+          source: "test",
+          accepted: 1,
+        },
+      });
+
+      projectSkillMetricsCore({
+        db,
+        deps: {
+          nowIso: () => "2026-07-02T00:02:00.000Z",
+          stableId: (prefix, value) => `${prefix}:${value}`,
+          recordProjectionEvent,
+        },
+      });
+
+      const rows = db
+        .prepare("SELECT metric, value, status FROM quality_signals WHERE source = ?")
+        .all("skill-metrics");
+      expect(rows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            metric: "skill_firing_rate",
+            value: 1,
+            status: "pass",
+          }),
+          expect.objectContaining({
+            metric: "skill_acceptance_rate",
+            value: 1,
+            status: "pass",
+          }),
+        ]),
+      );
     } finally {
       db.close();
     }

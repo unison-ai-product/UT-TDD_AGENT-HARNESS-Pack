@@ -66,6 +66,13 @@ import {
   projectRuntimeSkillInvocationsFromSessionLogs as projectRuntimeSkillInvocationsFromSessionLogsCore,
   projectRuntimeTestRunFromSessionEvent as projectRuntimeTestRunFromSessionEventCore,
 } from "./runtime-projections";
+import {
+  PLAN_SUCCESS_STATUSES,
+  projectSkillEvaluations as projectSkillEvaluationsCore,
+  projectSkillMetrics as projectSkillMetricsCore,
+  projectSkillTelemetry as projectSkillTelemetryCore,
+  skillScore,
+} from "./skill-projections";
 import type { RunUsage } from "./token-tracker";
 
 export interface ProjectionEvent {
@@ -592,7 +599,7 @@ export function projectRuntimeSkillInvocationFromSessionEvent(
       stableId,
       resolvePlanId: (planId) => resolveProjectedPlanId(input.plans, planId),
       recordProjectionEvent,
-      skillScore,
+      skillScore: (plan, asset) => skillScore(plan, asset, { skillDriveModelForPlan }),
     },
   });
 }
@@ -610,7 +617,7 @@ function projectRuntimeSkillInvocationsFromSessionLogs(
       stableId,
       resolvePlanId: (planId) => resolveProjectedPlanId(plans, planId),
       recordProjectionEvent,
-      skillScore,
+      skillScore: (plan, asset) => skillScore(plan, asset, { skillDriveModelForPlan }),
     },
   });
 }
@@ -2162,228 +2169,27 @@ function projectMemoryEntries(repoRoot: string, db: HarnessDb): void {
   }
 }
 
-function skillScore(plan: ProjectedPlan, asset: Record<string, unknown>): number {
-  const text = [
-    asset.asset_id,
-    asset.path,
-    asset.trigger,
-    asset.role,
-    asset.capability,
-    asset.skill_type,
-    asset.applies_layers,
-    asset.applies_drive_models,
-  ]
-    .join(" ")
-    .toLowerCase();
-  const appliesLayers = String(asset.applies_layers ?? "")
-    .split(",")
-    .filter(Boolean);
-  const appliesDriveModels = String(asset.applies_drive_models ?? "")
-    .split(",")
-    .filter(Boolean);
-  const driveModel = skillDriveModelForPlan(plan.planId);
-  let score = 0.2;
-  if (appliesLayers.includes(plan.layer)) score += 0.35;
-  if (appliesDriveModels.includes(driveModel)) score += 0.35;
-  if (text.includes(plan.drive.toLowerCase())) score += 0.1;
-  if (/review|checklist|quality|test|lint/.test(text)) score += 0.25;
-  return Math.min(1, Number(score.toFixed(2)));
-}
-
 function projectSkillTelemetry(db: HarnessDb, plans: Map<string, ProjectedPlan>): void {
-  const recordedAt = nowIso();
-  const assets = db
-    .prepare("SELECT * FROM automation_assets WHERE asset_type = ? ORDER BY asset_id")
-    .all("skill")
-    // A skill-MAP (index of skills — the W10 curate draft and the future
-    // SKILL_MAP.md) is catalogued under the skill root for asset-drift coverage but
-    // is NOT itself a recommendable skill, so it must not enter the ranking.
-    .filter((asset) => !String(asset.skill_type ?? "").startsWith("skill-map"));
-  for (const plan of plans.values()) {
-    const ranked = assets
-      .map((asset) => ({ asset, score: skillScore(plan, asset) }))
-      .filter((entry) => entry.score > 0)
-      .sort(
-        (a, b) =>
-          b.score - a.score ||
-          String(a.asset.asset_id ?? "").localeCompare(String(b.asset.asset_id ?? "")),
-      )
-      .slice(0, 5);
-    const review = db
-      .prepare("SELECT has_evidence FROM review_evidence_registry WHERE plan_id = ?")
-      .get(plan.planId) as { has_evidence?: number } | undefined;
-    const accepted = Number(review?.has_evidence ?? 0) === 1 ? 1 : 0;
-    ranked.forEach((entry, index) => {
-      const skillId = String(entry.asset.asset_id ?? "");
-      const recId = stableId("skill-rec", `${plan.planId}:${skillId}`);
-      recordProjectionEvent(db, {
-        table: "skill_recommendations",
-        id: recId,
-        row: {
-          skill_recommendation_id: recId,
-          session_id: "",
-          plan_id: plan.planId,
-          skill_id: skillId,
-          rank: index + 1,
-          score: entry.score,
-          reason: `layer=${plan.layer}; technical_drive=${plan.drive}; drive_model=${skillDriveModelForPlan(plan.planId)}; kind=${plan.kind}`,
-          recommended_at: recordedAt,
-        },
-      });
-      if (accepted === 1) {
-        const invId = stableId("skill-inv", `${plan.planId}:${skillId}:review`);
-        recordProjectionEvent(db, {
-          table: "skill_invocations",
-          id: invId,
-          row: {
-            skill_invocation_id: invId,
-            session_id: "",
-            plan_id: plan.planId,
-            skill_id: skillId,
-            layer: plan.layer,
-            drive: plan.drive,
-            fired_at: recordedAt,
-            source: "auto-projection:review-evidence",
-            accepted,
-          },
-        });
-      }
-    });
-  }
+  projectSkillTelemetryCore({
+    db,
+    plans,
+    deps: { nowIso, stableId, recordProjectionEvent, skillDriveModelForPlan },
+  });
 }
 
 function projectSkillMetrics(db: HarnessDb): void {
-  const computedAt = nowIso();
-  const rows = db
-    .prepare(
-      `SELECT r.plan_id, r.skill_id,
-              COUNT(DISTINCT r.skill_recommendation_id) AS rec,
-              COUNT(DISTINCT i.skill_invocation_id) AS inv,
-              SUM(CASE WHEN i.accepted = 1 THEN 1 ELSE 0 END) AS acc
-       FROM skill_recommendations r
-       LEFT JOIN skill_invocations i
-         ON i.plan_id = r.plan_id AND i.skill_id = r.skill_id
-       GROUP BY r.plan_id, r.skill_id`,
-    )
-    .all();
-  for (const row of rows) {
-    const rec = Number(row.rec ?? 0);
-    const inv = Number(row.inv ?? 0);
-    const acc = Number(row.acc ?? 0);
-    const planId = String(row.plan_id ?? "");
-    const skillId = String(row.skill_id ?? "");
-    const firing = rec === 0 ? 0 : inv / rec;
-    const acceptance = inv === 0 ? 0 : acc / inv;
-    for (const metric of [
-      { name: "skill_firing_rate", value: firing },
-      { name: "skill_acceptance_rate", value: acceptance },
-    ]) {
-      const signalId = stableId("skill-signal", `${planId}:${skillId}:${metric.name}`);
-      recordProjectionEvent(db, {
-        table: "quality_signals",
-        id: signalId,
-        row: {
-          signal_id: signalId,
-          source: "skill-metrics",
-          subject_id: `${planId}:${skillId}`,
-          metric: metric.name,
-          value: Number(metric.value.toFixed(4)),
-          threshold: 1,
-          status: metric.value < 1 ? "warn" : "pass",
-          computed_at: computedAt,
-        },
-      });
-    }
-  }
+  projectSkillMetricsCore({
+    db,
+    deps: { nowIso, stableId, recordProjectionEvent },
+  });
 }
 
-/**
- * FR-L1-36: Per-skill evaluation projection.
- *
- * skill_rating = success_count / adoption_count (0.0–1.0).
- * adoption    = distinct plan_id with accepted=1 invocation.
- * success     = adopted plans whose plan_registry.status is a success state.
- *
- * Success states rationale (hardcode-with-reason):
- * - "confirmed" and "completed" are the two terminal-success statuses in use across
- *   all docs/plans/*.md frontmatter (as of 2026-06-15: 149 confirmed, 12 completed).
- *   "draft" and "archived" are explicitly not success.  No other status values appear
- *   in the corpus.  Single source of truth: PLAN frontmatter `status:` field parsed
- *   by projectPlans above.  If new statuses are introduced they must be registered
- *   here and in the schema (CLAUDE.md: ハードコード単一正本化).
- *
- * unused_flag = 1 when no invocation has fired_at within the last 30 days from asOf.
- * AC-FR-BR21-36-01: 5 adopted plans, all 5 success → rating 1.0, unused_flag 0.
- * AC-FR-BR21-36-02: 0 adoption in last 30 days → unused_flag 1; no auto-delete.
- * Cold-start: 0 skill_invocations → 0 evaluation rows.
- */
-// Success states that count toward skill_rating numerator.  See rationale above.
-const PLAN_SUCCESS_STATUSES = ["confirmed", "completed"] as const;
-
 export function projectSkillEvaluations(db: HarnessDb, opts?: { asOf?: string }): void {
-  const evaluatedAt = opts?.asOf ?? nowIso();
-  // 30-day window: ISO timestamp 30 days before evaluatedAt.
-  const cutoff = new Date(new Date(evaluatedAt).getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
-
-  // Adoption: distinct plan_id per skill_id with accepted=1 invocation.
-  const adoptionRows = db
-    .prepare(
-      `SELECT i.skill_id,
-              COUNT(DISTINCT i.plan_id) AS adoption_count,
-              MAX(i.fired_at) AS last_fired_at
-       FROM skill_invocations i
-       WHERE i.accepted = 1
-       GROUP BY i.skill_id`,
-    )
-    .all();
-
-  if (adoptionRows.length === 0) return; // Cold-start: nothing to write.
-
-  const successStatusPlaceholders = PLAN_SUCCESS_STATUSES.map(() => "?").join(", ");
-
-  for (const row of adoptionRows) {
-    const skillId = String(row.skill_id ?? "");
-    const adoptionCount = Number(row.adoption_count ?? 0);
-
-    // Success count: adopted plans in a success status.
-    const successRow = db
-      .prepare(
-        `SELECT COUNT(DISTINCT i.plan_id) AS success_count
-         FROM skill_invocations i
-         JOIN plan_registry p ON p.plan_id = i.plan_id
-         WHERE i.skill_id = ?
-           AND i.accepted = 1
-           AND p.status IN (${successStatusPlaceholders})`,
-      )
-      .get(skillId, ...PLAN_SUCCESS_STATUSES) as { success_count: number } | undefined;
-
-    const successCount = Number(successRow?.success_count ?? 0);
-    const skillRating = adoptionCount === 0 ? 0 : Number((successCount / adoptionCount).toFixed(4));
-
-    // unused_flag: no invocation in last 30 days from asOf.
-    const recentRow = db
-      .prepare(
-        `SELECT COUNT(*) AS cnt
-         FROM skill_invocations
-         WHERE skill_id = ? AND fired_at >= ?`,
-      )
-      .get(skillId, cutoff) as { cnt: number } | undefined;
-
-    const unusedFlag = Number(recentRow?.cnt ?? 0) === 0 ? 1 : 0;
-
-    recordProjectionEvent(db, {
-      table: "skill_evaluations",
-      id: skillId,
-      row: {
-        skill_id: skillId,
-        skill_rating: skillRating,
-        adoption_count: adoptionCount,
-        success_count: successCount,
-        unused_flag: unusedFlag,
-        evaluated_at: evaluatedAt,
-      },
-    });
-  }
+  projectSkillEvaluationsCore({
+    db,
+    opts,
+    deps: { nowIso, recordProjectionEvent },
+  });
 }
 
 /**
