@@ -188,4 +188,23 @@ describe("github-ci-policy lint", () => {
       detail: "Pack CI must use bun run test:pack instead of raw vitest run",
     });
   });
+
+  it("rejects source full bun run test in Pack CI because Pack uses the safe smoke suite", () => {
+    const pack = PACK_WORKFLOW.replace("bun run test:pack", "bun run test");
+    const result = analyzeGithubCiPolicy(docs(SOURCE_WORKFLOW, pack));
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContainEqual({
+      file: "docs/templates/github/common/pack-harness-check.yml",
+      profile: "pack",
+      reason: "missing_step",
+      detail: "pack tests",
+    });
+    expect(result.violations).toContainEqual({
+      file: "docs/templates/github/common/pack-harness-check.yml",
+      profile: "pack",
+      reason: "forbidden_source_full_tests",
+      detail: "Pack CI must use bun run test:pack instead of source full bun run test",
+    });
+  });
 });

@@ -20,7 +20,8 @@ export interface GithubCiPolicyViolation {
     | "missing_concurrency"
     | "missing_step"
     | "forbidden_full_doctor"
-    | "forbidden_raw_vitest";
+    | "forbidden_raw_vitest"
+    | "forbidden_source_full_tests";
   detail: string;
 }
 
@@ -48,6 +49,25 @@ interface WorkflowYaml {
   jobs?: Record<string, WorkflowJob>;
 }
 
+interface RequiredStepSpec {
+  label: string;
+  any: readonly string[];
+}
+
+interface ForbiddenStepSpec {
+  reason: Extract<
+    GithubCiPolicyViolation["reason"],
+    "forbidden_full_doctor" | "forbidden_raw_vitest" | "forbidden_source_full_tests"
+  >;
+  detail: string;
+  matches: (step: WorkflowStep) => boolean;
+}
+
+interface GithubCiProfileSpec {
+  requiredSteps: readonly RequiredStepSpec[];
+  forbiddenSteps: readonly ForbiddenStepSpec[];
+}
+
 const SOURCE_REQUIRED_STEPS = [
   { label: "checkout@v5", any: ["actions/checkout@v5"] },
   { label: "setup-bun@v2", any: ["oven-sh/setup-bun@v2"] },
@@ -71,6 +91,37 @@ const PACK_REQUIRED_STEPS = [
   { label: "setup projection", any: ["src/cli.ts setup --solo"] },
   { label: "setup smoke doctor", any: ["doctor --setup-smoke"] },
 ] as const;
+
+const GITHUB_CI_PROFILE_SPECS: Record<GithubWorkflowDoc["profile"], GithubCiProfileSpec> = {
+  source: {
+    requiredSteps: SOURCE_REQUIRED_STEPS,
+    forbiddenSteps: [],
+  },
+  pack: {
+    requiredSteps: PACK_REQUIRED_STEPS,
+    forbiddenSteps: [
+      {
+        reason: "forbidden_full_doctor",
+        detail:
+          "Pack CI must use doctor --setup-smoke because Pack excludes source-only governance docs",
+        matches: (step) => {
+          const run = step.run ?? "";
+          return run.includes(" doctor") && !run.includes("--setup-smoke");
+        },
+      },
+      {
+        reason: "forbidden_raw_vitest",
+        detail: "Pack CI must use bun run test:pack instead of raw vitest run",
+        matches: (step) => /\bvitest\s+run\b/.test(step.run ?? ""),
+      },
+      {
+        reason: "forbidden_source_full_tests",
+        detail: "Pack CI must use bun run test:pack instead of source full bun run test",
+        matches: (step) => /\bbun\s+run\s+test\b(?!:)/.test(step.run ?? ""),
+      },
+    ],
+  },
+};
 
 function inferGithubCiProfile(file: string, content: string): GithubWorkflowDoc["profile"] {
   if (file.endsWith(join("common", "pack-harness-check.yml"))) return "pack";
@@ -162,37 +213,20 @@ export function analyzeGithubCiPolicy(docs: GithubWorkflowDoc[]): GithubCiPolicy
     }
 
     const steps = job.steps ?? [];
-    const required = doc.profile === "source" ? SOURCE_REQUIRED_STEPS : PACK_REQUIRED_STEPS;
-    for (const spec of required) {
+    const profileSpec = GITHUB_CI_PROFILE_SPECS[doc.profile];
+    for (const spec of profileSpec.requiredSteps) {
       if (!hasStep(steps, spec.any)) {
         pushViolation({ violations, doc, reason: "missing_step", detail: spec.label });
       }
     }
 
-    if (doc.profile === "pack") {
-      const fullDoctor = steps.some((step) => {
-        const run = step.run ?? "";
-        return run.includes(" doctor") && !run.includes("--setup-smoke");
-      });
-      if (fullDoctor) {
+    for (const spec of profileSpec.forbiddenSteps) {
+      if (steps.some(spec.matches)) {
         pushViolation({
           violations,
           doc,
-          reason: "forbidden_full_doctor",
-          detail:
-            "Pack CI must use doctor --setup-smoke because Pack excludes source-only governance docs",
-        });
-      }
-      const rawVitest = steps.some((step) => {
-        const run = step.run ?? "";
-        return /\bvitest\s+run\b/.test(run);
-      });
-      if (rawVitest) {
-        pushViolation({
-          violations,
-          doc,
-          reason: "forbidden_raw_vitest",
-          detail: "Pack CI must use bun run test:pack instead of raw vitest run",
+          reason: spec.reason,
+          detail: spec.detail,
         });
       }
     }
