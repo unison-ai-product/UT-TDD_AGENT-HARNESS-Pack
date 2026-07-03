@@ -39,5 +39,7 @@ describe("CLI delegation adapter execution env", () => {
     expect(env.UT_TDD_CODEX_BIN).toBe("C:/tools/codex.cmd");
     expect(env.UT_TDD_CLAUDE_BIN).toBe("C:/tools/claude.exe");
     expect(env.EXTRA_FLAG).toBe("1");
+    expect(env).not.toBe(process.env);
+    expect(process.env[[legacyPrefix, "ALLOW", "RAW", "CODEX"].join("_")]).toBe("legacy");
   });
 });
