@@ -5,6 +5,21 @@ Notable changes to the UT-TDD Agent Harness Pack. Release artifacts
 releases page. Signature artifacts remain an external signing boundary and
 are marked `signatureCreated=false` in each manifest.
 
+## Unreleased
+
+### Added
+
+- Setup guide (`docs/reference/setup-guide.md`): install, projection into an
+  existing project, verification checklist, version update, troubleshooting.
+
+### Fixed
+
+- README: quick start now begins from `git clone`, the status badge reflects
+  the public MIT distribution, the wrapper resolution order includes the
+  repo-local CLI stage, and two command reference errors are corrected
+  (`skill suggest --plan` takes a PLAN id; Codex launches as
+  `codex exec -m <model> -`).
+
 ## v0.1.4 - 2026-07-03
 
 ### Fixed
