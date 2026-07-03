@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { collectDoctorCheckRun } from "../src/doctor/check-registry";
+import {
+  buildFullDoctorCheckDefinitions,
+  collectDoctorCheckRun,
+  FULL_DOCTOR_OUTPUT_IDS,
+} from "../src/doctor/check-registry";
 import {
   checkDependencyDrift as checkDependencyDriftAdapter,
   checkRegressionExpansion as checkRegressionExpansionAdapter,
@@ -885,7 +889,9 @@ describe("runDoctor", () => {
       join(process.cwd(), "src", "doctor", "check-registry.ts"),
       "utf8",
     );
-    const checkAggregation = registrySource.match(/const checks = \[([\s\S]*?)\];/)?.[1] ?? "";
+    const definitions = buildFullDoctorCheckDefinitions(nodeDoctorDeps(process.cwd()));
+    const checkIds = definitions.map((definition) => definition.id);
+    const outputIds = [...FULL_DOCTOR_OUTPUT_IDS];
     expect(indexSource).toContain(
       'import { collectDoctorCheckRun, type DoctorOptions } from "./check-registry";',
     );
@@ -894,64 +900,82 @@ describe("runDoctor", () => {
     );
     expect(registrySource).toContain("export function collectDoctorCheckRun");
     expect(registrySource).toContain("export function collectDoctorChecks");
+    expect(registrySource).toContain("export function buildFullDoctorCheckDefinitions");
     expect(registrySource).toContain('export type DoctorScope = "full" | "toolchain"');
     expect(registrySource).toContain('if (scope === "toolchain")');
     const expectedHardGates = [
       "backfill",
-      "scrumRev",
+      "scrum-reverse",
       "propagation",
-      "pairFreeze",
-      "moduleDrift",
-      "mergedPlanStatus",
-      "reviewEvidence",
-      "guardrailInvariants",
-      "assetDrift",
-      "skillAssignment",
-      "descentObligation",
-      "changeImpact",
-      "changeSetIntegrity",
-      "verificationProfile",
-      "branchKind",
-      "codingRules",
-      "designLanguage",
-      "dddTddRules",
-      "runtimePortability",
-      "dbProjectionCoverage",
-      "dbProjectionIngestion",
-      "ruleDrift",
-      "gateConfirm",
-      "planSchedule",
-      "planGovernance",
-      "planDod",
-      "placeholderDeps",
-      "g1Trace",
-      "g3Trace",
-      "ruleAutomationClosure",
-      "driveModelPassage",
-      "driveDbRegistration",
-      "frRoadmapCoverage",
-      "telemetryClosure",
-      "cycleP4Verification",
-      "l6FrCoverage",
+      "pair-freeze",
+      "module-drift",
+      "merged-plan-status",
+      "review-evidence",
+      "guardrail-invariants",
+      "asset-drift",
+      "skill-assignment",
+      "descent-obligation",
+      "change-impact",
+      "change-set-integrity",
+      "verification-profile",
+      "branch-kind-check",
+      "coding-rules",
+      "design-language",
+      "ddd-tdd-rules",
+      "runtime-portability",
+      "db-projection-coverage",
+      "db-projection-ingestion",
+      "rule-drift",
+      "gate-confirm",
+      "plan-schedule",
+      "plan-governance",
+      "plan-dod",
+      "placeholder-deps",
+      "g1-trace",
+      "g3-trace",
+      "rule-automation-closure",
+      "drive-model-passage",
+      "drive-db-registration",
+      "fr-roadmap-coverage",
+      "telemetry-closure",
+      "cycle-p4-verification",
+      "l6-fr-coverage",
       "readability",
-      "runtimeReadability",
-      "projectHooks",
-      "codexWrapperParity",
-      "toolchainPin",
-      "l6Completion",
-      "l7Completion",
-      "verificationGroups",
+      "runtime-readability",
+      "project-hook",
+      "codex-wrapper-parity",
+      "toolchain-pin",
+      "l6-completion",
+      "l7-completion",
+      "verification-groups",
       "roadmap",
-      "implPlanTrace",
-      "oracleTestTrace",
-      "trackedCanonical",
-      "dependencyDrift",
-      "regressionExpansion",
-      "greenCommandDigest",
+      "impl-plan-trace",
+      "oracle-test-trace",
+      "tracked-canonical",
+      "dependency-drift",
+      "regression-expansion",
+      "green-command-digest",
     ];
 
-    expect(expectedHardGates.filter((name) => !checkAggregation.includes(name))).toEqual([]);
-    expect(checkAggregation).not.toContain("planReferenceFreshness");
-    expect(checkAggregation).not.toContain("checkPlanReferenceFreshnessAdvisory");
+    expect(new Set(checkIds).size).toBe(checkIds.length);
+    expect(new Set(outputIds).size).toBe(outputIds.length);
+    expect(checkIds).toEqual(expect.arrayContaining(outputIds));
+    expect(outputIds).toEqual(expect.arrayContaining(expectedHardGates));
+    expect(checkIds).not.toContain("plan-reference-freshness");
+    expect(outputIds).not.toContain("plan-reference-freshness");
+    expect(registrySource).not.toContain("checkPlanReferenceFreshnessAdvisory");
+    expect(checkIds.indexOf("review-evidence")).toBeLessThan(checkIds.indexOf("pair-freeze"));
+    expect(outputIds.indexOf("l7-completion")).toBeLessThan(outputIds.indexOf("review-evidence"));
+    expect(checkIds.indexOf("guardrail-invariants")).toBeGreaterThan(
+      checkIds.indexOf("regression-expansion"),
+    );
+    expect(outputIds.indexOf("guardrail-invariants")).toBeLessThan(
+      outputIds.indexOf("verification-groups"),
+    );
+    expect(
+      definitions.find((definition) => definition.id === "regression-expansion"),
+    ).toMatchObject({
+      requires: ["dependency-drift"],
+    });
   });
 });

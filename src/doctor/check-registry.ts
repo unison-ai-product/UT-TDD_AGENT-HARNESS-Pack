@@ -102,6 +102,390 @@ export interface DoctorCheckRun {
   timings: DoctorTiming[];
 }
 
+export interface DoctorCheckDefinition {
+  id: string;
+  profiles: readonly DoctorScope[];
+  requires?: readonly string[];
+  run: () => LintResult;
+}
+
+export const FULL_DOCTOR_OUTPUT_IDS = [
+  "backfill",
+  "scrum-reverse",
+  "plan-supersession",
+  "plan-body-substance",
+  "plan-completion-drift",
+  "propagation",
+  "pair-freeze",
+  "module-drift",
+  "merged-plan-status",
+  "plan-artifact-existence",
+  "asset-drift",
+  "skill-assignment",
+  "descent-obligation",
+  "change-impact",
+  "change-set-integrity",
+  "verification-profile",
+  "branch-kind-check",
+  "coding-rules",
+  "design-language",
+  "ddd-tdd-rules",
+  "runtime-portability",
+  "rule-drift",
+  "gate-confirm",
+  "plan-schedule",
+  "plan-governance",
+  "plan-dod",
+  "placeholder-deps",
+  "g1-trace",
+  "g3-trace",
+  "rule-automation-closure",
+  "drive-model-passage",
+  "drive-db-registration",
+  "fr-roadmap-coverage",
+  "telemetry-closure",
+  "cycle-p4-verification",
+  "l14-close-audit",
+  "project-hook",
+  "github-ci-policy",
+  "codex-hook-adapter",
+  "codex-wrapper-parity",
+  "toolchain-pin",
+  "l6-fr-coverage",
+  "readability",
+  "runtime-readability",
+  "feedback-log",
+  "l6-completion",
+  "l7-completion",
+  "review-evidence",
+  "guardrail-invariants",
+  "verification-groups",
+  "roadmap",
+  "impl-plan-trace",
+  "oracle-test-trace",
+  "tracked-canonical",
+  "sub-doc-catalog-drift",
+  "sub-doc-section-structure",
+  "screen-impl-pair-freeze",
+  "dependency-drift",
+  "regression-expansion",
+  "db-projection-coverage",
+  "db-projection-ingestion",
+  "doc-consistency",
+  "entity-coverage",
+  "fr-registry-audit",
+  "improvement-backlog",
+  "right-arm-gate-planning",
+  "g8-integration-workflow",
+  "g9-system-workflow",
+  "g10-ux-workflow",
+  "lint-wiring",
+  "proposal-document-coverage",
+  "frontend-design-coverage",
+  "handover-outstanding",
+  "green-command-digest",
+  "forward-convergence",
+  "forward-convergence-audit",
+] as const;
+
+export function buildFullDoctorCheckDefinitions(
+  deps: DoctorDeps,
+  options: DoctorOptions = {},
+): DoctorCheckDefinition[] {
+  const fullProfile = ["full"] as const;
+  let dependencyDriftResult: ReturnType<typeof checkDependencyDrift>["result"] = null;
+
+  return [
+    { id: "backfill", profiles: fullProfile, run: () => checkBackfillResult(deps.repoRoot) },
+    { id: "scrum-reverse", profiles: fullProfile, run: () => checkScrumReverse(deps.repoRoot) },
+    {
+      id: "plan-supersession",
+      profiles: fullProfile,
+      run: () => checkPlanSupersession(deps.repoRoot),
+    },
+    {
+      id: "plan-body-substance",
+      profiles: fullProfile,
+      run: () => checkPlanBodySubstance(deps.repoRoot),
+    },
+    {
+      id: "plan-completion-drift",
+      profiles: fullProfile,
+      run: () => checkPlanCompletionDrift(deps.repoRoot),
+    },
+    { id: "propagation", profiles: fullProfile, run: () => checkPropagation(deps.repoRoot) },
+    { id: "review-evidence", profiles: fullProfile, run: () => checkReviewEvidence(deps.repoRoot) },
+    { id: "pair-freeze", profiles: fullProfile, run: () => checkPairFreeze(deps.repoRoot) },
+    { id: "module-drift", profiles: fullProfile, run: () => checkModuleDrift(deps.repoRoot) },
+    {
+      id: "merged-plan-status",
+      profiles: fullProfile,
+      run: () => checkMergedPlanStatus(deps.repoRoot),
+    },
+    {
+      id: "plan-artifact-existence",
+      profiles: fullProfile,
+      run: () => checkPlanArtifactExistence(deps.repoRoot),
+    },
+    { id: "asset-drift", profiles: fullProfile, run: () => checkAssetDrift(deps.repoRoot) },
+    {
+      id: "skill-assignment",
+      profiles: fullProfile,
+      run: () => checkSkillAssignment(deps.repoRoot),
+    },
+    {
+      id: "descent-obligation",
+      profiles: fullProfile,
+      run: () => checkDescentObligation(deps.repoRoot),
+    },
+    { id: "change-impact", profiles: fullProfile, run: () => checkChangeImpact(deps.repoRoot) },
+    {
+      id: "change-set-integrity",
+      profiles: fullProfile,
+      run: () => checkChangeSetIntegrity(deps.repoRoot),
+    },
+    {
+      id: "verification-profile",
+      profiles: fullProfile,
+      run: () => checkVerificationProfile(deps.repoRoot),
+    },
+    {
+      id: "branch-kind-check",
+      profiles: fullProfile,
+      run: () => checkBranchKind(deps.repoRoot),
+    },
+    { id: "coding-rules", profiles: fullProfile, run: () => checkCodingRules(deps.repoRoot) },
+    {
+      id: "design-language",
+      profiles: fullProfile,
+      run: () => checkDesignLanguage(deps.repoRoot),
+    },
+    { id: "ddd-tdd-rules", profiles: fullProfile, run: () => checkDddTddRules(deps.repoRoot) },
+    {
+      id: "runtime-portability",
+      profiles: fullProfile,
+      run: () => checkRuntimePortability(deps.repoRoot),
+    },
+    { id: "rule-drift", profiles: fullProfile, run: () => checkRuleDrift(deps.repoRoot) },
+    { id: "gate-confirm", profiles: fullProfile, run: () => checkGateConfirm(deps.repoRoot) },
+    { id: "plan-schedule", profiles: fullProfile, run: () => checkPlanSchedule(deps.repoRoot) },
+    {
+      id: "plan-governance",
+      profiles: fullProfile,
+      run: () => checkPlanGovernance(deps.repoRoot),
+    },
+    { id: "plan-dod", profiles: fullProfile, run: () => checkPlanDod(deps.repoRoot) },
+    {
+      id: "placeholder-deps",
+      profiles: fullProfile,
+      run: () => checkPlaceholderDeps(deps.repoRoot),
+    },
+    {
+      id: "g1-trace",
+      profiles: fullProfile,
+      run: () => checkPlanTraceGate(deps.repoRoot, "G1-trace"),
+    },
+    {
+      id: "g3-trace",
+      profiles: fullProfile,
+      run: () => checkPlanTraceGate(deps.repoRoot, "G3-trace"),
+    },
+    {
+      id: "rule-automation-closure",
+      profiles: fullProfile,
+      run: () => checkRuleAutomationClosure(deps.repoRoot),
+    },
+    {
+      id: "drive-model-passage",
+      profiles: fullProfile,
+      run: () => checkDriveModelPassage(deps.repoRoot),
+    },
+    {
+      id: "drive-db-registration",
+      profiles: fullProfile,
+      run: () => checkDriveDbRegistration(deps.repoRoot),
+    },
+    {
+      id: "fr-roadmap-coverage",
+      profiles: fullProfile,
+      run: () => checkFrRoadmapCoverage(deps.repoRoot),
+    },
+    {
+      id: "telemetry-closure",
+      profiles: fullProfile,
+      run: () => checkTelemetryClosure(deps.repoRoot),
+    },
+    {
+      id: "cycle-p4-verification",
+      profiles: fullProfile,
+      run: () => checkCycleP4Verification(deps.repoRoot),
+    },
+    {
+      id: "l14-close-audit",
+      profiles: fullProfile,
+      run: () => checkL14CloseAudit(deps.repoRoot),
+    },
+    { id: "project-hook", profiles: fullProfile, run: () => checkProjectHooks(deps.repoRoot) },
+    {
+      id: "github-ci-policy",
+      profiles: fullProfile,
+      run: () => checkGithubCiPolicy(deps.repoRoot),
+    },
+    {
+      id: "codex-hook-adapter",
+      profiles: fullProfile,
+      run: () => checkCodexHookAdapter(deps.repoRoot),
+    },
+    {
+      id: "codex-wrapper-parity",
+      profiles: fullProfile,
+      run: () => checkCodexWrapperParity(deps),
+    },
+    { id: "toolchain-pin", profiles: fullProfile, run: () => checkToolchainPin(deps.repoRoot) },
+    { id: "l6-fr-coverage", profiles: fullProfile, run: () => checkL6FrCoverage(deps.repoRoot) },
+    { id: "readability", profiles: fullProfile, run: () => checkReadability(deps.repoRoot) },
+    {
+      id: "runtime-readability",
+      profiles: fullProfile,
+      run: () => checkRuntimeReadability(deps.repoRoot),
+    },
+    { id: "feedback-log", profiles: fullProfile, run: () => checkFeedbackLog(deps.repoRoot) },
+    { id: "l6-completion", profiles: fullProfile, run: () => checkL6Completion(deps.repoRoot) },
+    { id: "l7-completion", profiles: fullProfile, run: () => checkL7Completion(deps.repoRoot) },
+    { id: "roadmap", profiles: fullProfile, run: () => checkRoadmap(deps.repoRoot) },
+    {
+      id: "impl-plan-trace",
+      profiles: fullProfile,
+      run: () => checkImplPlanTrace(deps.repoRoot),
+    },
+    {
+      id: "oracle-test-trace",
+      profiles: fullProfile,
+      run: () => checkOracleTestTrace(deps.repoRoot),
+    },
+    {
+      id: "tracked-canonical",
+      profiles: fullProfile,
+      run: () => checkTrackedCanonical(deps.repoRoot),
+    },
+    {
+      id: "sub-doc-catalog-drift",
+      profiles: fullProfile,
+      run: () => checkSubDocCatalogDrift(deps.repoRoot),
+    },
+    {
+      id: "sub-doc-section-structure",
+      profiles: fullProfile,
+      run: () => checkSubDocSectionStructure(deps.repoRoot),
+    },
+    {
+      id: "screen-impl-pair-freeze",
+      profiles: fullProfile,
+      run: () => checkScreenImplPairFreeze(deps.repoRoot),
+    },
+    {
+      id: "verification-groups",
+      profiles: fullProfile,
+      run: () => checkVerificationGroupsResult(deps.repoRoot),
+    },
+    {
+      id: "dependency-drift",
+      profiles: fullProfile,
+      run: () => {
+        const result = checkDependencyDrift(deps.repoRoot);
+        dependencyDriftResult = result.result;
+        return result;
+      },
+    },
+    {
+      id: "regression-expansion",
+      profiles: fullProfile,
+      requires: ["dependency-drift"],
+      run: () => checkRegressionExpansion(deps.repoRoot, dependencyDriftResult),
+    },
+    {
+      id: "guardrail-invariants",
+      profiles: fullProfile,
+      run: () => checkGuardrailInvariants(deps.repoRoot),
+    },
+    {
+      id: "db-projection-coverage",
+      profiles: fullProfile,
+      run: () => checkDbProjectionCoverage(deps.repoRoot),
+    },
+    {
+      id: "db-projection-ingestion",
+      profiles: fullProfile,
+      run: () => checkDbProjectionIngestion(deps.repoRoot, options),
+    },
+    { id: "doc-consistency", profiles: fullProfile, run: () => checkDocConsistency(deps.repoRoot) },
+    { id: "entity-coverage", profiles: fullProfile, run: () => checkEntityCoverage(deps.repoRoot) },
+    {
+      id: "fr-registry-audit",
+      profiles: fullProfile,
+      run: () => checkFrRegistryAudit(deps.repoRoot),
+    },
+    {
+      id: "improvement-backlog",
+      profiles: fullProfile,
+      run: () => checkImprovementBacklog(deps.repoRoot),
+    },
+    {
+      id: "right-arm-gate-planning",
+      profiles: fullProfile,
+      run: () => checkRightArmGatePlanning(deps.repoRoot),
+    },
+    {
+      id: "g8-integration-workflow",
+      profiles: fullProfile,
+      run: () => checkG8IntegrationWorkflow(deps.repoRoot),
+    },
+    {
+      id: "g9-system-workflow",
+      profiles: fullProfile,
+      run: () => checkG9SystemWorkflow(deps.repoRoot),
+    },
+    { id: "g10-ux-workflow", profiles: fullProfile, run: () => checkG10UxWorkflow(deps.repoRoot) },
+    { id: "lint-wiring", profiles: fullProfile, run: () => checkLintWiring(deps.repoRoot) },
+    {
+      id: "proposal-document-coverage",
+      profiles: fullProfile,
+      run: () => checkProposalDocumentCoverage(deps.repoRoot),
+    },
+    {
+      id: "frontend-design-coverage",
+      profiles: fullProfile,
+      run: () => checkFrontendDesignCoverage(deps.repoRoot),
+    },
+    {
+      id: "handover-outstanding",
+      profiles: fullProfile,
+      run: () => checkHandoverOutstandingAnchor(handoverDeps(deps)),
+    },
+    {
+      id: "green-command-digest",
+      profiles: fullProfile,
+      run: () => {
+        const result = checkGreenCommandDigests(deps.repoRoot);
+        return {
+          ...result,
+          ok: options.strictGreenCommandDigest === true ? result.mismatches.length === 0 : true,
+        };
+      },
+    },
+    {
+      id: "forward-convergence",
+      profiles: fullProfile,
+      run: () => checkForwardConvergence(deps.repoRoot),
+    },
+    {
+      id: "forward-convergence-audit",
+      profiles: fullProfile,
+      run: () => checkForwardConvergenceAudit(deps.repoRoot),
+    },
+  ];
+}
+
 export function collectDoctorCheckRun(
   deps: DoctorDeps,
   options: DoctorOptions = {},
@@ -129,225 +513,20 @@ export function collectDoctorCheckRun(
     return { checks: [toolchainPin], timings };
   }
 
-  const backfill = record("backfill", () => checkBackfillResult(deps.repoRoot));
-  const scrumRev = record("scrum-reverse", () => checkScrumReverse(deps.repoRoot));
-  const planSupersession = record("plan-supersession", () => checkPlanSupersession(deps.repoRoot));
-  const planBodySubstance = record("plan-body-substance", () =>
-    checkPlanBodySubstance(deps.repoRoot),
-  );
-  const planCompletionDrift = record("plan-completion-drift", () =>
-    checkPlanCompletionDrift(deps.repoRoot),
-  );
-  const propagation = record("propagation", () => checkPropagation(deps.repoRoot));
-  const reviewEvidence = record("review-evidence", () => checkReviewEvidence(deps.repoRoot));
-  const pairFreeze = record("pair-freeze", () => checkPairFreeze(deps.repoRoot));
-  const moduleDrift = record("module-drift", () => checkModuleDrift(deps.repoRoot));
-  const mergedPlanStatus = record("merged-plan-status", () => checkMergedPlanStatus(deps.repoRoot));
-  const planArtifactExistence = record("plan-artifact-existence", () =>
-    checkPlanArtifactExistence(deps.repoRoot),
-  );
-  const assetDrift = record("asset-drift", () => checkAssetDrift(deps.repoRoot));
-  const skillAssignment = record("skill-assignment", () => checkSkillAssignment(deps.repoRoot));
-  const descentObligation = record("descent-obligation", () =>
-    checkDescentObligation(deps.repoRoot),
-  );
-  const changeImpact = record("change-impact", () => checkChangeImpact(deps.repoRoot));
-  const changeSetIntegrity = record("change-set-integrity", () =>
-    checkChangeSetIntegrity(deps.repoRoot),
-  );
-  const verificationProfile = record("verification-profile", () =>
-    checkVerificationProfile(deps.repoRoot),
-  );
-  const branchKind = record("branch-kind-check", () => checkBranchKind(deps.repoRoot));
-  const codingRules = record("coding-rules", () => checkCodingRules(deps.repoRoot));
-  const designLanguage = record("design-language", () => checkDesignLanguage(deps.repoRoot));
-  const dddTddRules = record("ddd-tdd-rules", () => checkDddTddRules(deps.repoRoot));
-  const runtimePortability = record("runtime-portability", () =>
-    checkRuntimePortability(deps.repoRoot),
-  );
-  const ruleDrift = record("rule-drift", () => checkRuleDrift(deps.repoRoot));
-  const gateConfirm = record("gate-confirm", () => checkGateConfirm(deps.repoRoot));
-  const planSchedule = record("plan-schedule", () => checkPlanSchedule(deps.repoRoot));
-  const planGovernance = record("plan-governance", () => checkPlanGovernance(deps.repoRoot));
-  const planDod = record("plan-dod", () => checkPlanDod(deps.repoRoot));
-  const placeholderDeps = record("placeholder-deps", () => checkPlaceholderDeps(deps.repoRoot));
-  const g1Trace = record("g1-trace", () => checkPlanTraceGate(deps.repoRoot, "G1-trace"));
-  const g3Trace = record("g3-trace", () => checkPlanTraceGate(deps.repoRoot, "G3-trace"));
-  const ruleAutomationClosure = record("rule-automation-closure", () =>
-    checkRuleAutomationClosure(deps.repoRoot),
-  );
-  const driveModelPassage = record("drive-model-passage", () =>
-    checkDriveModelPassage(deps.repoRoot),
-  );
-  const driveDbRegistration = record("drive-db-registration", () =>
-    checkDriveDbRegistration(deps.repoRoot),
-  );
-  const frRoadmapCoverage = record("fr-roadmap-coverage", () =>
-    checkFrRoadmapCoverage(deps.repoRoot),
-  );
-  const telemetryClosure = record("telemetry-closure", () => checkTelemetryClosure(deps.repoRoot));
-  const cycleP4Verification = record("cycle-p4-verification", () =>
-    checkCycleP4Verification(deps.repoRoot),
-  );
-  const l14CloseAudit = record("l14-close-audit", () => checkL14CloseAudit(deps.repoRoot));
-  const projectHooks = record("project-hook", () => checkProjectHooks(deps.repoRoot));
-  const githubCiPolicy = record("github-ci-policy", () => checkGithubCiPolicy(deps.repoRoot));
-  const codexHookAdapter = record("codex-hook-adapter", () => checkCodexHookAdapter(deps.repoRoot));
-  const codexWrapperParity = record("codex-wrapper-parity", () => checkCodexWrapperParity(deps));
-  const toolchainPin = record("toolchain-pin", () => checkToolchainPin(deps.repoRoot));
-  const l6FrCoverage = record("l6-fr-coverage", () => checkL6FrCoverage(deps.repoRoot));
-  const readability = record("readability", () => checkReadability(deps.repoRoot));
-  const runtimeReadability = record("runtime-readability", () =>
-    checkRuntimeReadability(deps.repoRoot),
-  );
-  const feedbackLog = record("feedback-log", () => checkFeedbackLog(deps.repoRoot));
-  const l6Completion = record("l6-completion", () => checkL6Completion(deps.repoRoot));
-  const l7Completion = record("l7-completion", () => checkL7Completion(deps.repoRoot));
-  const roadmap = record("roadmap", () => checkRoadmap(deps.repoRoot));
-  const implPlanTrace = record("impl-plan-trace", () => checkImplPlanTrace(deps.repoRoot));
-  const oracleTestTrace = record("oracle-test-trace", () => checkOracleTestTrace(deps.repoRoot));
-  const trackedCanonical = record("tracked-canonical", () => checkTrackedCanonical(deps.repoRoot));
-  const subDocCatalogDrift = record("sub-doc-catalog-drift", () =>
-    checkSubDocCatalogDrift(deps.repoRoot),
-  );
-  const subDocSectionStructure = record("sub-doc-section-structure", () =>
-    checkSubDocSectionStructure(deps.repoRoot),
-  );
-  const screenImplPairFreeze = record("screen-impl-pair-freeze", () =>
-    checkScreenImplPairFreeze(deps.repoRoot),
-  );
-  const verificationGroups = record("verification-groups", () =>
-    checkVerificationGroupsResult(deps.repoRoot),
-  );
-  const dependencyDrift = record("dependency-drift", () => checkDependencyDrift(deps.repoRoot));
-  const regressionExpansion = record("regression-expansion", () =>
-    checkRegressionExpansion(deps.repoRoot, dependencyDrift.result),
-  );
-  const guardrailInvariants = record("guardrail-invariants", () =>
-    checkGuardrailInvariants(deps.repoRoot),
-  );
-  const dbProjectionCoverage = record("db-projection-coverage", () =>
-    checkDbProjectionCoverage(deps.repoRoot),
-  );
-  const dbProjectionIngestion = record("db-projection-ingestion", () =>
-    checkDbProjectionIngestion(deps.repoRoot, options),
-  );
-  const docConsistency = record("doc-consistency", () => checkDocConsistency(deps.repoRoot));
-  const entityCoverage = record("entity-coverage", () => checkEntityCoverage(deps.repoRoot));
-  const frRegistryAudit = record("fr-registry-audit", () => checkFrRegistryAudit(deps.repoRoot));
-  const improvementBacklog = record("improvement-backlog", () =>
-    checkImprovementBacklog(deps.repoRoot),
-  );
-  const rightArmGatePlanning = record("right-arm-gate-planning", () =>
-    checkRightArmGatePlanning(deps.repoRoot),
-  );
-  const g8IntegrationWorkflow = record("g8-integration-workflow", () =>
-    checkG8IntegrationWorkflow(deps.repoRoot),
-  );
-  const g9SystemWorkflow = record("g9-system-workflow", () => checkG9SystemWorkflow(deps.repoRoot));
-  const g10UxWorkflow = record("g10-ux-workflow", () => checkG10UxWorkflow(deps.repoRoot));
-  const lintWiring = record("lint-wiring", () => checkLintWiring(deps.repoRoot));
-  const proposalDocumentCoverage = record("proposal-document-coverage", () =>
-    checkProposalDocumentCoverage(deps.repoRoot),
-  );
-  const frontendDesignCoverage = record("frontend-design-coverage", () =>
-    checkFrontendDesignCoverage(deps.repoRoot),
-  );
-  const handoverOutstanding = record("handover-outstanding", () =>
-    checkHandoverOutstandingAnchor(handoverDeps(deps)),
-  );
-  const greenCommandDigest = record("green-command-digest", () => {
-    const result = checkGreenCommandDigests(deps.repoRoot);
-    return {
-      ...result,
-      ok: options.strictGreenCommandDigest === true ? result.mismatches.length === 0 : true,
-    };
+  const resultsById = new Map<string, LintResult>();
+  for (const definition of buildFullDoctorCheckDefinitions(deps, options)) {
+    resultsById.set(definition.id, record(definition.id, definition.run));
+  }
+  const checks = FULL_DOCTOR_OUTPUT_IDS.map((id) => {
+    const result = resultsById.get(id);
+    if (!result) {
+      return {
+        ok: false,
+        messages: [`doctor registry - violation: missing full doctor check result (${id})`],
+      };
+    }
+    return result;
   });
-  const forwardConvergence = record("forward-convergence", () =>
-    checkForwardConvergence(deps.repoRoot),
-  );
-  const forwardConvergenceAudit = record("forward-convergence-audit", () =>
-    checkForwardConvergenceAudit(deps.repoRoot),
-  );
-
-  const checks = [
-    backfill,
-    scrumRev,
-    planSupersession,
-    planBodySubstance,
-    planCompletionDrift,
-    propagation,
-    pairFreeze,
-    moduleDrift,
-    mergedPlanStatus,
-    planArtifactExistence,
-    assetDrift,
-    skillAssignment,
-    descentObligation,
-    changeImpact,
-    changeSetIntegrity,
-    verificationProfile,
-    branchKind,
-    codingRules,
-    designLanguage,
-    dddTddRules,
-    runtimePortability,
-    ruleDrift,
-    gateConfirm,
-    planSchedule,
-    planGovernance,
-    planDod,
-    placeholderDeps,
-    g1Trace,
-    g3Trace,
-    ruleAutomationClosure,
-    driveModelPassage,
-    driveDbRegistration,
-    frRoadmapCoverage,
-    telemetryClosure,
-    cycleP4Verification,
-    l14CloseAudit,
-    projectHooks,
-    githubCiPolicy,
-    codexHookAdapter,
-    codexWrapperParity,
-    toolchainPin,
-    l6FrCoverage,
-    readability,
-    runtimeReadability,
-    feedbackLog,
-    l6Completion,
-    l7Completion,
-    reviewEvidence,
-    guardrailInvariants,
-    verificationGroups,
-    roadmap,
-    implPlanTrace,
-    oracleTestTrace,
-    trackedCanonical,
-    subDocCatalogDrift,
-    subDocSectionStructure,
-    screenImplPairFreeze,
-    dependencyDrift,
-    regressionExpansion,
-    dbProjectionCoverage,
-    dbProjectionIngestion,
-    docConsistency,
-    entityCoverage,
-    frRegistryAudit,
-    improvementBacklog,
-    rightArmGatePlanning,
-    g8IntegrationWorkflow,
-    g9SystemWorkflow,
-    g10UxWorkflow,
-    lintWiring,
-    proposalDocumentCoverage,
-    frontendDesignCoverage,
-    handoverOutstanding,
-    greenCommandDigest,
-    forwardConvergence,
-    forwardConvergenceAudit,
-  ];
 
   return { checks, timings };
 }
