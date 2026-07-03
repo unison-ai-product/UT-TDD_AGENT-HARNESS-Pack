@@ -481,18 +481,24 @@ program
     "--setup-smoke",
     "run only the fresh-consumer setup smoke checks for wrapper and adapter hooks",
   )
+  .option("--json", "JSON output")
   .action(
     (opts: {
       strictTelemetryProvenance?: boolean;
       strictGreenCommandDigest?: boolean;
       setupSmoke?: boolean;
+      json?: boolean;
     }) => {
       const r = runDoctor(undefined, {
         strictTelemetryProvenance: opts.strictTelemetryProvenance === true,
         strictGreenCommandDigest: opts.strictGreenCommandDigest === true,
         setupSmoke: opts.setupSmoke === true,
       });
-      for (const m of r.messages) process.stdout.write(`${m}\n`);
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
+      } else {
+        for (const m of r.messages) process.stdout.write(`${m}\n`);
+      }
       process.exitCode = r.ok ? 0 : 1;
     },
   );

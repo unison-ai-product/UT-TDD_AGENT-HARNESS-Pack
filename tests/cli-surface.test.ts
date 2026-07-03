@@ -136,9 +136,27 @@ describe("L7 CLI surface closure", () => {
     const run = runCli(["doctor", "--help"]);
 
     expect(run.status).toBe(0);
+    expect(run.stdout).toContain("--json");
     expect(run.stdout).toContain("--setup-smoke");
     expect(run.stdout).toContain("--strict-telemetry-provenance");
     expect(run.stdout).toContain("--strict-green-command-digest");
+  }, 15_000);
+
+  it("emits machine-readable doctor JSON while preserving failing exit codes", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-cli-doctor-json-fail-"));
+    try {
+      const run = runCliIn(root, ["doctor", "--setup-smoke", "--json"]);
+      const payload = JSON.parse(run.stdout);
+
+      expect(run.status).toBe(1);
+      expect(payload.ok).toBe(false);
+      expect(payload.messages).toEqual(
+        expect.arrayContaining([expect.stringContaining("doctor:")]),
+      );
+      expect(run.stdout).not.toContain("undefined");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }, 15_000);
 
   it("exposes Pack sync commands as first-class distribution surfaces", () => {
