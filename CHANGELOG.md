@@ -10,7 +10,7 @@ are marked `signatureCreated=false` in each manifest.
 ### Added
 
 - Update-check advisory: `ut-tdd status` compares the harness checkout version
-  against the newest release tag on `origin` (24h cache, fail-open) and prints
+  against the newest release tag on the configured Pack remote (24h cache, fail-open) and prints
   an `update:` line when a newer release exists. `--json` gains an additive
   `update` field. The CLI `--version` now reads the real package version.
 - Setup guide (`docs/reference/setup-guide.md`): install, projection into an

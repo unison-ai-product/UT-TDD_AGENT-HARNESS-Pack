@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -11,29 +13,25 @@ import {
   renderUpdateLine,
   UPDATE_CHECK_CACHE_PATH,
   UPDATE_CHECK_DISABLE_ENV,
+  UPDATE_CHECK_REMOTE_ENV,
   UPDATE_CHECK_TTL_MS,
   type UpdateCheckDeps,
   updateCheckDisabled,
 } from "../src/setup/update-check";
 
-// PLAN-L7-362: Pack update-check advisory。全経路 fail-open (gate ではない)、
-// remote の正 = package.json repository.url (継承 .git による origin 誤読防止、TL review 所見1)、
-// TTL 24h キャッシュの不変条件を固定する。
-
 const ROOT = "/harness";
 const REPO_ROOT = join(fileURLToPath(import.meta.url), "..", "..");
+const CLI_PATH = join(REPO_ROOT, "src", "cli.ts");
 
-/** Windows では bun が .cmd shim のため cmd.exe 経由で起動する (distribution-acceptance と同型)。 */
-function runCli(args: string[], env: NodeJS.ProcessEnv) {
-  const base = { cwd: REPO_ROOT, encoding: "utf8" as const, env, timeout: 120_000 };
+function runCli(args: string[], env: NodeJS.ProcessEnv, cwd = REPO_ROOT) {
+  const base = { cwd, encoding: "utf8" as const, env, timeout: 120_000 };
   if (process.platform === "win32") {
     const cmdExe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
-    return spawnSync(cmdExe, ["/d", "/c", "bun", "src/cli.ts", ...args], base);
+    return spawnSync(cmdExe, ["/d", "/c", "bun", CLI_PATH, ...args], base);
   }
-  return spawnSync("bun", ["src/cli.ts", ...args], base);
+  return spawnSync("bun", [CLI_PATH, ...args], base);
 }
 
-/** in-memory deps (now / remote tags を注入して決定論)。remote 呼び出しを記録する。 */
 function mockDeps(
   over: Partial<UpdateCheckDeps> & {
     version?: string;
@@ -69,6 +67,44 @@ function mockDeps(
   };
 }
 
+function makeFakeGit(root: string) {
+  const fakeBin = join(root, "bin");
+  mkdirSync(fakeBin, { recursive: true });
+  if (process.platform === "win32") {
+    const script = join(fakeBin, "git.cmd");
+    writeFileSync(
+      script,
+      [
+        "@echo off",
+        'echo %*>> "%UT_TDD_FAKE_GIT_LOG%"',
+        'if "%1"=="ls-remote" (',
+        "  echo abc\trefs/tags/v0.1.99",
+        "  exit /b 0",
+        ")",
+        "exit /b 1",
+        "",
+      ].join("\r\n"),
+    );
+    return fakeBin;
+  }
+  const script = join(fakeBin, "git");
+  writeFileSync(
+    script,
+    [
+      "#!/bin/sh",
+      'printf "%s\\n" "$*" >> "$UT_TDD_FAKE_GIT_LOG"',
+      'if [ "$1" = "ls-remote" ]; then',
+      '  printf "abc\\trefs/tags/v0.1.99\\n"',
+      "  exit 0",
+      "fi",
+      "exit 1",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(script, 0o755);
+  return fakeBin;
+}
+
 describe("update-check semver primitives", () => {
   it("U-UPDCHK-001: parseSemver accepts v-prefixed and bare release tags only", () => {
     expect(parseSemver("v0.1.4")).toEqual([0, 1, 4]);
@@ -78,7 +114,7 @@ describe("update-check semver primitives", () => {
     expect(parseSemver("")).toBeNull();
   });
 
-  it("U-UPDCHK-002: latestReleaseTag picks numeric max (0.1.10 > 0.1.9) and ignores non-semver", () => {
+  it("U-UPDCHK-002: latestReleaseTag picks numeric max and ignores non-semver", () => {
     expect(latestReleaseTag(["v0.1.9", "v0.1.10", "v0.1.2", "nightly", "v1.0.0-beta"])).toBe(
       "v0.1.10",
     );
@@ -115,7 +151,7 @@ describe("checkForUpdate", () => {
     expect(cache).toEqual({ checkedAtMs: 1_000_000, latestVersion: "v0.1.5", remote: "origin" });
   });
 
-  it("U-UPDCHK-004: local at latest (or ahead) is not an update", () => {
+  it("U-UPDCHK-004: local at latest or ahead is not an update", () => {
     expect(checkForUpdate(mockDeps({ version: "0.1.4", tags: ["v0.1.4"] })).updateAvailable).toBe(
       false,
     );
@@ -124,7 +160,7 @@ describe("checkForUpdate", () => {
     );
   });
 
-  it("U-UPDCHK-005: fresh cache short-circuits the remote (listRemoteTags must not fire)", () => {
+  it("U-UPDCHK-005: fresh cache short-circuits the remote", () => {
     const deps = mockDeps({
       version: "0.1.4",
       listRemoteTags: () => {
@@ -169,7 +205,7 @@ describe("checkForUpdate", () => {
     expect(deps.files.has(join(ROOT, UPDATE_CHECK_CACHE_PATH))).toBe(false);
   });
 
-  it("U-UPDCHK-008: missing or malformed harness package.json fails open with a precise detail", () => {
+  it("U-UPDCHK-008: missing or malformed harness package.json fails open", () => {
     expect(checkForUpdate(mockDeps({ tags: ["v9.9.9"] }))).toMatchObject({
       checked: false,
       detail: "harness package.json unreadable",
@@ -177,14 +213,13 @@ describe("checkForUpdate", () => {
     const broken = mockDeps({ tags: ["v9.9.9"] });
     broken.files.set(join(ROOT, "package.json"), "{not json");
     expect(checkForUpdate(broken).checked).toBe(false);
-    // TL review 所見5: 読めるが version が release 形式でないケースは detail を区別する。
     expect(checkForUpdate(mockDeps({ version: "workspace:*", tags: ["v9.9.9"] }))).toMatchObject({
       checked: false,
       detail: "harness package.json version is not a release version",
     });
   });
 
-  it("U-UPDCHK-009: cache write failure stays fail-open (result still returned)", () => {
+  it("U-UPDCHK-009: cache write failure stays fail-open", () => {
     const deps = mockDeps({
       version: "0.1.4",
       tags: ["v0.1.5"],
@@ -212,9 +247,7 @@ describe("checkForUpdate", () => {
     expect(deps.remoteCalls).toEqual(["https://example.com/pack.git"]);
   });
 
-  it("U-UPDCHK-013: vendored install (no repository field, no own .git) stays silent instead of reading the consumer origin", () => {
-    // TL review 所見1: node_modules 配下では git が上位 (consumer) の .git を継承するため、
-    // repository も自身の .git も無いときは origin へ問い合わせてはならない。
+  it("U-UPDCHK-013: vendored install with no canonical remote never reads consumer origin", () => {
     const deps = mockDeps({ version: "0.1.4", tags: ["v9.9.9"], hasOwnGit: () => false });
     const r = checkForUpdate(deps);
     expect(r).toMatchObject({ checked: false, updateAvailable: false, source: "none" });
@@ -222,12 +255,11 @@ describe("checkForUpdate", () => {
     expect(deps.remoteCalls).toEqual([]);
   });
 
-  it("U-UPDCHK-014: corrupt cache JSON and remote-mismatch cache are treated as stale", () => {
-    // TL review 所見3: 壊れた cache は missing 扱いで remote へ落ちる (throw しない)。
+  it("U-UPDCHK-014: corrupt cache JSON and remote-mismatch cache are stale", () => {
     const broken = mockDeps({ version: "0.1.4", tags: ["v0.1.5"] });
     broken.files.set(join(ROOT, UPDATE_CHECK_CACHE_PATH), "{not json");
     expect(checkForUpdate(broken)).toMatchObject({ source: "remote", updateAvailable: true });
-    // remote が変わった cache (repository 追加等) は TTL 内でも stale。
+
     const moved = mockDeps({
       version: "0.1.4",
       repository: "https://example.com/pack.git",
@@ -239,14 +271,30 @@ describe("checkForUpdate", () => {
     );
     expect(checkForUpdate(moved)).toMatchObject({ latestVersion: "v0.1.6", source: "remote" });
   });
+
+  it("U-UPDCHK-018: explicit remote override supports forks and mirrors", () => {
+    const deps = mockDeps({
+      version: "0.1.4",
+      repository: "https://example.com/pack.git",
+      tags: ["v0.1.5"],
+      remoteOverride: () => "https://mirror.example.com/pack.git",
+    });
+    expect(checkForUpdate(deps)).toMatchObject({ checked: true, updateAvailable: true });
+    expect(deps.remoteCalls).toEqual(["https://mirror.example.com/pack.git"]);
+    const cache = JSON.parse(deps.files.get(join(ROOT, UPDATE_CHECK_CACHE_PATH)) ?? "{}");
+    expect(cache.remote).toBe("https://mirror.example.com/pack.git");
+  });
 });
 
 describe("renderUpdateLine", () => {
-  it("U-UPDCHK-011: one advisory line per outcome", () => {
+  it("U-UPDCHK-011: one advisory line per outcome without raw git checkout commands", () => {
     const base = checkForUpdate(mockDeps({ version: "0.1.4", tags: ["v0.1.5"] }));
-    expect(renderUpdateLine(base)).toBe(
-      "update: v0.1.4 -> v0.1.5 available (see CHANGELOG.md; git fetch --tags && git checkout v0.1.5)",
+    const line = renderUpdateLine(base);
+    expect(line).toBe(
+      "update: v0.1.4 -> v0.1.5 available (see CHANGELOG.md and update the Pack checkout, not the consumer repo)",
     );
+    expect(line).not.toContain("git fetch");
+    expect(line).not.toContain("git checkout");
     expect(renderUpdateLine(checkForUpdate(mockDeps({ version: "0.1.4", tags: ["v0.1.4"] })))).toBe(
       "update: up-to-date (v0.1.4)",
     );
@@ -259,14 +307,17 @@ describe("renderUpdateLine", () => {
     expect(renderUpdateLine(updateCheckDisabled())).toBe(
       `update: check skipped (disabled by ${UPDATE_CHECK_DISABLE_ENV})`,
     );
+    expect(renderUpdateLine(updateCheckDisabled("CI"))).toBe(
+      "update: check skipped (disabled by CI)",
+    );
   });
 });
 
-describe("status CLI wiring (TL review 所見2)", () => {
-  const env = { ...process.env, [UPDATE_CHECK_DISABLE_ENV]: "1" };
+describe("status CLI wiring", () => {
+  const disabledEnv = { ...process.env, [UPDATE_CHECK_DISABLE_ENV]: "1" };
 
   it("U-UPDCHK-015: status --json keeps existing fields and adds update additively", () => {
-    const res = runCli(["status", "--json"], env);
+    const res = runCli(["status", "--json"], disabledEnv);
     expect(res.status, res.stderr || res.stdout).toBe(0);
     const json = JSON.parse(res.stdout);
     for (const key of ["mode", "claude", "codex", "nextAction", "outstanding"]) {
@@ -277,11 +328,63 @@ describe("status CLI wiring (TL review 所見2)", () => {
   });
 
   it("U-UPDCHK-016: status text emits exactly one update advisory line", () => {
-    const res = runCli(["status"], env);
+    const res = runCli(["status"], disabledEnv);
     expect(res.status, res.stderr || res.stdout).toBe(0);
     const updateLines = res.stdout.split("\n").filter((l) => l.startsWith("update: "));
     expect(updateLines).toEqual([
       `update: check skipped (disabled by ${UPDATE_CHECK_DISABLE_ENV})`,
     ]);
+  });
+
+  it("U-UPDCHK-019: CI skips remote checks by default for deterministic runs", () => {
+    const res = runCli(["status", "--json"], {
+      ...process.env,
+      CI: "true",
+      [UPDATE_CHECK_DISABLE_ENV]: "",
+    });
+    expect(res.status, res.stderr || res.stdout).toBe(0);
+    const json = JSON.parse(res.stdout);
+    expect(json.update).toMatchObject({
+      checked: false,
+      updateAvailable: false,
+      detail: "disabled by CI",
+    });
+  });
+
+  it("U-UPDCHK-020: status from a consumer cwd uses configured Pack remote, never consumer origin", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "ut-tdd-update-check-"));
+    try {
+      const fakeBin = makeFakeGit(tmp);
+      const consumerRoot = join(tmp, "consumer");
+      mkdirSync(join(consumerRoot, ".git"), { recursive: true });
+      const logPath = join(tmp, "git.log");
+      const remote = `https://example.com/pack-${process.pid}-${Date.now()}.git`;
+
+      const res = runCli(
+        ["status", "--json"],
+        {
+          ...process.env,
+          PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+          CI: "",
+          [UPDATE_CHECK_DISABLE_ENV]: "",
+          [UPDATE_CHECK_REMOTE_ENV]: remote,
+          UT_TDD_FAKE_GIT_LOG: logPath,
+        },
+        consumerRoot,
+      );
+
+      expect(res.status, res.stderr || res.stdout).toBe(0);
+      const json = JSON.parse(res.stdout);
+      expect(json.update).toMatchObject({
+        checked: true,
+        latestVersion: "v0.1.99",
+        source: "remote",
+      });
+      const logText = readFileSync(logPath, "utf8");
+      expect(logText).toContain(remote);
+      expect(logText).not.toContain("origin");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

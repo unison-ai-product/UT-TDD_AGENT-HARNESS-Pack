@@ -1,22 +1,14 @@
 /**
- * Pack update-check advisory (PLAN-L7-362) — 導入済み consumer へ新 release の存在を
- * `ut-tdd status` の additive な 1 行で知らせる。
+ * Pack update-check advisory (PLAN-L7-362).
  *
- * 設計不変条件:
- *  - **advisory であって gate ではない**: remote 不達 / tag 無し / package.json 欠落を含む
- *    全経路 fail-open。status / doctor を赤にしない (throw しない)。
- *  - **基準は harness checkout であって consumer cwd ではない**: 投影導入 (setup-guide §2)
- *    では cwd の package.json / origin は利用者自身のプロジェクトを指すため、local version も
- *    remote tags もモジュール位置から解決した harness root で読む。
- *  - **remote の正は package.json `repository.url`** (TL review 所見1): node_modules 配下へ
- *    ベンダリング導入された harness root は自身の `.git` を持たず、`git ls-remote origin` が
- *    上位 (consumer 自身) の `.git` / origin を継承して誤読する。remote 名 `origin` への
- *    fallback は harness root 自身が `.git` を持つ場合に限る。
- *  - **キャッシュ TTL 24h**: `.ut-tdd/state/update-check.json` (harness root 側) に保存し、
- *    TTL 内は remote へ問い合わせない。remote が変わった cache は stale 扱い。remote 失敗時は
- *    キャッシュを書かず次回再試行。
- *  - **ls-remote は認証不要**: public Pack repo の tag 列挙に gh / token を要求しない。
- *    timeout 付き spawnSync で hang を防ぐ (setup 非対話ハングの教訓、PLAN-L7-361)。
+ * Invariants:
+ * - Advisory only, never a gate. Remote failures, missing tags, malformed
+ *   manifests, and cache write failures must not make status / doctor red.
+ * - The baseline is the harness checkout, not the consumer cwd.
+ * - The canonical remote is package.json repository.url. Falling back to origin
+ *   is allowed only when the harness root itself owns .git, so vendored installs
+ *   do not accidentally read the consumer repository origin.
+ * - Remote results are cached for 24 hours under the harness root.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -25,30 +17,32 @@ import { fileURLToPath } from "node:url";
 
 export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
 export const UPDATE_CHECK_CACHE_PATH = join(".ut-tdd", "state", "update-check.json");
-/** CI / テストで advisory の remote 問い合わせを止める opt-out (fail-open と同じ沈黙表示)。 */
 export const UPDATE_CHECK_DISABLE_ENV = "UT_TDD_SKIP_UPDATE_CHECK";
+export const UPDATE_CHECK_REMOTE_ENV = "UT_TDD_UPDATE_CHECK_REMOTE";
 const LS_REMOTE_TIMEOUT_MS = 5000;
 
 export interface UpdateCheckDeps {
-  /** harness checkout の root (consumer cwd ではない)。 */
+  /** Harness checkout root, not consumer cwd. */
   harnessRoot: string;
   nowMs: () => number;
   readText: (path: string) => string | null;
   writeText: (path: string, content: string) => void;
-  /** harness root 自身が `.git` を持つか (継承 .git による origin 誤読の防止)。 */
+  /** True only when the harness root itself owns .git. */
   hasOwnGit: () => boolean;
-  /** `git ls-remote --tags <remote>` の tag 名一覧。null = remote 不達 (fail-open)。 */
+  /** Optional configured remote for forks, mirrors, or private Pack channels. */
+  remoteOverride?: () => string | null;
+  /** Tag names from `git ls-remote --tags <remote>`; null means fail-open. */
   listRemoteTags: (remote: string) => string[] | null;
 }
 
 export interface UpdateCheckResult {
-  /** remote または TTL 内キャッシュを参照できたか。false = advisory 沈黙。 */
+  /** True when remote or a fresh cache was consulted. False means advisory is silent. */
   checked: boolean;
   localVersion: string | null;
   latestVersion: string | null;
   updateAvailable: boolean;
   source: "remote" | "cache" | "none";
-  /** fail-open 理由 (checked=false のときのみ)。 */
+  /** Fail-open detail, set when checked=false. */
   detail: string | null;
 }
 
@@ -58,14 +52,20 @@ interface UpdateCheckCache {
   remote: string;
 }
 
-/** `v0.1.4` / `0.1.4` を [major, minor, patch] へ。release tag 形式以外は null。 */
+interface HarnessManifest {
+  version: string | null;
+  repositoryUrl: string | null;
+  readable: boolean;
+}
+
+/** Parse `v0.1.4` / `0.1.4` into [major, minor, patch]. */
 export function parseSemver(tag: string): [number, number, number] | null {
   const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(tag.trim());
   if (!m) return null;
   return [Number(m[1]), Number(m[2]), Number(m[3])];
 }
 
-/** semver 比較 (a > b なら正)。数値比較なので 0.1.10 > 0.1.9。 */
+/** Semver compare. Numeric comparison keeps 0.1.10 > 0.1.9. */
 export function compareSemver(a: [number, number, number], b: [number, number, number]): number {
   for (let i = 0; i < 3; i++) {
     if (a[i] !== b[i]) return a[i] - b[i];
@@ -73,7 +73,7 @@ export function compareSemver(a: [number, number, number], b: [number, number, n
   return 0;
 }
 
-/** tag 一覧から最大の release tag (vX.Y.Z) を選ぶ。該当なしは null。 */
+/** Select the largest release tag from a tag list. */
 export function latestReleaseTag(tags: string[]): string | null {
   let best: string | null = null;
   let bestV: [number, number, number] | null = null;
@@ -88,13 +88,7 @@ export function latestReleaseTag(tags: string[]): string | null {
   return best;
 }
 
-interface HarnessManifest {
-  version: string | null;
-  repositoryUrl: string | null;
-  readable: boolean;
-}
-
-/** `git+https://...git` / `{ type, url }` / 素の文字列 repository を ls-remote へ渡せる URL へ。 */
+/** Normalize package.json repository forms into a URL usable by git ls-remote. */
 export function normalizeRepositoryUrl(repository: unknown): string | null {
   const raw =
     typeof repository === "string"
@@ -147,16 +141,22 @@ function failOpen(localVersion: string | null, detail: string): UpdateCheckResul
   };
 }
 
-/** env opt-out 時の沈黙結果 (CLI 配線が使う。fail-open と同じ非 gate 表示)。 */
-export function updateCheckDisabled(): UpdateCheckResult {
-  return failOpen(null, `disabled by ${UPDATE_CHECK_DISABLE_ENV}`);
+/** Silent non-gate result for env / CI opt-out. */
+export function updateCheckDisabled(reason = UPDATE_CHECK_DISABLE_ENV): UpdateCheckResult {
+  return failOpen(null, `disabled by ${reason}`);
+}
+
+function configuredRemote(deps: UpdateCheckDeps, manifest: HarnessManifest): string | null {
+  const override = deps.remoteOverride?.();
+  if (override) return override;
+  if (manifest.repositoryUrl) return manifest.repositoryUrl;
+  return deps.hasOwnGit() ? "origin" : null;
 }
 
 /**
- * update-check 本体。remote 参照は TTL 24h キャッシュ越し。**never throws** (全経路 fail-open)。
- * remote の解決順: package.json `repository.url` → (harness root 自身に `.git` がある場合のみ)
- * remote 名 `origin`。どちらも無ければ advisory 沈黙 (ベンダリング導入で consumer の origin を
- * 誤読しないための fail-open、TL review 所見1)。
+ * Main update-check routine. Never throws.
+ * Remote resolution order: explicit override, package.json repository.url, then
+ * origin only when the harness root owns .git. If none is available, silence.
  */
 export function checkForUpdate(deps: UpdateCheckDeps): UpdateCheckResult {
   let localVersion: string | null = null;
@@ -168,7 +168,7 @@ export function checkForUpdate(deps: UpdateCheckDeps): UpdateCheckResult {
       return failOpen(null, "harness package.json version is not a release version");
     }
 
-    const remote = manifest.repositoryUrl ?? (deps.hasOwnGit() ? "origin" : null);
+    const remote = configuredRemote(deps, manifest);
     if (remote === null) {
       return failOpen(
         localVersion,
@@ -195,7 +195,7 @@ export function checkForUpdate(deps: UpdateCheckDeps): UpdateCheckResult {
       try {
         deps.writeText(join(deps.harnessRoot, UPDATE_CHECK_CACHE_PATH), JSON.stringify(next));
       } catch {
-        // fail-open: キャッシュ書き込み失敗は次回 remote 再試行に倒す。
+        // Fail-open: cache write failure only means the next status run checks remote again.
       }
     }
 
@@ -214,10 +214,10 @@ export function checkForUpdate(deps: UpdateCheckDeps): UpdateCheckResult {
   }
 }
 
-/** status text 向け 1 行 (additive advisory、A-138 ITEM-1 / IMP-139 の前例に倣う)。 */
+/** Render the single additive status text line. */
 export function renderUpdateLine(r: UpdateCheckResult): string {
   if (r.updateAvailable && r.latestVersion) {
-    return `update: v${r.localVersion} -> ${r.latestVersion} available (see CHANGELOG.md; git fetch --tags && git checkout ${r.latestVersion})`;
+    return `update: v${r.localVersion} -> ${r.latestVersion} available (see CHANGELOG.md and update the Pack checkout, not the consumer repo)`;
   }
   if (r.checked && r.latestVersion === null) {
     return `update: no release tags on remote (v${r.localVersion})`;
@@ -226,18 +226,18 @@ export function renderUpdateLine(r: UpdateCheckResult): string {
   return `update: check skipped (${r.detail ?? "unknown"})`;
 }
 
-/** モジュール位置 (src/setup/) から harness checkout root を解決する。**never throws**。 */
-export function defaultHarnessRoot(): string {
+/** Resolve the harness checkout root from this module location. */
+export function defaultHarnessRoot(): string | null {
   try {
     return join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   } catch {
-    // fail-open: 非 file: 実行形態では cwd に倒す (CLI 起動を止めない、TL review 所見4)。
-    return process.cwd();
+    return null;
   }
 }
 
-/** harness root の package.json version (CLI --version 表示用)。fail-open で "0.0.0"。 */
-export function readHarnessVersion(harnessRoot: string): string {
+/** Harness package.json version for CLI --version. Fail-open to 0.0.0. */
+export function readHarnessVersion(harnessRoot: string | null): string {
+  if (harnessRoot === null) return "0.0.0";
   try {
     const parsed = JSON.parse(readFileSync(join(harnessRoot, "package.json"), "utf8")) as {
       version?: unknown;
@@ -248,7 +248,20 @@ export function readHarnessVersion(harnessRoot: string): string {
   }
 }
 
-export function nodeUpdateCheckDeps(harnessRoot = defaultHarnessRoot()): UpdateCheckDeps {
+export function nodeUpdateCheckDeps(
+  harnessRoot: string | null = defaultHarnessRoot(),
+): UpdateCheckDeps {
+  if (harnessRoot === null) {
+    return {
+      harnessRoot: "",
+      nowMs: () => Date.now(),
+      readText: () => null,
+      writeText: () => {},
+      hasOwnGit: () => false,
+      remoteOverride: () => process.env[UPDATE_CHECK_REMOTE_ENV]?.trim() || null,
+      listRemoteTags: () => null,
+    };
+  }
   return {
     harnessRoot,
     nowMs: () => Date.now(),
@@ -264,6 +277,7 @@ export function nodeUpdateCheckDeps(harnessRoot = defaultHarnessRoot()): UpdateC
       writeFileSync(p, c);
     },
     hasOwnGit: () => existsSync(join(harnessRoot, ".git")),
+    remoteOverride: () => process.env[UPDATE_CHECK_REMOTE_ENV]?.trim() || null,
     listRemoteTags: (remote) => {
       const res = spawnSync("git", ["ls-remote", "--tags", remote], {
         cwd: harnessRoot,

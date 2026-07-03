@@ -466,8 +466,10 @@ program
     // PLAN-L7-362: update-check advisory (fail-open、gate ではない)。基準は harness checkout。
     const update =
       process.env[UPDATE_CHECK_DISABLE_ENV] === "1"
-        ? updateCheckDisabled()
-        : checkForUpdate(nodeUpdateCheckDeps());
+        ? updateCheckDisabled(UPDATE_CHECK_DISABLE_ENV)
+        : process.env.CI === "true"
+          ? updateCheckDisabled("CI")
+          : checkForUpdate(nodeUpdateCheckDeps());
     if (opts.json) {
       // 既存 6 フィールド (camelCase 公開契約) に nextAction + outstanding を additive に付加する
       // (A-138 ITEM-1、PLAN-L7-84、IMP-139、taxonomy=current)。判断ゲートの進め方 + 未了量を提示。
