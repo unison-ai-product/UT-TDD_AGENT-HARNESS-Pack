@@ -442,9 +442,7 @@ describe("runDoctor", () => {
       const messages = checkPlanReferenceFreshnessAdvisory(root);
 
       expect(
-        messages.some((message) =>
-          message.includes("plan-reference-freshness - advisory"),
-        ),
+        messages.some((message) => message.includes("plan-reference-freshness - advisory")),
       ).toBe(true);
       expect(messages.every((message) => message.startsWith("doctor: "))).toBe(true);
     } finally {

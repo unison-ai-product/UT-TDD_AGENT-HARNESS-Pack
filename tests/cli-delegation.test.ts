@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import { Command } from "commander";
+import { afterEach, describe, expect, it } from "vitest";
 import { adapterExecutionEnv, registerDelegationCommands } from "../src/cli/delegation";
 
 const legacyPrefix = ["HE", "LIX"].join("");
