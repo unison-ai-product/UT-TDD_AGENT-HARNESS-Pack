@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { adapterExecutionEnv } from "../src/cli/delegation";
+import { Command } from "commander";
+import { adapterExecutionEnv, registerDelegationCommands } from "../src/cli/delegation";
 
 const legacyPrefix = ["HE", "LIX"].join("");
 const touchedKeys = [
@@ -41,5 +42,36 @@ describe("CLI delegation adapter execution env", () => {
     expect(env.EXTRA_FLAG).toBe("1");
     expect(env).not.toBe(process.env);
     expect(process.env[[legacyPrefix, "ALLOW", "RAW", "CODEX"].join("_")]).toBe("legacy");
+  });
+});
+
+describe("CLI delegation command registration", () => {
+  it("registers codex and claude runtime adapter commands with governed overrides", () => {
+    const program = new Command();
+    registerDelegationCommands(program, {
+      gitBranch: () => "work/test",
+      gitHead: () => "abc1234",
+      resolveTaskText: (opts) => opts.task ?? null,
+      resolveSkillContextInjection: () => undefined,
+      runSessionStartSideEffects: () => {},
+      taskFileOptionDescription: "read task text from file",
+      writeHandoverWarnings: () => {},
+    });
+
+    for (const provider of ["codex", "claude"]) {
+      const command = program.commands.find((candidate) => candidate.name() === provider);
+      expect(command, provider).toBeDefined();
+      expect(command?.description()).toBe(`${provider} runtime adapter command`);
+      expect(command?.options.map((option) => option.long)).toEqual([
+        "--role",
+        "--task",
+        "--task-file",
+        "--plan",
+        "--model",
+        "--effort",
+        "--execute",
+        "--json",
+      ]);
+    }
   });
 });

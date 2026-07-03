@@ -25,7 +25,11 @@ import {
 } from "./assets/catalog";
 import { loadBranchAudit, renderBranchAudit } from "./audit/branches";
 import { renderQualityAudit, runQualityAudit } from "./audit/quality";
-import { adapterExecutionEnv, executeAdapterPlanForCli } from "./cli/delegation";
+import {
+  adapterExecutionEnv,
+  executeAdapterPlanForCli,
+  registerDelegationCommands,
+} from "./cli/delegation";
 import { registerDistributionCommands } from "./cli/distribution";
 import { registerFeedbackCommands } from "./cli/feedback";
 import { runDoctor } from "./doctor";
@@ -72,7 +76,6 @@ import { lintPlanWithGate } from "./plan/lint";
 import {
   type AdapterContextInjection,
   type AdapterProvider,
-  buildAdapterPlan,
   buildProviderInvocation,
 } from "./runtime/adapter";
 import {
@@ -2091,88 +2094,15 @@ program
     },
   );
 
-function runtimeCommand(provider: AdapterProvider): Command {
-  return (
-    program
-      .command(provider)
-      .description(`${provider} runtime adapter command`)
-      .requiredOption("--role <role>", "delegation role")
-      .option("--task <text>", "task text")
-      .option("--task-file <path>", TASK_FILE_OPTION_DESCRIPTION)
-      .option("--plan <id>", "PLAN id")
-      // PLAN-L7-255: per-call model/effort 注入。config.toml / settings の既定 model を
-      // 呼び出し単位で上書きし、spark/mini 級の軽量 lane を governed 経路で使えるようにする。
-      .option("--model <model>", "provider model override for this call")
-      .option("--effort <level>", "provider reasoning effort override for this call")
-      .option("--execute", "execute provider CLI instead of dry-run")
-      .option("--json", "JSON output")
-      .action(
-        (opts: {
-          role: string;
-          task?: string;
-          taskFile?: string;
-          plan?: string;
-          model?: string;
-          effort?: string;
-          execute?: boolean;
-          json?: boolean;
-        }) => {
-          const task = resolveTaskText(opts);
-          if (!task) {
-            process.stderr.write("adapter requires exactly one of --task or --task-file\n");
-            process.exitCode = 1;
-            return;
-          }
-          const mode = detectMode().mode;
-          const contextInjection = resolveSkillContextInjection(opts.plan);
-          const plan = buildAdapterPlan(
-            {
-              provider,
-              role: opts.role,
-              task,
-              planId: opts.plan,
-              model: opts.model,
-              effort: opts.effort,
-              execute: Boolean(opts.execute),
-              contextInjection,
-            },
-            mode,
-          );
-          if (!plan.available) {
-            process.stderr.write(`${plan.messages.join("\n")}\n`);
-            process.exitCode = 1;
-            return;
-          }
-          // dry-run (非 execute) は plan JSON を出して終了。plan.dry_run は execute=false ゆえ true。
-          // --json は出力形式であって実行抑止ではない (team run と同契約)。--execute --json は
-          // 実行まで進み、末尾で実行結果 JSON (dry_run=false, exit_code) を返す。
-          if (!opts.execute) {
-            process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
-            return;
-          }
-          const jsonOut = Boolean(opts.json);
-          const execution = executeAdapterPlanForCli(
-            plan,
-            {
-              sessionPrefix: provider,
-              toolName: provider,
-              planId: opts.plan,
-              jsonOut,
-              reviewRole: opts.role,
-            },
-            { gitBranch, gitHead, runSessionStartSideEffects, writeHandoverWarnings },
-          );
-          if (jsonOut) {
-            process.stdout.write(`${JSON.stringify({ ...plan, ...execution }, null, 2)}\n`);
-          }
-          process.exitCode = execution.exit_code ?? 1;
-        },
-      )
-  );
-}
-
-runtimeCommand("codex");
-runtimeCommand("claude");
+registerDelegationCommands(program, {
+  gitBranch,
+  gitHead,
+  resolveTaskText,
+  resolveSkillContextInjection,
+  runSessionStartSideEffects,
+  taskFileOptionDescription: TASK_FILE_OPTION_DESCRIPTION,
+  writeHandoverWarnings,
+});
 
 program
   .command("gate <id>")

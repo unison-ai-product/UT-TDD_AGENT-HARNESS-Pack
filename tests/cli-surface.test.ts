@@ -185,6 +185,38 @@ describe("L7 CLI surface closure", () => {
     expect(payload.args).toEqual(["exec", "-m", "gpt-5.3-codex-spark", "-"]);
   }, 20_000);
 
+  it("keeps claude runtime command dry-run registered through delegation helper", () => {
+    const run = runCli([
+      "claude",
+      "--role",
+      "reviewer",
+      "--task",
+      "mechanical ledger check",
+      "--model",
+      "claude-opus-4-8",
+      "--effort",
+      "xhigh",
+    ]);
+    const payload = JSON.parse(run.stdout);
+
+    expect(run.status).toBe(0);
+    expect(payload).toMatchObject({
+      provider: "claude",
+      dry_run: true,
+      model: "claude-opus-4-8",
+      effort: "high",
+    });
+    expect(payload.args).toEqual([
+      "--print",
+      "--input-format",
+      "text",
+      "--model",
+      "claude-opus-4-8",
+      "--effort",
+      "high",
+    ]);
+  }, 20_000);
+
   it("passes plan skill injection through task route adapter plans", () => {
     const sourcePlan = join(
       repoRoot,
