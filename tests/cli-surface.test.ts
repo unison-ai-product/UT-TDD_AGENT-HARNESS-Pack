@@ -36,6 +36,12 @@ function runCliIn(cwd: string, args: string[], env: NodeJS.ProcessEnv = process.
   });
 }
 
+function parseCliJson(run: ReturnType<typeof runCliIn>) {
+  expect(run.status, `stderr:\n${run.stderr}\nstdout:\n${run.stdout}`).toBe(0);
+  expect(run.stdout.trim(), `stderr:\n${run.stderr}`).not.toBe("");
+  return JSON.parse(run.stdout);
+}
+
 function writeFakeProvider(binDir: string, name: "codex" | "claude"): string {
   const rawEnv = [legacyEnvPrefix, "ALLOW", "RAW", name.toUpperCase()].join("_");
   const reasonEnv = [legacyEnvPrefix, "RAW", name.toUpperCase(), "REASON"].join("_");
@@ -177,9 +183,7 @@ describe("L7 CLI surface closure", () => {
       "--model",
       "gpt-5.3-codex-spark",
     ]);
-    const payload = JSON.parse(run.stdout);
-
-    expect(run.status).toBe(0);
+    const payload = parseCliJson(run);
     expect(payload.dry_run).toBe(true);
     expect(payload.model).toBe("gpt-5.3-codex-spark");
     expect(payload.args).toEqual(["exec", "-m", "gpt-5.3-codex-spark", "-"]);
@@ -197,9 +201,7 @@ describe("L7 CLI surface closure", () => {
       "--effort",
       "xhigh",
     ]);
-    const payload = JSON.parse(run.stdout);
-
-    expect(run.status).toBe(0);
+    const payload = parseCliJson(run);
     expect(payload).toMatchObject({
       provider: "claude",
       dry_run: true,
