@@ -32,6 +32,7 @@ import {
 } from "./cli/delegation";
 import { registerDistributionCommands } from "./cli/distribution";
 import { registerFeedbackCommands } from "./cli/feedback";
+import { contextSuggest } from "./context/doc-router";
 import { runDoctor } from "./doctor";
 import { computeSkillMetrics } from "./feedback/engine";
 import { renderTakeoverFeedback, selectTakeoverFeedback } from "./feedback/surface";
@@ -2794,6 +2795,45 @@ memory
   });
 
 registerDistributionCommands(program);
+
+const context = program
+  .command("context")
+  .description("startup context tiering (canonical doc section routing, PLAN-L7-302)");
+context
+  .command("suggest")
+  .description("suggest which canonical doc sections to read for a task (tier-1 dynamic load)")
+  .option("--task <text>", "free-text task (classified into kind → routed sections)")
+  .option("--task-file <path>", TASK_FILE_OPTION_DESCRIPTION)
+  .option("--json", "JSON output")
+  .action((opts: { task?: string; taskFile?: string; json?: boolean }) => {
+    const taskText = resolveTaskText(opts);
+    if (taskText === null) {
+      process.stderr.write("context suggest requires exactly one of --task or --task-file\n");
+      process.exitCode = 1;
+      return;
+    }
+    const repoRoot = process.cwd();
+    const classification = classifyTask({ text: taskText });
+    const result = contextSuggest(repoRoot, classification.kind);
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      return;
+    }
+    if (result.fail_open) {
+      process.stdout.write(
+        `context suggest — kind=${result.kind}: 全文読み推奨 (${result.fail_open_reason})\n`,
+      );
+      return;
+    }
+    process.stdout.write(
+      `context suggest — kind=${result.kind}: ${result.sections.length} セクション\n`,
+    );
+    for (const s of result.sections) {
+      process.stdout.write(
+        `  ${s.path}:${s.start_line}-${s.end_line}  ${s.heading}  (matched: ${s.matched})\n`,
+      );
+    }
+  });
 
 program.parseAsync(process.argv).catch((e: unknown) => {
   process.stderr.write(`${String(e)}\n`);
