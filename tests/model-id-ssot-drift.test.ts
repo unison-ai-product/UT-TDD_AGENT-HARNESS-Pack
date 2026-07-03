@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { SUBAGENT_ALLOWLIST } from "../src/runtime/agent-guard-policy";
 import { BUILTIN_GITHUB_TEMPLATES } from "../src/setup/templates";
 import { MODEL_IDS } from "../src/team/model-policy";
 
@@ -63,5 +64,23 @@ describe("U-MODELID-SSOT: model ID single source of truth", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it("(d) .claude/CLAUDE.md allowlist doc matches SUBAGENT_ALLOWLIST", () => {
+    const docPath = join(repoRoot, ".claude", "CLAUDE.md");
+    if (!existsSync(docPath)) {
+      // Clean Pack artifacts intentionally omit the source-local Claude runtime policy.
+      expect(docPath.includes(".claude")).toBe(true);
+      return;
+    }
+    const text = readFileSync(docPath, "utf8");
+    const section = text.match(/^Allowlist:\n\n((?:- `[^`]+`\n)+)/m);
+    expect(section, "Allowlist bullet section missing in .claude/CLAUDE.md").not.toBeNull();
+    const documented = new Set(
+      [...(section as RegExpMatchArray)[1].matchAll(/- `([^`]+)`/g)].map((m) => m[1]),
+    );
+    const missingInDoc = [...SUBAGENT_ALLOWLIST].filter((name) => !documented.has(name)).sort();
+    const extraInDoc = [...documented].filter((name) => !SUBAGENT_ALLOWLIST.has(name)).sort();
+    expect({ missingInDoc, extraInDoc }).toEqual({ missingInDoc: [], extraInDoc: [] });
   });
 });
