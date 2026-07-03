@@ -27,6 +27,10 @@ docs/handover/session-handover-*.md
 .ut-tdd/adapters/local*.yaml
 .ut-tdd/teams/local*.yaml
 .ut-tdd/tmp/
+.ut-tdd/pack-sync/
+.ut-tdd/pack-stage/
+.ut-tdd/release/
+.ut-tdd/release-*/
 # harness.db projection (runtime state, rebuildable from docs/state/logs; never tracked)
 .ut-tdd/harness.db
 .ut-tdd/harness.db-wal
