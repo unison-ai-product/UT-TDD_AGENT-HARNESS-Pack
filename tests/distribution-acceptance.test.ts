@@ -140,6 +140,9 @@ describe("clean distribution local acceptance smoke", () => {
       const env = {
         ...process.env,
         UT_TDD_CODEX_BIN: fakeCodex,
+        // PLAN-L7-362: staged root には cache が無いため、status の update-check advisory が
+        // 実 remote へ問い合わせないよう opt-out する (テスト決定論)。
+        UT_TDD_SKIP_UPDATE_CHECK: "1",
         PATH: `${join(cleanRoot, ".fake-bin")}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
       };
 

@@ -207,6 +207,11 @@ bun .ut-tdd\bin\ut-tdd.mjs --help
 Pack はタグ付き release (`v0.1.x`) で更新されます。変更点は [CHANGELOG.md](./CHANGELOG.md)、
 成果物 (tarball + sha256 + manifest) は [Releases](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/releases) を参照してください。
 
+新 release の通知は 2 経路: GitHub で Pack リポジトリを **Watch → Custom → Releases** に
+設定する (push 通知)、または `ut-tdd status` の advisory 行 — 新しい release tag を検出すると
+`update: v0.1.4 -> v0.1.5 available ...` を 1 行表示します (24h キャッシュ・fail-open、
+オフラインでも status が赤になることはありません)。
+
 ```sh
 git fetch --tags
 git checkout v0.1.4          # 追従運用なら: git pull origin main

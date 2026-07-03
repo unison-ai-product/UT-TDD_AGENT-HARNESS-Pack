@@ -127,6 +127,15 @@ import {
 import { findReference } from "./search/index";
 import { nodeSetupDeps, runSetup, type SetupArgs } from "./setup/index";
 import {
+  checkForUpdate,
+  defaultHarnessRoot,
+  nodeUpdateCheckDeps,
+  readHarnessVersion,
+  renderUpdateLine,
+  UPDATE_CHECK_DISABLE_ENV,
+  updateCheckDisabled,
+} from "./setup/update-check";
+import {
   bucketRecommendations,
   buildSkillInjectionSet,
   recommendSkillsForPlan,
@@ -441,7 +450,8 @@ const program = new Command();
 program
   .name("ut-tdd")
   .description("UT-TDD Agent Harness (TypeScript core, ADR-001)")
-  .version("0.1.0");
+  // PLAN-L7-362: update-check の比較元 (harness root package.json) と同一ソースで表示する。
+  .version(readHarnessVersion(defaultHarnessRoot()));
 
 program
   .command("status")
@@ -453,16 +463,24 @@ program
     // IMP-139: 未了の正の集計 (非終端 PLAN 層別 + open defer) を additive に surface し
     // 「doctor green = 完了」誤読を機械照合可能にする (gate ではない informational surface)。
     const outstanding = computeOutstandingWork(process.cwd());
+    // PLAN-L7-362: update-check advisory (fail-open、gate ではない)。基準は harness checkout。
+    const update =
+      process.env[UPDATE_CHECK_DISABLE_ENV] === "1"
+        ? updateCheckDisabled()
+        : checkForUpdate(nodeUpdateCheckDeps());
     if (opts.json) {
       // 既存 6 フィールド (camelCase 公開契約) に nextAction + outstanding を additive に付加する
       // (A-138 ITEM-1、PLAN-L7-84、IMP-139、taxonomy=current)。判断ゲートの進め方 + 未了量を提示。
-      process.stdout.write(`${JSON.stringify({ ...d, nextAction, outstanding }, null, 2)}\n`);
+      process.stdout.write(
+        `${JSON.stringify({ ...d, nextAction, outstanding, update }, null, 2)}\n`,
+      );
     } else {
       process.stdout.write(
         `mode: ${d.mode}  (claude=${d.claude}, codex=${d.codex}, current=${d.currentRuntime ?? "-"})\n`,
       );
       process.stdout.write(`next: ${nextAction}\n`);
       process.stdout.write(`${outstandingSummaryLine(outstanding)}\n`);
+      process.stdout.write(`${renderUpdateLine(update)}\n`);
     }
   });
 

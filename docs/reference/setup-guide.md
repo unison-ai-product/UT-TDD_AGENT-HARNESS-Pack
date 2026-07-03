@@ -85,6 +85,15 @@ Windows PowerShell では `<pack-checkout>\scripts\ut-tdd.ps1 setup --solo`。
 Pack はタグ付き release (`v0.1.x`) で更新されます。変更点は先に
 [CHANGELOG.md](../../CHANGELOG.md) で確認してください。
 
+新 release を知る経路は 2 つあります:
+
+- **push 通知 (推奨)**: GitHub で Pack リポジトリを **Watch → Custom → Releases** に
+  設定すると、release 公開時に GitHub から通知が届きます。
+- **ハーネス内蔵の advisory**: `ut-tdd status` が origin の release tag と手元の version を
+  比較し、新しい tag があれば `update: v0.1.4 -> v0.1.5 available ...` の 1 行を表示します
+  (結果は 24 時間キャッシュ。オフライン等で確認できないときは `update: check skipped (...)`
+  になるだけで、status / doctor が赤になることはありません)。
+
 ```sh
 git fetch --tags
 git checkout v0.1.4          # 追従運用なら: git pull origin main

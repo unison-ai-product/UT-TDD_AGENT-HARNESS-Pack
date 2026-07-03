@@ -9,8 +9,14 @@ are marked `signatureCreated=false` in each manifest.
 
 ### Added
 
+- Update-check advisory: `ut-tdd status` compares the harness checkout version
+  against the newest release tag on `origin` (24h cache, fail-open) and prints
+  an `update:` line when a newer release exists. `--json` gains an additive
+  `update` field. The CLI `--version` now reads the real package version.
 - Setup guide (`docs/reference/setup-guide.md`): install, projection into an
   existing project, verification checklist, version update, troubleshooting.
+  The version-update section documents both notification paths (GitHub
+  Watch → Custom → Releases, and the `ut-tdd status` advisory line).
 
 ### Fixed
 
