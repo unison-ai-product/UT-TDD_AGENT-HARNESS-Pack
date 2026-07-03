@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
+import { hasPersonalAbsolutePath } from "./personal-path";
 
 export type AssetType = "agent" | "skill" | "prompt";
 
@@ -39,7 +40,6 @@ export interface AssetDriftResult {
 const LEGACY_SOURCE_PATH_PATTERNS = [
   /~\/ai-dev-kit-vscode/,
   /ai-dev-kit-vscode/,
-  /C:\\Users\\micro\\ai-dev-kit-vscode/i,
 ];
 
 const LEGACY_RUNTIME_NAME = ["he", "lix"].join("");
@@ -120,11 +120,11 @@ export function analyzeAssetDrift(input: AssetDriftInput): AssetDriftResult {
 
   for (const asset of input.assets) {
     for (const pattern of LEGACY_SOURCE_PATH_PATTERNS) {
-      if (pattern.test(asset.text)) {
+      if (pattern.test(asset.text) || hasPersonalAbsolutePath(asset.text)) {
         violations.push({
           kind: "legacy-source-path-residue",
           path: asset.path,
-          detail: "legacy source personal workspace path residue",
+          detail: "legacy source or personal workspace path residue",
         });
         break;
       }

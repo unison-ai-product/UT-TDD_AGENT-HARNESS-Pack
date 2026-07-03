@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { PERSONAL_ABSOLUTE_PATH_PATTERN } from "./personal-path";
 
 export interface ProjectHookDoc {
   file: string;
@@ -76,7 +77,7 @@ export const FORBIDDEN_PATH_RE = new RegExp(
     "ai-dev-kit-vscode",
     `vendor/${LEGACY_RUNTIME_NAME}-source`,
     String.raw`\.${LEGACY_RUNTIME_NAME}`,
-    String.raw`C:\\Users\\micro`,
+    PERSONAL_ABSOLUTE_PATH_PATTERN,
     `${LEGACY_ENV_PREFIX}[A-Z0-9_]*`,
     String.raw`\b${LEGACY_RUNTIME_NAME}\s+(?:codex|claude|plan|gate|handover)\b`,
     `pmo-${LEGACY_RUNTIME_NAME}-`,
