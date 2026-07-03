@@ -230,6 +230,14 @@ describe("clean distribution local acceptance smoke", () => {
       expect(distributionJson.export.artifactPaths).not.toContain(
         "docs/plans/PLAN-L7-157-distribution-clean-pull.md",
       );
+      // A-172 review B 項目: 参照ゼロの孤立旧構想 doc (v1.1) は clean 配布に載せない
+      // (PLAN-RECOVERY-06 同時修正、allowlist から除外)。
+      expect(distributionJson.export.artifactPaths).not.toContain(
+        "docs/governance/ai-dev-team-concept_v1.1.md",
+      );
+      expect(distributionJson.export.artifactPaths).not.toContain(
+        "docs/governance/ai-dev-team-operations_v1.1.md",
+      );
       expect(distributionJson.actualCutRequiresPoApproval).toBe(true);
 
       const setup = runBun(cleanRoot, ["src/cli.ts", "setup", "--solo"], env);

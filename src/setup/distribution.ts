@@ -116,8 +116,6 @@ const CLEAN_ALLOW_FILES = new Set([
   "biome.json",
   "bun.lock",
   "docs/governance/README.md",
-  "docs/governance/ai-dev-team-concept_v1.1.md",
-  "docs/governance/ai-dev-team-operations_v1.1.md",
   "docs/governance/audit-framework.md",
   "docs/governance/coding-rules.md",
   "docs/governance/ddd-tdd-rules.md",

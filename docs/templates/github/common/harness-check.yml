@@ -26,4 +26,7 @@ jobs:
       - run: bun run typecheck
       - run: bun run test
       - run: bun .ut-tdd/bin/ut-tdd.mjs audit quality --include-tests --limit 20
-      - run: bun .ut-tdd/bin/ut-tdd.mjs doctor
+      # Consumer CI gate is doctor --setup-smoke: full doctor asserts source-repo
+      # self-application state (design docs / PLAN corpus) and is structurally red
+      # on a fresh consumer repository (A-172 C-1).
+      - run: bun .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke

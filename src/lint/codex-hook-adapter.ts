@@ -176,8 +176,13 @@ export function analyzeCodexHookAdapter(input: { codexHooksJson: string | null }
     const matchingCommands = entries
       .flatMap((entry) => entry.hooks ?? [])
       // type==="command" の hook のみが guard を充足しうる (非 command エントリで偽充足させない)。
+      // source 配線 (commandParts) と setup 生成 wrapper 配線 (wrapperCommand、PLAN-RECOVERY-06)
+      // の両形式を受理する。
       .filter(
-        (hook) => hook.type === "command" && commandHas(hook.command ?? "", required.commandParts),
+        (hook) =>
+          hook.type === "command" &&
+          (commandHas(hook.command ?? "", required.commandParts) ||
+            (hook.command ?? "").includes(required.wrapperCommand)),
       );
     if (matchingCommands.length === 0) {
       violations.push({ hook: required.id, reason: "missing_hook" });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyzeProjectHooks } from "../src/lint/project-hook";
+import { BUILTIN_GITHUB_TEMPLATES } from "../src/setup/templates";
 
 function teamStandardSettings(): { hooks: Record<string, unknown> } {
   return {
@@ -49,6 +50,41 @@ describe("project-hook lint", () => {
 
     expect(result.ok).toBe(true);
     expect(result.violations).toEqual([]);
+  });
+
+  // PLAN-RECOVERY-06 (A-172 C-2): setup が consumer へ生成する settings.json (wrapper 配線) が
+  // project-hook gate を通ることを実テンプレートで固定する。gate 要求と setup 生成物が
+  // 再乖離したらこの test が赤になる (単一定義源の回帰フェンス)。
+  it("accepts the setup-generated consumer settings.json wrapper wiring", () => {
+    const generated = BUILTIN_GITHUB_TEMPLATES["adapter/.claude/settings.json"];
+    expect(generated).toBeDefined();
+
+    const result = analyzeProjectHooks([{ file: ".claude/settings.json", content: generated }]);
+
+    expect(result.ok).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("rejects wrapper-wired guard hooks that drop blockOnFailure", () => {
+    const generated = JSON.parse(BUILTIN_GITHUB_TEMPLATES["adapter/.claude/settings.json"]) as {
+      hooks: Record<string, { matcher?: string; hooks: { blockOnFailure?: boolean }[] }[]>;
+    };
+    for (const entry of generated.hooks.PreToolUse) {
+      for (const hook of entry.hooks) {
+        delete hook.blockOnFailure;
+      }
+    }
+
+    const result = analyzeProjectHooks([
+      { file: ".claude/settings.json", content: JSON.stringify(generated) },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContainEqual({
+      file: ".claude/settings.json",
+      hook: "PreToolUse",
+      reason: "missing_block_on_failure",
+    });
   });
 
   it("rejects missing team-standard project hook entries", () => {

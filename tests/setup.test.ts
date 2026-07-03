@@ -265,7 +265,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       expect(templates["common/harness-check.yml"]).toContain("harness-check");
       expect(templates["common/harness-check.yml"]).toContain("github guard");
       expect(templates["common/harness-check.yml"]).toContain("audit quality --include-tests");
-      expect(templates["common/harness-check.yml"]).toContain("ut-tdd.mjs doctor");
+      expect(templates["common/harness-check.yml"]).toContain("ut-tdd.mjs doctor --setup-smoke");
       expect(templates["team/CODEOWNERS"]).toContain("{{TL_TEAM}}");
       const deps = mockDeps({ repoRoot: repo, templates });
       const plan = planSetup("0-B", {
@@ -287,7 +287,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(workflow).toContain("bun run typecheck");
     expect(workflow).toContain("bun run test");
     expect(workflow).toContain("audit quality --include-tests");
-    expect(workflow).toContain("ut-tdd.mjs doctor");
+    expect(workflow).toContain("ut-tdd.mjs doctor --setup-smoke");
   });
 
   it("U-SETUP-004c: built-in adapter templates ship enforced portable guard hooks", () => {
@@ -423,9 +423,15 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     const wrapper = deps.files.get(join("/repo", ".ut-tdd", "bin", "ut-tdd.mjs"));
     expect(wrapper).toContain('const setupSourceCli = "');
     expect(wrapper).toContain(
-      'existsSync(localBin) ? localBin : existsSync(setupSourceCli) ? "bun" : "ut-tdd"',
+      'const repoLocalHarness = existsSync(repoLocalCli) && existsSync(join(repoRoot, "src", "setup", "index.ts"));',
     );
-    expect(wrapper).toContain("[setupSourceCli, ...process.argv.slice(2)]");
+    expect(wrapper).toContain(
+      "const sourceCli = repoLocalHarness ? repoLocalCli : setupSourceCli;",
+    );
+    expect(wrapper).toContain(
+      'existsSync(localBin) ? localBin : existsSync(sourceCli) ? "bun" : "ut-tdd"',
+    );
+    expect(wrapper).toContain("[sourceCli, ...process.argv.slice(2)]");
     expect(wrapper).not.toContain("{{UT_TDD_SOURCE_CLI_JSON}}");
 
     const codexHooks = deps.files.get(join("/repo", ".codex", "hooks.json"));

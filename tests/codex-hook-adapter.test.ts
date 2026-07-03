@@ -16,6 +16,7 @@ import { REQUIRED as CLAUDE_REQUIRED } from "../src/lint/project-hook";
 import { analyzeReadability } from "../src/lint/readability";
 import { evaluateAgentGuard } from "../src/runtime/agent-guard";
 import { evaluateWorkGuard } from "../src/runtime/work-guard";
+import { BUILTIN_GITHUB_TEMPLATES } from "../src/setup/templates";
 
 /** .codex/hooks.json と同型の有効な Codex adapter fixture (mutate して fail-close を検証)。 */
 function validCodexHooks(): Record<string, unknown> {
@@ -69,6 +70,26 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139)", () => {
   it("U-CXHOOK-002: 有効な adapter fixture は ok", () => {
     assertExternalizedCodexRequiredPolicy();
     expect(analyzeCodexHookAdapter({ codexHooksJson: json(validCodexHooks()) }).ok).toBe(true);
+  });
+
+  // PLAN-RECOVERY-06 (A-172 C-2): setup が consumer へ生成する .codex/hooks.json (wrapper 配線)
+  // が codex-hook-adapter gate を通ることを実テンプレートで固定する (単一定義源の回帰フェンス)。
+  it("U-CXHOOK-002c: setup 生成 consumer hooks.json (wrapper 配線) は ok", () => {
+    const generated = BUILTIN_GITHUB_TEMPLATES["adapter/.codex/hooks.json"];
+    expect(generated).toBeDefined();
+
+    const r = analyzeCodexHookAdapter({ codexHooksJson: generated });
+    expect(r.ok).toBe(true);
+    expect(r.violations).toEqual([]);
+  });
+
+  it("U-CXHOOK-002d: Claude/Codex の wrapper 配線は定義上同一 (entrypoint 分岐防止)", () => {
+    const claudeWrapperById = new Map(
+      CLAUDE_REQUIRED.map((hook) => [hook.id, hook.wrapperCommand]),
+    );
+    for (const required of CODEX_REQUIRED) {
+      expect(required.wrapperCommand).toBe(claudeWrapperById.get(required.id));
+    }
   });
 
   it("U-CXHOOK-002b: policy prose is mojibake-free", () => {
