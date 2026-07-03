@@ -37,10 +37,7 @@ export interface AssetDriftResult {
   violations: AssetDriftViolation[];
 }
 
-const LEGACY_SOURCE_PATH_PATTERNS = [
-  /~\/ai-dev-kit-vscode/,
-  /ai-dev-kit-vscode/,
-];
+const LEGACY_SOURCE_PATH_PATTERNS = [/~\/ai-dev-kit-vscode/, /ai-dev-kit-vscode/];
 
 const LEGACY_RUNTIME_NAME = ["he", "lix"].join("");
 const LEGACY_RUNTIME_ENV_PREFIX = LEGACY_RUNTIME_NAME.toUpperCase();

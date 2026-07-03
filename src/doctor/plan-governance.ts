@@ -1,6 +1,13 @@
 import { existsSync } from "node:fs";
 import { analyzeBackfill, backfillMessages, loadBackfillDocs } from "../lint/backfill-pairing";
 import {
+  analyzeForwardConvergence,
+  forwardConvergenceMessages,
+  legacyAuditDriftMessages,
+  loadConvergenceDocs,
+  loadLegacyAuditDrift,
+} from "../lint/forward-convergence";
+import {
   analyzePlanBodySubstance,
   loadPlanBodySubstanceInput,
   planBodySubstanceMessages,
@@ -10,13 +17,6 @@ import {
   loadPlanCompletionDriftInput,
   planCompletionDriftMessages,
 } from "../lint/plan-completion-drift";
-import {
-  analyzeForwardConvergence,
-  forwardConvergenceMessages,
-  legacyAuditDriftMessages,
-  loadConvergenceDocs,
-  loadLegacyAuditDrift,
-} from "../lint/forward-convergence";
 import {
   analyzePlanSupersession,
   loadSupersedePlans,

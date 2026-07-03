@@ -381,7 +381,7 @@ function routeModeKindViolations(
   ];
 }
 
-const PLAN_CODE_LINE_REFERENCE_PATTERN = /\b([A-Za-z0-9_.\/\\-]+\.tsx?):(\d+)\b/g;
+const PLAN_CODE_LINE_REFERENCE_PATTERN = /\b([A-Za-z0-9_./\\-]+\.tsx?):(\d+)\b/g;
 
 function fileLineCount(path: string): number {
   return readFileSync(path, "utf8").split(/\r?\n/).length;
@@ -426,9 +426,7 @@ export function analyzePlanReferenceFreshness(
   return { findings, checked: docs.length, ok: findings.length === 0 };
 }
 
-export function planReferenceFreshnessMessages(
-  result: PlanReferenceFreshnessResult,
-): string[] {
+export function planReferenceFreshnessMessages(result: PlanReferenceFreshnessResult): string[] {
   if (result.findings.length === 0) {
     return [`plan-reference-freshness - OK (draft code-line refs checked=${result.checked})`];
   }
