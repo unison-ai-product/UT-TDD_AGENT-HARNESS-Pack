@@ -815,7 +815,9 @@ hook
 
 hook
   .command("agent-guard")
-  .description("PreToolUse(Agent|Task): enforce subagent allowlist and declared model family")
+  .description(
+    "PreToolUse(Agent|Task): enforce subagent allowlist and declared model family; exits: 0=pass, 1=error, 2=blocked",
+  )
   .action(() => {
     const repoRoot = process.cwd();
     const input = parseHookInput<AgentGuardInput>(readStdin());
@@ -844,7 +846,9 @@ hook
 
 hook
   .command("work-guard")
-  .description("PreToolUse(Edit|Write|MultiEdit/apply_patch|write_file): block foreign edits")
+  .description(
+    "PreToolUse(Edit|Write|MultiEdit/apply_patch|write_file): block foreign edits; exits: 0=pass, 1=error, 2=blocked",
+  )
   .action(() => {
     const repoRoot = process.cwd();
     const input = parseHookInput<{ tool_input?: unknown; session_id?: string }>(readStdin());
@@ -885,7 +889,9 @@ hook
 const guard = program.command("guard").description("manual guard checks for non-hooked runtimes");
 guard
   .command("preflight")
-  .description("run work-guard before hosted/API edits that cannot execute repo-local Codex hooks")
+  .description(
+    "run work-guard before hosted/API edits that cannot execute repo-local Codex hooks; exits: 0=pass, 1=error, 2=blocked",
+  )
   .option("--target <path...>", "repo-relative or absolute target path(s) to edit")
   .option("--patch-file <path>", "patch file to scan for apply_patch headers")
   .option("--stdin", "read an apply_patch body from stdin")

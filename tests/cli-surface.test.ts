@@ -159,6 +159,20 @@ describe("L7 CLI surface closure", () => {
     }
   }, 15_000);
 
+  it("documents guard blocked exit code in hook and manual preflight help", () => {
+    const agentGuard = runCli(["hook", "agent-guard", "--help"]);
+    const workGuard = runCli(["hook", "work-guard", "--help"]);
+    const preflight = runCli(["guard", "preflight", "--help"]);
+    const exitContract = "exits: 0=pass, 1=error, 2=blocked";
+
+    expect(agentGuard.status).toBe(0);
+    expect(workGuard.status).toBe(0);
+    expect(preflight.status).toBe(0);
+    expect(agentGuard.stdout).toContain(exitContract);
+    expect(workGuard.stdout).toContain(exitContract);
+    expect(preflight.stdout).toContain(exitContract);
+  }, 15_000);
+
   it("exposes Pack sync commands as first-class distribution surfaces", () => {
     const run = runCli(["distribution", "--help"]);
 
