@@ -296,7 +296,13 @@ export function emitSetup(plan: SetupPlan, templates: TemplateSet, deps: SetupDe
       }
       continue;
     }
-    if (exists && !deps.confirm(`${r.path} は既存です。上書きしますか？`)) continue;
+    if (exists) {
+      // confirm は isInteractive 時のみ (nodeConfirm の blocking readSync が、stdin が開いたまま
+      // 無音の非対話環境 (CI runner / tool shell) で無限待ちになる)。非対話は既存保護 = skip が
+      // 既定 (非破壊導入の invariant、PLAN-L7-361)。
+      if (deps.isInteractive !== true) continue;
+      if (!deps.confirm(`${r.path} は既存です。上書きしますか？`)) continue;
+    }
     deps.writeText(abs, r.content);
     written.push(r.path);
   }

@@ -26,6 +26,7 @@ const SYNTHETIC = [
 
 describe("doc-router buildDocIndex (PLAN-L7-302 doc-router 部分)", () => {
   it("実見出しから level / 節番号 / 行範囲を索引化する", () => {
+    // U-CONTEXT-001
     const idx = buildDocIndex("synthetic.md", SYNTHETIC);
     expect(idx.total_lines).toBe(13);
     const headings = idx.sections.map((s) => s.heading);

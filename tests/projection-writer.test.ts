@@ -55,6 +55,7 @@ const hasSourceScreenDocs = () =>
 
 describe("SECRET_PATTERN word-boundary anchoring", () => {
   it("does not match 'sk' inside a word but matches a boundary-delimited token", () => {
+    // U-SECRET-001
     // Hyphenated slugs / paths must not false-positive (these crashed db rebuild).
     // The "sk" segments are interpolated so no literal token appears in source.
     expect(isSecretLike(`changed-path-src-${"task"}-has-no-relation-graph-node-impact`)).toBe(

@@ -189,6 +189,7 @@ describe("loadRelationGraphSourceSet", () => {
   it("builds a source set with plan→source, source→test, design→test-design edges", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-graph-loader-"));
     try {
+      // U-GRAPH-001
       buildRepo(root);
       const sourceSet = loadRelationGraphSourceSet(root);
 

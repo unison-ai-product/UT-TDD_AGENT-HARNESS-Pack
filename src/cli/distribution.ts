@@ -519,7 +519,11 @@ export function registerDistributionCommands(program: Command): void {
             artifactPath: rel,
           });
         }
-        tarResult = spawnSync("tar", ["-czf", tarball, "-C", stage, "."], {
+        // -f はドライブレター (C:) を含む絶対パスだと GNU tar (Git Bash 同梱) がリモートホスト名と
+        // 解釈して "Cannot connect to C:" で必ず失敗する。cwd を outDir に固定し -f を相対 basename に
+        // することで bsdtar/GNU tar の両実装で動く (PLAN-L7-361)。-C の引数は remote 解釈されない。
+        tarResult = spawnSync("tar", ["-czf", basename(tarball), "-C", stage, "."], {
+          cwd: outDir,
           encoding: "utf8",
           stdio: ["ignore", "pipe", "pipe"],
         });
@@ -578,6 +582,14 @@ export function registerDistributionCommands(program: Command): void {
       process.stdout.write(
         `distribution package: ${ok ? "ok" : "blocked"} tag=${exportPlan.sourceTag}\n`,
       );
+      if (!ok && tarResult !== null && tarResult.status !== 0) {
+        const stderrHead = String(tarResult.stderr ?? "")
+          .split(/\r?\n/, 1)[0]
+          .trim();
+        process.stdout.write(
+          `  tar: error exit=${tarResult.status ?? "null"}${stderrHead ? ` (${stderrHead})` : ""} - artifacts not created\n`,
+        );
+      }
       process.stdout.write(`  tarball: ${tarball}\n`);
       process.stdout.write(`  checksum: ${checksum}\n`);
       process.stdout.write("  signature: required but not created (external signing boundary)\n");

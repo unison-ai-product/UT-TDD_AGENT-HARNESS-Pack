@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -239,6 +240,30 @@ describe("clean distribution local acceptance smoke", () => {
         "docs/governance/ai-dev-team-operations_v1.1.md",
       );
       expect(distributionJson.actualCutRequiresPoApproval).toBe(true);
+
+      // PLAN-L7-361: package の tar は相対 -f + cwd 固定で bsdtar/GNU tar 両対応 (絶対
+      // Windows パスは GNU tar が remote host 解釈)。実 tarball の生成と exit 契約を固定。
+      const releaseDir = join(cleanRoot, ".ut-tdd", "release-accept");
+      const pkg = runBun(
+        cleanRoot,
+        [
+          "src/cli.ts",
+          "distribution",
+          "package",
+          "--tag",
+          "v0.0.0-accept",
+          "--out",
+          releaseDir,
+          "--json",
+        ],
+        env,
+      );
+      expect(pkg.status, pkg.stderr || pkg.stdout).toBe(0);
+      const pkgJson = JSON.parse(pkg.stdout);
+      expect(pkgJson.ok).toBe(true);
+      expect(pkgJson.tar.exitCode).toBe(0);
+      expect(existsSync(join(releaseDir, "v0.0.0-accept.tar.gz"))).toBe(true);
+      expect(existsSync(join(releaseDir, "v0.0.0-accept.tar.gz.sha256"))).toBe(true);
 
       const setup = runBun(cleanRoot, ["src/cli.ts", "setup", "--solo"], env);
       expect(setup.status, setup.stderr || setup.stdout).toBe(0);

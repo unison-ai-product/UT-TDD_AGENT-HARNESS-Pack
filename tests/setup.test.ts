@@ -22,6 +22,7 @@ import {
   detectProjectScale,
   emitSetup,
   loadTemplates,
+  PACK_SAFE_TEST_SCRIPT,
   type ProjectScale,
   planSetup,
   recommendPhase,
@@ -275,6 +276,60 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       const written = emitSetup(plan, templates, deps);
       expect(written).toContain(join(".github", "CODEOWNERS"));
       expect(deps.files.get(join(repo, ".github", "CODEOWNERS"))).toContain("@org/tl");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  // Pack の test:pack は transform の PACK_SAFE_TEST_SCRIPT が正本。source package.json 側の
+  // test:pack 更新 (例: 3dd979f の toolchain-pin 追加) が定数へ伝播し忘れると、次の sync-pack が
+  // Pack 側の既存 script を黙って退行させる (実発生 2026-07-03)。両者の一致を fail-close で固定。
+  it("U-SETUP-017: PACK_SAFE_TEST_SCRIPT stays in sync with source test:pack", () => {
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts["test:pack"]).toBe(PACK_SAFE_TEST_SCRIPT);
+  });
+
+  // PLAN-L7-361: nodeConfirm は blocking readSync のため、stdin が開いたまま無音の非対話環境
+  // (CI runner / tool shell) で emitSetup の上書き確認が無限待ちになった。非対話では confirm を
+  // 呼ばず既存保護 (skip) が invariant。
+  it("U-SETUP-016: non-interactive emitSetup keeps existing files without calling confirm", () => {
+    const repo = mkdtempSync(join(tmpdir(), "ut-tdd-setup-nonint-"));
+    try {
+      const templates = loadTemplates(repo);
+      const wrapperPath = join("/repo", ".ut-tdd", "bin", "ut-tdd.mjs");
+      const deps = mockDeps({
+        templates,
+        isInteractive: false,
+        confirm: () => {
+          throw new Error("confirm must not be called in non-interactive mode");
+        },
+      });
+      deps.files.set(wrapperPath, "PREEXISTING-CONSUMER-CONTENT");
+
+      const plan = planSetup("0-A", { dryRun: false });
+      const written = emitSetup(plan, templates, deps);
+
+      expect(deps.files.get(wrapperPath)).toBe("PREEXISTING-CONSUMER-CONTENT");
+      expect(written).not.toContain(join(".ut-tdd", "bin", "ut-tdd.mjs"));
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("U-SETUP-016b: interactive confirm=yes still overwrites existing files", () => {
+    const repo = mkdtempSync(join(tmpdir(), "ut-tdd-setup-int-"));
+    try {
+      const templates = loadTemplates(repo);
+      const wrapperPath = join("/repo", ".ut-tdd", "bin", "ut-tdd.mjs");
+      const deps = mockDeps({ templates, isInteractive: true, confirm: () => true });
+      deps.files.set(wrapperPath, "PREEXISTING-CONSUMER-CONTENT");
+
+      const written = emitSetup(planSetup("0-A", { dryRun: false }), templates, deps);
+
+      expect(deps.files.get(wrapperPath)).not.toBe("PREEXISTING-CONSUMER-CONTENT");
+      expect(written).toContain(join(".ut-tdd", "bin", "ut-tdd.mjs"));
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
