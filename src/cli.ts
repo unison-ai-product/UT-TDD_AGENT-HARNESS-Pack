@@ -25,6 +25,7 @@ import {
 } from "./assets/catalog";
 import { loadBranchAudit, renderBranchAudit } from "./audit/branches";
 import { renderQualityAudit, runQualityAudit } from "./audit/quality";
+import { adapterExecutionEnv, executeAdapterPlanForCli } from "./cli/delegation";
 import { registerDistributionCommands } from "./cli/distribution";
 import { registerFeedbackCommands } from "./cli/feedback";
 import { runDoctor } from "./doctor";
@@ -70,7 +71,6 @@ import {
 import { lintPlanWithGate } from "./plan/lint";
 import {
   type AdapterContextInjection,
-  type AdapterPlan,
   type AdapterProvider,
   buildAdapterPlan,
   buildProviderInvocation,
@@ -444,26 +444,6 @@ function surfaceMemoryToStdout(repoRoot: string): void {
   } catch {
     // fail-open: memory surface is shared context, not a runtime blocker.
   }
-}
-
-function adapterExecutionEnv(
-  provider: AdapterProvider,
-  extraEnv: Record<string, string> = {},
-): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  const legacyPrefix = ["HE", "LIX"].join("");
-  for (const key of [
-    [legacyPrefix, "ALLOW", "RAW", "CLAUDE"].join("_"),
-    [legacyPrefix, "RAW", "CLAUDE", "REASON"].join("_"),
-    [legacyPrefix, "ALLOW", "RAW", "CODEX"].join("_"),
-    [legacyPrefix, "RAW", "CODEX", "REASON"].join("_"),
-    [legacyPrefix, "CLAUDE", "BIN"].join("_"),
-    [legacyPrefix, "CODEX", "BIN"].join("_"),
-  ]) {
-    delete env[key];
-  }
-  if (provider !== "claude" && provider !== "codex") return env;
-  return { ...env, ...extraEnv };
 }
 
 const program = new Command();
@@ -2033,63 +2013,6 @@ routeCommand
     },
   );
 
-function executeAdapterPlanForCli(
-  plan: AdapterPlan,
-  input: { sessionPrefix: string; role: string; planId?: string; jsonOut?: boolean },
-): { executed: true; exit_code: number | null; signal: string | null } {
-  const sessionId = `${input.sessionPrefix}-${Date.now()}`;
-  const repoRoot = process.cwd();
-  const deps = nodeDeps(repoRoot, gitBranch, gitHead);
-  const startInput: SessionHookInput = {
-    hook_event_name: HOOK_EVENT_SESSION_START,
-    session_id: sessionId,
-    ...(input.planId ? { plan_id: input.planId } : {}),
-  };
-  runSessionStartSideEffects(repoRoot, startInput, deps);
-  dispatch(startInput, deps, HOOK_EVENT_SESSION_START);
-  const invocation = buildProviderInvocation({
-    provider: plan.provider,
-    command: plan.command,
-    args: plan.args,
-  });
-  const child = spawnSync(invocation.command, invocation.args, {
-    input: plan.stdin,
-    stdio:
-      plan.stdin === undefined
-        ? ["inherit", input.jsonOut ? 2 : "inherit", "inherit"]
-        : ["pipe", input.jsonOut ? 2 : "inherit", "inherit"],
-    env: adapterExecutionEnv(plan.provider, plan.env),
-    shell: invocation.shell ?? false,
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
-  });
-  if (child.error) {
-    process.stderr.write(`${plan.provider}: failed to launch (${String(child.error)})\n`);
-  }
-  dispatch(
-    {
-      hook_event_name: "PostToolUse",
-      session_id: sessionId,
-      ...(input.planId ? { plan_id: input.planId } : {}),
-      tool_name: input.role,
-      tool_input: { command: `${plan.command} ${plan.args.join(" ")}` },
-      tool_response: { outcome: child.status === 0 ? "ok" : "error" },
-    },
-    deps,
-    "PostToolUse",
-  );
-  dispatch(
-    {
-      hook_event_name: "Stop",
-      session_id: sessionId,
-      ...(input.planId ? { plan_id: input.planId } : {}),
-    },
-    deps,
-    "Stop",
-  );
-  writeHandoverWarnings();
-  return { executed: true, exit_code: child.status ?? null, signal: child.signal ?? null };
-}
-
 program
   .command("advisor")
   .description("upper-model advisor adapter for uncertain orchestration decisions")
@@ -2155,12 +2078,16 @@ program
         }
         return;
       }
-      const execution = executeAdapterPlanForCli(decision.adapterPlan, {
-        sessionPrefix: `advisor-${decision.provider}`,
-        role: "advisor",
-        planId: opts.plan,
-        jsonOut: Boolean(opts.json),
-      });
+      const execution = executeAdapterPlanForCli(
+        decision.adapterPlan,
+        {
+          sessionPrefix: `advisor-${decision.provider}`,
+          toolName: "advisor",
+          planId: opts.plan,
+          jsonOut: Boolean(opts.json),
+        },
+        { gitBranch, gitHead, runSessionStartSideEffects, writeHandoverWarnings },
+      );
       const output = {
         ...decision,
         adapterPlan: {
