@@ -138,9 +138,21 @@ describe("L7 CLI surface closure", () => {
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("--json");
     expect(run.stdout).toContain("--setup-smoke");
+    expect(run.stdout).toContain("--scope");
     expect(run.stdout).toContain("--timing");
     expect(run.stdout).toContain("--strict-telemetry-provenance");
     expect(run.stdout).toContain("--strict-green-command-digest");
+  }, 15_000);
+
+  it("fail-closes unsupported doctor scope as machine-readable JSON", () => {
+    const run = runCli(["doctor", "--scope", "bogus", "--json"]);
+    const payload = JSON.parse(run.stdout);
+
+    expect(run.status).toBe(1);
+    expect(payload.ok).toBe(false);
+    expect(payload.messages).toEqual([
+      'doctor: invalid --scope "bogus" (expected: full, toolchain)',
+    ]);
   }, 15_000);
 
   it("emits machine-readable doctor JSON while preserving failing exit codes", () => {

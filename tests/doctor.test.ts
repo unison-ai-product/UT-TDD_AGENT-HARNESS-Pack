@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
+import { collectDoctorCheckRun } from "../src/doctor/check-registry";
 import {
   checkDependencyDrift as checkDependencyDriftAdapter,
   checkRegressionExpansion as checkRegressionExpansionAdapter,
@@ -337,6 +338,19 @@ describe("runDoctor", () => {
 
     expect(r.ok).toBe(true);
     expect(r.messages).toEqual(["doctor: setup-smoke - OK (checked=22, failed=0)"]);
+  });
+
+  it("runs only the toolchain gate when doctor scope is toolchain", () => {
+    const run = collectDoctorCheckRun(nodeDoctorDeps(process.cwd()), {
+      scope: "toolchain",
+      timing: true,
+    });
+
+    expect(run.checks).toHaveLength(1);
+    expect(run.checks[0]?.messages[0]).toContain("toolchain-pin");
+    expect(run.timings).toEqual([
+      expect.objectContaining({ id: "toolchain-pin", ok: run.checks[0]?.ok, message_count: 1 }),
+    ]);
   });
 
   it("includes asset-drift hard gate in doctor output", () => {
@@ -880,6 +894,8 @@ describe("runDoctor", () => {
     );
     expect(registrySource).toContain("export function collectDoctorCheckRun");
     expect(registrySource).toContain("export function collectDoctorChecks");
+    expect(registrySource).toContain('export type DoctorScope = "full" | "toolchain"');
+    expect(registrySource).toContain('if (scope === "toolchain")');
     const expectedHardGates = [
       "backfill",
       "scrumRev",

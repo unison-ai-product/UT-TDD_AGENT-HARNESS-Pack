@@ -87,11 +87,14 @@ import {
   checkRightArmGatePlanning,
 } from "./workflow-quality";
 
+export type DoctorScope = "full" | "toolchain";
+
 export interface DoctorOptions {
   strictTelemetryProvenance?: boolean;
   strictGreenCommandDigest?: boolean;
   setupSmoke?: boolean;
   timing?: boolean;
+  scope?: DoctorScope;
 }
 
 export interface DoctorCheckRun {
@@ -103,6 +106,7 @@ export function collectDoctorCheckRun(
   deps: DoctorDeps,
   options: DoctorOptions = {},
 ): DoctorCheckRun {
+  const scope = options.scope ?? "full";
   const timings: DoctorTiming[] = [];
   const record = <T extends LintResult>(id: string, run: () => T): T => {
     if (options.timing !== true) return run();
@@ -116,6 +120,11 @@ export function collectDoctorCheckRun(
     });
     return result;
   };
+
+  if (scope === "toolchain") {
+    const toolchainPin = record("toolchain-pin", () => checkToolchainPin(deps.repoRoot));
+    return { checks: [toolchainPin], timings };
+  }
 
   const backfill = record("backfill", () => checkBackfillResult(deps.repoRoot));
   const scrumRev = record("scrum-reverse", () => checkScrumReverse(deps.repoRoot));

@@ -481,6 +481,7 @@ program
     "--setup-smoke",
     "run only the fresh-consumer setup smoke checks for wrapper and adapter hooks",
   )
+  .option("--scope <scope>", "limit doctor checks to a supported scope (full|toolchain)")
   .option("--timing", "include per-check doctor timing diagnostics")
   .option("--json", "JSON output")
   .action(
@@ -488,13 +489,26 @@ program
       strictTelemetryProvenance?: boolean;
       strictGreenCommandDigest?: boolean;
       setupSmoke?: boolean;
+      scope?: string;
       timing?: boolean;
       json?: boolean;
     }) => {
+      const scope = opts.scope ?? "full";
+      if (scope !== "full" && scope !== "toolchain") {
+        const message = `doctor: invalid --scope "${scope}" (expected: full, toolchain)`;
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify({ ok: false, messages: [message] }, null, 2)}\n`);
+        } else {
+          process.stderr.write(`${message}\n`);
+        }
+        process.exitCode = 1;
+        return;
+      }
       const r = runDoctor(undefined, {
         strictTelemetryProvenance: opts.strictTelemetryProvenance === true,
         strictGreenCommandDigest: opts.strictGreenCommandDigest === true,
         setupSmoke: opts.setupSmoke === true,
+        scope,
         timing: opts.timing === true,
       });
       if (opts.json) {
