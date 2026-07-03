@@ -111,6 +111,7 @@ const CLEAN_ALLOW_FILES = new Set([
   ".gitattributes",
   ".gitignore",
   ".github/workflows/harness-check.yml",
+  "CHANGELOG.md",
   "LICENSE",
   "README.md",
   "biome.json",

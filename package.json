@@ -1,6 +1,6 @@
 {
   "name": "ut-tdd",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "UT-TDD Agent Harness - AI agent workflow, verification, and distribution foundation (TypeScript core, ADR-001)",
   "license": "MIT",
   "type": "module",

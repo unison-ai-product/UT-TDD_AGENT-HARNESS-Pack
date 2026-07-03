@@ -211,6 +211,7 @@ describe("clean distribution local acceptance smoke", () => {
         },
       });
       expect(distributionJson.export.artifactPaths).toContain("src/cli.ts");
+      expect(distributionJson.export.artifactPaths).toContain("CHANGELOG.md");
       expect(distributionJson.export.artifactPaths).toContain("skills/SKILL_MAP.md");
       expect(distributionJson.export.artifactPaths).not.toContain("docs/skills/SKILL_MAP.md");
       expect(distributionJson.export.artifactPaths).toContain(

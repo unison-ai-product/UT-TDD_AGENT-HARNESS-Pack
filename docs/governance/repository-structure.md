@@ -18,6 +18,7 @@ UT-TDD-agent-harness/
 │   └── hooks.json                #   hook adapter (.claude/settings.json guard parity, PLAN-L7-139)
 ├── .vscode/                      # editor workspace recommendations/settings (tracked, non-runtime)
 ├── README.md                     # project overview / onboarding entrypoint
+├── CHANGELOG.md                  # Pack release 履歴 (clean 配布に同梱、v0.1.4 で導入)
 ├── package.json                  # Node/Bun 依存 + scripts
 ├── tsconfig.json                 # TypeScript strict
 ├── bun.lock                      # Bun lockfile (tracked)
