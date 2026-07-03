@@ -897,6 +897,7 @@ describe("runDoctor", () => {
       "runtimeReadability",
       "projectHooks",
       "codexWrapperParity",
+      "toolchainPin",
       "l6Completion",
       "l7Completion",
       "verificationGroups",

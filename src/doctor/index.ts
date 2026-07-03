@@ -83,6 +83,7 @@ import {
   checkGithubCiPolicy,
   checkProjectHooks,
 } from "./runtime-surface";
+import { checkToolchainPin } from "./toolchain";
 import {
   checkFrontendDesignCoverage,
   checkG8IntegrationWorkflow,
@@ -171,6 +172,7 @@ export {
   checkGithubCiPolicy,
   checkProjectHooks,
 } from "./runtime-surface";
+export { checkToolchainPin } from "./toolchain";
 export {
   checkFrontendDesignCoverage,
   checkG8IntegrationWorkflow,
@@ -247,6 +249,7 @@ function collectDoctorChecks(deps: DoctorDeps, options: DoctorOptions = {}) {
   const githubCiPolicy = checkGithubCiPolicy(deps.repoRoot);
   const codexHookAdapter = checkCodexHookAdapter(deps.repoRoot);
   const codexWrapperParity = checkCodexWrapperParity(deps);
+  const toolchainPin = checkToolchainPin(deps.repoRoot);
   const l6FrCoverage = checkL6FrCoverage(deps.repoRoot);
   const readability = checkReadability(deps.repoRoot);
   const runtimeReadability = checkRuntimeReadability(deps.repoRoot);
@@ -334,6 +337,7 @@ function collectDoctorChecks(deps: DoctorDeps, options: DoctorOptions = {}) {
     githubCiPolicy,
     codexHookAdapter,
     codexWrapperParity,
+    toolchainPin,
     l6FrCoverage,
     readability,
     runtimeReadability,
