@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import {
   analyzeDbProjectionCoverage,
   dbProjectionCoverageMessages,
@@ -8,16 +9,27 @@ import {
 } from "../lint/db-projection-coverage";
 import {
   analyzeDbProjectionIngestion,
+  type DbProjectionIngestionResult,
   type DbTelemetryProvenanceStats,
   dbProjectionIngestionMessages,
 } from "../lint/db-projection-ingestion";
+import type { LintResult } from "../plan/lint";
 import type { HarnessDb } from "../state-db/index";
 import { openHarnessDb } from "../state-db/index";
-import { projectTokenUsage, rebuildHarnessDb } from "../state-db/projection-writer";
+import {
+  type ProjectionTiming,
+  projectTokenUsage,
+  rebuildHarnessDb,
+} from "../state-db/projection-writer";
 import { loadRuntimeSessionUsage } from "../state-db/token-tracker";
 
 export interface DbProjectionDoctorOptions {
   strictTelemetryProvenance?: boolean;
+  timing?: boolean;
+}
+
+interface DbProjectionIngestionCheckResult extends LintResult {
+  timingSubsteps?: ProjectionTiming[];
 }
 
 export function checkDbProjectionCoverage(repoRoot: string): { messages: string[]; ok: boolean } {
@@ -125,7 +137,7 @@ function projectRuntimeModelTelemetryForDoctor(db: HarnessDb): void {
 export function checkDbProjectionIngestion(
   repoRoot: string,
   options: DbProjectionDoctorOptions = {},
-): { messages: string[]; ok: boolean } {
+): DbProjectionIngestionCheckResult {
   if (!existsSync(repoRoot)) {
     return {
       messages: ["db-projection-ingestion - violation: repo root could not be read"],
@@ -133,15 +145,36 @@ export function checkDbProjectionIngestion(
     };
   }
   try {
-    const db = openHarnessDb(":memory:", { repoRoot });
+    const profile: ProjectionTiming[] = [];
+    const timed = <T>(id: string, run: () => T): T => {
+      if (options.timing !== true) return run();
+      const started = performance.now();
+      const result = run();
+      profile.push({ id, duration_ms: Number((performance.now() - started).toFixed(3)) });
+      return result;
+    };
+    const db = timed("open-db", () => openHarnessDb(":memory:", { repoRoot }));
     try {
-      const rebuilt = rebuildHarnessDb({ repoRoot, db });
-      projectRuntimeModelTelemetryForDoctor(db);
-      const result = analyzeDbProjectionIngestion(rebuilt.rowCounts, undefined, {
-        telemetryStats: loadDbTelemetryProvenanceStats(db),
-        enforceTelemetryProvenance: options.strictTelemetryProvenance === true,
+      const rebuilt = rebuildHarnessDb({ repoRoot, db, timing: options.timing === true });
+      timed("runtime-model-telemetry", () => projectRuntimeModelTelemetryForDoctor(db));
+      let telemetryStats: DbTelemetryProvenanceStats[] = [];
+      timed("telemetry-stats", () => {
+        telemetryStats = loadDbTelemetryProvenanceStats(db);
       });
-      return { messages: dbProjectionIngestionMessages(result), ok: result.ok };
+      const result = timed("analyze", (): DbProjectionIngestionResult => {
+        return analyzeDbProjectionIngestion(rebuilt.rowCounts, undefined, {
+          telemetryStats,
+          enforceTelemetryProvenance: options.strictTelemetryProvenance === true,
+        });
+      });
+      const checkResult: DbProjectionIngestionCheckResult = {
+        messages: dbProjectionIngestionMessages(result),
+        ok: result.ok,
+      };
+      if (options.timing === true) {
+        checkResult.timingSubsteps = [...(rebuilt.timings ?? []), ...profile];
+      }
+      return checkResult;
     } finally {
       db.close();
     }

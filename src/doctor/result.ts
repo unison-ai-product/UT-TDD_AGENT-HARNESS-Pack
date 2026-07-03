@@ -5,6 +5,7 @@ export interface DoctorTiming {
   duration_ms: number;
   ok: boolean;
   message_count: number;
+  substeps?: { id: string; duration_ms: number }[];
 }
 
 export interface DoctorResult extends LintResult {

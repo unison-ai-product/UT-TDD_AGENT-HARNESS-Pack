@@ -1,4 +1,8 @@
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { checkDbProjectionIngestion } from "../src/doctor/db-projection";
 import {
   AUTOMATIC_DB_PROJECTION_REQUIREMENTS,
   analyzeDbProjectionIngestion,
@@ -24,6 +28,56 @@ describe("db projection ingestion detector", () => {
       expect(result.rowCounts.test_cases).toBeGreaterThan(0);
     } finally {
       db.close();
+    }
+  });
+
+  it("profiles rebuild phases without changing projection counts", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      const rebuilt = rebuildHarnessDb({ repoRoot: process.cwd(), db, timing: true });
+
+      expect(rebuilt.ok).toBe(true);
+      expect(rebuilt.rowCounts.graph_nodes).toBeGreaterThan(0);
+      expect(rebuilt.timings?.map((timing) => timing.id)).toEqual(
+        expect.arrayContaining(["plans", "graph-impact", "row-counts"]),
+      );
+      expect(rebuilt.timings?.every((timing) => timing.duration_ms >= 0)).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("exposes db projection profiling as timing substeps for doctor JSON", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-db-profile-"));
+    const claudeDir = join(root, "claude");
+    const codexDir = join(root, "codex");
+    const previousClaude = process.env.UT_TDD_CLAUDE_SESSIONS_DIR;
+    const previousCodex = process.env.UT_TDD_CODEX_SESSIONS_DIR;
+    mkdirSync(claudeDir, { recursive: true });
+    mkdirSync(codexDir, { recursive: true });
+    try {
+      process.env.UT_TDD_CLAUDE_SESSIONS_DIR = claudeDir;
+      process.env.UT_TDD_CODEX_SESSIONS_DIR = codexDir;
+
+      const result = checkDbProjectionIngestion(process.cwd(), { timing: true });
+
+      expect(result.ok).toBe(true);
+      expect(result.messages.join("\n")).not.toContain("db-projection-ingestion profile");
+      expect(result.timingSubsteps?.map((timing) => timing.id)).toEqual(
+        expect.arrayContaining(["plans", "graph-impact", "runtime-model-telemetry"]),
+      );
+    } finally {
+      if (previousClaude === undefined) {
+        delete process.env.UT_TDD_CLAUDE_SESSIONS_DIR;
+      } else {
+        process.env.UT_TDD_CLAUDE_SESSIONS_DIR = previousClaude;
+      }
+      if (previousCodex === undefined) {
+        delete process.env.UT_TDD_CODEX_SESSIONS_DIR;
+      } else {
+        process.env.UT_TDD_CODEX_SESSIONS_DIR = previousCodex;
+      }
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

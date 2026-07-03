@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { performance } from "node:perf_hooks";
 import { parse as parseYaml } from "yaml";
 import type { DocumentExportProjectionRows } from "../export/document-export";
 import {
@@ -88,6 +89,12 @@ export interface RebuildHarnessDbInput {
   relationGraph?: RelationGraphProjection;
   documentExports?: DocumentExportProjectionRows;
   verificationEvidence?: VerificationEvidenceProjection;
+  timing?: boolean;
+}
+
+export interface ProjectionTiming {
+  id: string;
+  duration_ms: number;
 }
 
 export interface RebuildHarnessDbResult {
@@ -100,6 +107,7 @@ export interface RebuildHarnessDbResult {
     documentExports?: DocumentExportProjectionRows;
     verificationEvidence?: VerificationEvidenceProjection;
   };
+  timings?: ProjectionTiming[];
 }
 
 export {
@@ -2633,60 +2641,94 @@ export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarn
   const repoRoot = input.repoRoot ?? process.cwd();
   const ownsDb = input.db === undefined;
   const db = input.db ?? openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
+  const timings: ProjectionTiming[] = [];
+  const time = <T>(id: string, run: () => T): T => {
+    if (input.timing !== true) return run();
+    const started = performance.now();
+    const result = run();
+    timings.push({ id, duration_ms: Number((performance.now() - started).toFixed(3)) });
+    return result;
+  };
   try {
-    migrate(db);
-    const relationGraph = input.relationGraph ?? defaultRelationGraphProjection(repoRoot);
-    const documentExports = input.documentExports ?? defaultDocumentExportProjection(repoRoot);
+    time("migrate", () => migrate(db));
+    const relationGraph =
+      input.relationGraph ??
+      time("load-relation-graph", () => defaultRelationGraphProjection(repoRoot));
+    const documentExports =
+      input.documentExports ??
+      time("load-document-exports", () => defaultDocumentExportProjection(repoRoot));
     // Atomic rebuild: truncate + re-project run inside a single transaction so a
     // mid-rebuild failure rolls back to the prior committed projection instead of
     // leaving the DB truncated or half-populated (DB rebuild atomicity).
     db.exec("BEGIN IMMEDIATE");
     try {
-      truncateProjectionTables(db);
-      const plans = projectPlans(repoRoot, db);
-      projectDriveRuns(repoRoot, db, plans);
-      projectHookEvents(repoRoot, db, plans);
-      projectReviewModelRuns(repoRoot, db, plans);
-      projectRoadmapRollup(repoRoot, db);
-      projectReviewEvidenceRegistry(repoRoot, db);
-      projectGuardrailInvariantAdvisories(db);
-      projectDescentObligations(repoRoot, db);
-      projectVerificationBandExecution(db);
-      projectAutomationAssets(repoRoot, db);
-      projectMemoryEntries(repoRoot, db);
-      projectRuntimeSkillInvocationsFromSessionLogs(repoRoot, db, plans);
-      projectSkillTelemetry(db, plans);
-      projectSkillMetrics(db);
-      projectSkillEvaluations(db);
-      projectPocEvaluations(db);
-      projectModelEvaluations(db, repoRoot);
-      projectOperationalMetrics(db);
+      time("truncate", () => truncateProjectionTables(db));
+      const plans = time("plans", () => projectPlans(repoRoot, db));
+      time("drive-hook-model", () => {
+        projectDriveRuns(repoRoot, db, plans);
+        projectHookEvents(repoRoot, db, plans);
+        projectReviewModelRuns(repoRoot, db, plans);
+      });
+      time("roadmap-review", () => {
+        projectRoadmapRollup(repoRoot, db);
+        projectReviewEvidenceRegistry(repoRoot, db);
+        projectGuardrailInvariantAdvisories(db);
+        projectDescentObligations(repoRoot, db);
+        projectVerificationBandExecution(db);
+      });
+      time("automation-memory", () => {
+        projectAutomationAssets(repoRoot, db);
+        projectMemoryEntries(repoRoot, db);
+      });
+      time("runtime-skill-logs", () =>
+        projectRuntimeSkillInvocationsFromSessionLogs(repoRoot, db, plans),
+      );
+      time("skill-projections", () => {
+        projectSkillTelemetry(db, plans);
+        projectSkillMetrics(db);
+        projectSkillEvaluations(db);
+        projectPocEvaluations(db);
+      });
+      time("model-operational", () => {
+        projectModelEvaluations(db, repoRoot);
+        projectOperationalMetrics(db);
+      });
       const projectionDeps = { nowIso, stableId, recordProjectionEvent };
-      projectRefactorCandidateSignals(repoRoot, db, projectionDeps);
-      projectRelationGraph(db, relationGraph);
-      projectGraphSnapshot(db, relationGraph);
-      projectImpactRules(db);
-      projectCurrentImpactResults(repoRoot, db, relationGraph);
-      projectArtifactProgress(db, relationGraph);
-      projectVerificationCatalogs(repoRoot, db);
-      projectDocumentExportCatalogs(db);
-      projectDocumentExports(db, documentExports);
-      projectVerificationEvidence(db, input.verificationEvidence);
-      projectTestCaseCatalog(repoRoot, db);
-      projectFeedbackEvents(db, projectionDeps);
-      projectTroubleEvents(db, projectionDeps);
-      projectRetryEvents(db, projectionDeps);
-      projectIssueQueue(db, projectionDeps);
-      projectIssueApprovalGuardrails(db, projectionDeps);
-      projectImprovementLog(db, projectionDeps);
-      projectScreens(repoRoot, db);
-      db.exec("COMMIT");
+      time("refactor-candidates", () =>
+        projectRefactorCandidateSignals(repoRoot, db, projectionDeps),
+      );
+      time("graph-impact", () => {
+        projectRelationGraph(db, relationGraph);
+        projectGraphSnapshot(db, relationGraph);
+        projectImpactRules(db);
+        projectCurrentImpactResults(repoRoot, db, relationGraph);
+        projectArtifactProgress(db, relationGraph);
+      });
+      time("catalogs", () => {
+        projectVerificationCatalogs(repoRoot, db);
+        projectDocumentExportCatalogs(db);
+      });
+      time("document-exports", () => projectDocumentExports(db, documentExports));
+      time("verification-evidence", () =>
+        projectVerificationEvidence(db, input.verificationEvidence),
+      );
+      time("test-cases", () => projectTestCaseCatalog(repoRoot, db));
+      time("feedback", () => {
+        projectFeedbackEvents(db, projectionDeps);
+        projectTroubleEvents(db, projectionDeps);
+        projectRetryEvents(db, projectionDeps);
+        projectIssueQueue(db, projectionDeps);
+        projectIssueApprovalGuardrails(db, projectionDeps);
+        projectImprovementLog(db, projectionDeps);
+      });
+      time("screens", () => projectScreens(repoRoot, db));
+      time("commit", () => db.exec("COMMIT"));
     } catch (error) {
       db.exec("ROLLBACK");
       throw error;
     }
-    const counts = rowCounts(db);
-    return {
+    const counts = time("row-counts", () => rowCounts(db));
+    const result: RebuildHarnessDbResult = {
       ok: true,
       path: db.path,
       rowCounts: counts,
@@ -2697,6 +2739,8 @@ export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarn
         verificationEvidence: input.verificationEvidence,
       },
     };
+    if (input.timing === true) result.timings = timings;
+    return result;
   } finally {
     if (ownsDb) db.close();
   }

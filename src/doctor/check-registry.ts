@@ -112,12 +112,15 @@ export function collectDoctorCheckRun(
     if (options.timing !== true) return run();
     const started = performance.now();
     const result = run();
-    timings.push({
+    const timing: DoctorTiming = {
       id,
       duration_ms: Number((performance.now() - started).toFixed(3)),
       ok: result.ok,
       message_count: result.messages.length,
-    });
+    };
+    const substeps = (result as { timingSubsteps?: DoctorTiming["substeps"] }).timingSubsteps;
+    if (substeps && substeps.length > 0) timing.substeps = substeps;
+    timings.push(timing);
     return result;
   };
 
