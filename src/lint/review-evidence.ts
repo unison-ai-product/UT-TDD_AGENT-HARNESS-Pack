@@ -50,6 +50,12 @@ export interface GreenCommandEvidence {
   evidence_path: string;
   output_digest: string;
   completed_at?: string;
+  /**
+   * green 記録時点の HEAD commit SHA (PLAN-L7-303)。存在すれば digest 照合先を「現在の working tree」
+   * ではなく「その commit の blob」に固定する = 証跡が永続検証可能になり、コードの健全な進化で
+   * digest が経年 stale 化しなくなる。省略時は従来どおり working tree と照合 (後方互換)。
+   */
+  anchor_commit?: string;
 }
 
 export interface ParsedReviewPlan {
@@ -143,6 +149,9 @@ export function extractReviewEntries(content: string): ReviewEntry[] {
               evidence_path: typeof cmd.evidence_path === "string" ? cmd.evidence_path : "",
               output_digest: typeof cmd.output_digest === "string" ? cmd.output_digest : "",
               ...(typeof cmd.completed_at === "string" ? { completed_at: cmd.completed_at } : {}),
+              ...(typeof cmd.anchor_commit === "string"
+                ? { anchor_commit: cmd.anchor_commit }
+                : {}),
             }));
         }
         if (typeof e.worker_model === "string") entry.worker_model = e.worker_model;

@@ -118,6 +118,13 @@ describe("L7 CLI surface closure", () => {
     }
   }, 15_000);
 
+  it("exposes green command digest migration as a non-destructive plan dry-run surface", () => {
+    const run = runCli(["plan", "--help"]);
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("digest-migrate");
+  }, 15_000);
+
   it("exposes skill suggest as a JSON command surface", () => {
     const run = runCli(["skill", "suggest", "--plan", "PLAN-NO-SUCH", "--json"]);
 

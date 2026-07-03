@@ -137,6 +137,7 @@ const frontmatterBaseSchema = z.object({
               completed_at: z.string().optional(),
               evidence_path: z.string().min(1),
               output_digest: z.string().regex(/^sha256:[a-f0-9]{16,64}$/i),
+              anchor_commit: z.string().min(1).optional(),
             }),
           )
           .optional(),

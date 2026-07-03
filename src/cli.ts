@@ -49,6 +49,7 @@ import {
   setActivePlanCli,
 } from "./handover/index";
 import { loadChangedFiles, loadStagedFiles } from "./lint/change-impact";
+import { nodeHistoryScanDeps, planDigestMigration } from "./lint/green-command-digest";
 import { computeOutstandingWork, outstandingSummaryLine } from "./lint/outstanding";
 import {
   analyzeRelationImpact,
@@ -56,6 +57,7 @@ import {
   exportRelationDiagram,
   type RelationDiagramAdapter,
 } from "./lint/relation-graph";
+import { loadReviewPlans } from "./lint/review-evidence";
 import {
   inspectMcpProfile,
   listVerificationProfiles,
@@ -950,6 +952,41 @@ plan
     const r = lintPlanWithGate(path, process.cwd(), opts?.gate);
     for (const m of r.messages) process.stdout.write(`${m}\n`);
     process.exitCode = r.ok ? 0 : 1;
+  });
+
+plan
+  .command("digest-migrate")
+  .description(
+    "green_command digest を記録時点 commit へ anchor 化する計画 (PLAN-L7-303、dry-run 既定)。" +
+      "履歴から claimed digest 一致 commit を特定し recoverable/suspect に分類する。--execute は PO ゲート (committed PLAN 改変=監査境界) につき未実装。",
+  )
+  .option("--json", "JSON 出力")
+  .action((opts: { json?: boolean }) => {
+    const repoRoot = process.cwd();
+    const candidates = planDigestMigration(
+      loadReviewPlans(repoRoot),
+      nodeHistoryScanDeps(repoRoot),
+    );
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(candidates, null, 2)}\n`);
+      return;
+    }
+    const counts = { recoverable: 0, suspect: 0, "already-anchored": 0 } as Record<string, number>;
+    for (const c of candidates) counts[c.disposition] = (counts[c.disposition] ?? 0) + 1;
+    process.stdout.write(
+      `plan digest-migrate (dry-run) — ${candidates.length} green_command: ` +
+        `recoverable=${counts.recoverable} suspect=${counts.suspect} already-anchored=${counts["already-anchored"]}\n`,
+    );
+    for (const c of candidates.filter((x) => x.disposition !== "already-anchored")) {
+      const anchor = c.anchor_candidate
+        ? `anchor=${c.anchor_candidate.slice(0, 12)}`
+        : "anchor=none";
+      process.stdout.write(`  [${c.disposition}] ${c.plan_id} ${c.evidence_path} ${anchor}\n`);
+    }
+    process.stdout.write(
+      "\nsuspect = どの commit にも claimed 一致 blob 無し (捏造/回復不能疑い、A-18x 台帳化)。" +
+        "\n書き込み (anchor_commit back-fill) は committed PLAN 改変 = 監査境界につき PO ゲート。\n",
+    );
   });
 
 plan

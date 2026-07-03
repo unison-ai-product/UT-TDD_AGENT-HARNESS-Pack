@@ -328,6 +328,7 @@ describe("frontmatter schema (§1.1 / §1.1.parent_design / §3.3 / §3.4)", () 
                 completed_at: "2026-06-23",
                 evidence_path: "tests/review-evidence.test.ts",
                 output_digest: "sha256:0123456789abcdef",
+                anchor_commit: "e57f70bf878269168e8ba9841c34b289a6ea4641",
               },
             ],
           },
