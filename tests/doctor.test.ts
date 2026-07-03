@@ -10,6 +10,7 @@ import {
   checkAgentSlots,
   checkAssetDrift,
   checkBackfillResult,
+  checkBranchKind,
   checkChangeImpact,
   checkChangeSetIntegrity,
   checkCodexWrapperParity,
@@ -394,6 +395,17 @@ describe("runDoctor", () => {
     expect(checkForwardConvergenceAudit).toBeTypeOf("function");
   });
 
+  it("keeps doctor lint gate re-exports stable after extraction", () => {
+    expect(checkModuleDrift).toBeTypeOf("function");
+    expect(checkAssetDrift).toBeTypeOf("function");
+    expect(checkSkillAssignment).toBeTypeOf("function");
+    expect(checkDescentObligation).toBeTypeOf("function");
+    expect(checkChangeImpact).toBeTypeOf("function");
+    expect(checkChangeSetIntegrity).toBeTypeOf("function");
+    expect(checkVerificationProfile).toBeTypeOf("function");
+    expect(checkBranchKind).toBeTypeOf("function");
+  });
+
   it("surfaces draft code-line reference freshness as a leading advisory", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-ref-fresh-"));
     try {
@@ -764,6 +776,7 @@ describe("runDoctor", () => {
       ["change-impact", checkChangeImpact(missingRoot)],
       ["change-set-integrity", checkChangeSetIntegrity(missingRoot)],
       ["verification-profile", checkVerificationProfile(missingRoot)],
+      ["branch-kind", checkBranchKind(missingRoot)],
       ["coding-rules", checkCodingRules(missingRoot)],
       ["ddd-tdd-rules", checkDddTddRules(missingRoot)],
       ["runtime-portability", checkRuntimePortability(missingRoot)],
@@ -852,6 +865,7 @@ describe("runDoctor", () => {
       "changeImpact",
       "changeSetIntegrity",
       "verificationProfile",
+      "branchKind",
       "codingRules",
       "designLanguage",
       "dddTddRules",
