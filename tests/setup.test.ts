@@ -414,7 +414,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     for (const p of preview) expect(p).not.toContain("UT-TDD-agent-harness");
   });
 
-  it("U-SETUP-009b: built-in wrapper falls back to the setup harness source CLI", () => {
+  it("U-SETUP-009b: built-in wrapper falls back to the setup Pack CLI", () => {
     const deps = mockDeps();
     const plan = planSetup("0-A", { dryRun: false });
 
@@ -436,7 +436,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(() => JSON.parse(claudeSettings ?? "")).not.toThrow();
   });
 
-  it("U-SETUP-009b2: generated wrapper prefers consumer local bin when local and setup source both exist", () => {
+  it("U-SETUP-009b2: generated wrapper prefers consumer local bin when local and setup fallback both exist", () => {
     const repo = mkdtempSync(join(tmpdir(), "ut-tdd-wrapper-local-"));
     try {
       const deps = mockDeps({ repoRoot: repo });
@@ -475,7 +475,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     }
   });
 
-  it("U-SETUP-009b3: generated wrapper falls back to setup source through bun when local bin is absent", () => {
+  it("U-SETUP-009b3: generated wrapper falls back to setup Pack CLI through bun when local bin is absent", () => {
     const repo = mkdtempSync(join(tmpdir(), "ut-tdd-wrapper-source-"));
     try {
       const deps = mockDeps({ repoRoot: repo });

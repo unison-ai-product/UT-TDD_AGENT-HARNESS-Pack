@@ -204,7 +204,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "",
     "if (result.error) {",
     '  console.error("[ut-tdd-wrapper] Failed to launch project-local ut-tdd.");',
-    '  console.error("[ut-tdd-wrapper] Add UT-TDD as a project dependency, keep the setup harness checkout available, or verify `ut-tdd --help` in this repository shell.");',
+    '  console.error("[ut-tdd-wrapper] Add UT-TDD as a project dependency, keep the setup Pack checkout available, or verify `ut-tdd --help` in this repository shell.");',
     "  console.error(result.error.message);",
     "  process.exit(127);",
     "}",
