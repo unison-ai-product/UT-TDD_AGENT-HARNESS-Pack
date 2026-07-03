@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeProjectHooks } from "../src/lint/project-hook";
+import { analyzeProjectHooks, REQUIRED } from "../src/lint/project-hook";
 import { BUILTIN_GITHUB_TEMPLATES } from "../src/setup/templates";
 
 function teamStandardSettings(): { hooks: Record<string, unknown> } {
@@ -85,6 +85,17 @@ describe("project-hook lint", () => {
       hook: "PreToolUse",
       reason: "missing_block_on_failure",
     });
+  });
+
+  // isWrapperForm は includes 部分一致のため、wrapperCommand 同士が prefix 関係になると
+  // クロス判定 (別 hook での偽充足) が起きうる。エントリ追加時の回帰を構造で防ぐ。
+  it("keeps required wrapper commands mutually non-substring", () => {
+    for (const a of REQUIRED) {
+      for (const b of REQUIRED) {
+        if (a.id === b.id) continue;
+        expect(a.wrapperCommand.includes(b.wrapperCommand)).toBe(false);
+      }
+    }
   });
 
   it("rejects missing team-standard project hook entries", () => {

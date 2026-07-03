@@ -103,8 +103,11 @@ export const REQUIRED = [
   },
 ] satisfies readonly RequiredProjectHook[];
 
+/** REQUIRED の id union。typo を compile error にする (module 評価時 throw の回避)。 */
+export type RequiredProjectHookId = (typeof REQUIRED)[number]["id"];
+
 /** setup templates 用: 必須 hook id → 正規 wrapper command (単一定義源)。 */
-export function wrapperHookCommand(id: string): string {
+export function wrapperHookCommand(id: RequiredProjectHookId): string {
   const entry = REQUIRED.find((required) => required.id === id);
   if (!entry) throw new Error(`unknown required project hook id: ${id}`);
   return entry.wrapperCommand;

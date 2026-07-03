@@ -83,6 +83,25 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139)", () => {
     expect(r.violations).toEqual([]);
   });
 
+  it("U-CXHOOK-002e: wrapper 配線でも guard の blockOnFailure 欠落は fail-close", () => {
+    const generated = JSON.parse(BUILTIN_GITHUB_TEMPLATES["adapter/.codex/hooks.json"]) as {
+      hooks: Record<string, { matcher?: string; hooks: { blockOnFailure?: boolean }[] }[]>;
+    };
+    for (const entry of generated.hooks.PreToolUse) {
+      for (const hook of entry.hooks) {
+        delete hook.blockOnFailure;
+      }
+    }
+
+    const r = analyzeCodexHookAdapter({ codexHooksJson: JSON.stringify(generated) });
+    expect(r.ok).toBe(false);
+    expect(r.violations).toContainEqual({
+      hook: "agent-guard",
+      reason: "missing_block_on_failure",
+    });
+    expect(r.violations).toContainEqual({ hook: "work-guard", reason: "missing_block_on_failure" });
+  });
+
   it("U-CXHOOK-002d: Claude/Codex の wrapper 配線は定義上同一 (entrypoint 分岐防止)", () => {
     const claudeWrapperById = new Map(
       CLAUDE_REQUIRED.map((hook) => [hook.id, hook.wrapperCommand]),

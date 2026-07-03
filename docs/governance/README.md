@@ -20,8 +20,8 @@ Claude Code、Codex、人間レビュアーは通常作業で以下を読む:
 
 以下の文書は背景、チーム運用、上位計画を補助する。上記の現行正本を上書きしない:
 
-- `ai-dev-team-concept_v1.1.md`
-- `ai-dev-team-operations_v1.1.md`
+- `ai-dev-team-concept_v1.1.md` (Pack 配布対象外、source repo のみ)
+- `ai-dev-team-operations_v1.1.md` (Pack 配布対象外、source repo のみ)
 - `audit-framework.md`
 - `coding-rules.md`
 - `ddd-tdd-rules.md`
