@@ -55,7 +55,13 @@ import {
   verificationProfileGateMessages,
 } from "../lint/verification-profile";
 import type { LintResult } from "../plan/lint";
-import { lintPlan, lintPlanWithGate } from "../plan/lint";
+import {
+  analyzePlanReferenceFreshness,
+  lintPlan,
+  lintPlanWithGate,
+  loadPlanGovernanceDocs,
+  planReferenceFreshnessMessages,
+} from "../plan/lint";
 import { SUBAGENT_ALLOWLIST } from "../runtime/agent-guard";
 import {
   type AgentSlotsDeps,
@@ -462,6 +468,16 @@ export function checkPlanGovernance(repoRoot: string): { messages: string[]; ok:
   }
 }
 
+export function checkPlanReferenceFreshnessAdvisory(repoRoot: string): string[] {
+  if (!existsSync(repoRoot)) return [];
+  try {
+    const freshness = analyzePlanReferenceFreshness(loadPlanGovernanceDocs(repoRoot), repoRoot);
+    return planReferenceFreshnessMessages(freshness).map((message) => `doctor: ${message}`);
+  } catch {
+    return ["doctor: plan-reference-freshness - advisory: skipped (PLAN refs could not be read)"];
+  }
+}
+
 /** doctor 用に agent-slots deps を node I/O で構築 (now 固定は test 注入)。 */
 function doctorSlotsDeps(deps: DoctorDeps): AgentSlotsDeps {
   return {
@@ -697,6 +713,7 @@ export function runDoctor(
     checkHandover(deps),
     ...checkHandoverDisciplineMessages(deps).map((m) => `doctor: handover-discipline — ${m}`),
     checkAgentSlots(doctorSlotsDeps(deps)),
+    ...checkPlanReferenceFreshnessAdvisory(deps.repoRoot),
   ];
   const checks = collectDoctorChecks(deps, options);
 

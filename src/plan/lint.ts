@@ -426,6 +426,22 @@ export function analyzePlanReferenceFreshness(
   return { findings, checked: docs.length, ok: findings.length === 0 };
 }
 
+export function planReferenceFreshnessMessages(
+  result: PlanReferenceFreshnessResult,
+): string[] {
+  if (result.findings.length === 0) {
+    return [`plan-reference-freshness - OK (draft code-line refs checked=${result.checked})`];
+  }
+  const sample = result.findings
+    .slice(0, 8)
+    .map((finding) => `${finding.file}:${finding.reason}(${finding.reference}; ${finding.detail})`)
+    .join(", ");
+  return [
+    `plan-reference-freshness - advisory: ${result.findings.length} stale draft code-line reference(s) found (non-blocking)`,
+    `plan-reference-freshness - sample: ${sample}`,
+  ];
+}
+
 function expectedArtifactTypeForPath(path: string): string | null {
   if (path.startsWith("docs/design/")) return "design_doc";
   if (path.startsWith("docs/test-design/")) return "test_design";

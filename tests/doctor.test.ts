@@ -38,6 +38,7 @@ import {
   checkPlaceholderDeps,
   checkPlanDod,
   checkPlanGovernance,
+  checkPlanReferenceFreshnessAdvisory,
   checkPlanTraceGate,
   checkProjectHooks,
   checkPropagation,
@@ -380,6 +381,52 @@ describe("runDoctor", () => {
       true,
     );
     expect(r.messages.some((m) => m.includes("doctor: plan-governance - OK"))).toBe(true);
+  });
+
+  it("surfaces draft code-line reference freshness as a leading advisory", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-ref-fresh-"));
+    try {
+      mkdirSync(join(root, "docs", "plans"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "plans", "PLAN-L7-900-ref-fresh.md"),
+        [
+          "---",
+          "plan_id: PLAN-L7-900-ref-fresh",
+          'title: "PLAN-L7-900 ref fresh fixture"',
+          "kind: refactor",
+          "layer: L7",
+          "drive: be",
+          "status: draft",
+          "created: 2026-06-20",
+          "updated: 2026-06-20",
+          "agent_slots:",
+          "  - role: tl",
+          '    slot_label: "TL - fixture"',
+          "generates: []",
+          "dependencies:",
+          "  parent: null",
+          "  requires: []",
+          "  blocks: []",
+          "  references: []",
+          "---",
+          "",
+          "See src/missing.ts:1 before implementation.",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const messages = checkPlanReferenceFreshnessAdvisory(root);
+
+      expect(
+        messages.some((message) =>
+          message.includes("plan-reference-freshness - advisory"),
+        ),
+      ).toBe(true);
+      expect(messages.every((message) => message.startsWith("doctor: "))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("surfaces dependency-drift and regression expansion instead of scaffold stub", () => {
@@ -832,5 +879,7 @@ describe("runDoctor", () => {
     ];
 
     expect(expectedHardGates.filter((name) => !checkAggregation.includes(name))).toEqual([]);
+    expect(checkAggregation).not.toContain("planReferenceFreshness");
+    expect(checkAggregation).not.toContain("checkPlanReferenceFreshnessAdvisory");
   });
 });
