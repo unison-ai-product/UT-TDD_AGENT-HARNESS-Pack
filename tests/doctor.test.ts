@@ -22,6 +22,8 @@ import {
   checkDescentObligation,
   checkDriveDbRegistration,
   checkDriveModelPassage,
+  checkForwardConvergence,
+  checkForwardConvergenceAudit,
   checkFrRoadmapCoverage,
   checkGateConfirm,
   checkGuardrailInvariants,
@@ -39,6 +41,7 @@ import {
   checkPlanDod,
   checkPlanGovernance,
   checkPlanReferenceFreshnessAdvisory,
+  checkPlanSchedule,
   checkPlanTraceGate,
   checkProjectHooks,
   checkPropagation,
@@ -381,6 +384,14 @@ describe("runDoctor", () => {
       true,
     );
     expect(r.messages.some((m) => m.includes("doctor: plan-governance - OK"))).toBe(true);
+  });
+
+  it("keeps doctor plan gate re-exports stable after extraction", () => {
+    expect(checkPlanSchedule).toBeTypeOf("function");
+    expect(checkPlanGovernance).toBeTypeOf("function");
+    expect(checkPlanReferenceFreshnessAdvisory).toBeTypeOf("function");
+    expect(checkForwardConvergence).toBeTypeOf("function");
+    expect(checkForwardConvergenceAudit).toBeTypeOf("function");
   });
 
   it("surfaces draft code-line reference freshness as a leading advisory", () => {

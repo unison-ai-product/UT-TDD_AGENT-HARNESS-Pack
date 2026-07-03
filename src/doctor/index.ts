@@ -35,13 +35,6 @@ import {
   loadFrUnitCoverageOracles,
   loadTraceKeyedArtifacts,
 } from "../lint/descent-obligation";
-import {
-  analyzeForwardConvergence,
-  forwardConvergenceMessages,
-  legacyAuditDriftMessages,
-  loadConvergenceDocs,
-  loadLegacyAuditDrift,
-} from "../lint/forward-convergence";
 import { checkGreenCommandDigests } from "../lint/green-command-digest";
 import { analyzeModuleDrift, loadModuleDocs, moduleDriftMessages } from "../lint/module-drift";
 import {
@@ -55,13 +48,6 @@ import {
   verificationProfileGateMessages,
 } from "../lint/verification-profile";
 import type { LintResult } from "../plan/lint";
-import {
-  analyzePlanReferenceFreshness,
-  lintPlan,
-  lintPlanWithGate,
-  loadPlanGovernanceDocs,
-  planReferenceFreshnessMessages,
-} from "../plan/lint";
 import { SUBAGENT_ALLOWLIST } from "../runtime/agent-guard";
 import {
   type AgentSlotsDeps,
@@ -77,10 +63,15 @@ import { checkDependencyDrift, checkRegressionExpansion } from "./dependency-reg
 import { checkDocConsistency, checkEntityCoverage, checkFrRegistryAudit } from "./doc-registry";
 import {
   checkBackfillResult,
+  checkForwardConvergence,
+  checkForwardConvergenceAudit,
   checkGuardrailInvariants,
   checkPairFreeze,
   checkPlanBodySubstance,
   checkPlanCompletionDrift,
+  checkPlanGovernance,
+  checkPlanReferenceFreshnessAdvisory,
+  checkPlanSchedule,
   checkPlanSupersession,
   checkPropagation,
   checkReviewEvidence,
@@ -140,10 +131,15 @@ export { checkDocConsistency, checkEntityCoverage, checkFrRegistryAudit } from "
 export {
   checkBackfill,
   checkBackfillResult,
+  checkForwardConvergence,
+  checkForwardConvergenceAudit,
   checkGuardrailInvariants,
   checkPairFreeze,
   checkPlanBodySubstance,
   checkPlanCompletionDrift,
+  checkPlanGovernance,
+  checkPlanReferenceFreshnessAdvisory,
+  checkPlanSchedule,
   checkPlanSupersession,
   checkPropagation,
   checkReviewEvidence,
@@ -443,41 +439,6 @@ export function checkBranchKind(repoRoot: string): { messages: string[]; ok: boo
   }
 }
 
-export function checkPlanSchedule(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return { messages: ["plan-schedule - violation: repo root could not be read"], ok: false };
-  }
-  try {
-    return lintPlan(undefined, repoRoot);
-  } catch {
-    return { messages: ["plan-schedule - violation: PLAN schedule lint could not run"], ok: false };
-  }
-}
-
-export function checkPlanGovernance(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return { messages: ["plan-governance - violation: repo root could not be read"], ok: false };
-  }
-  try {
-    return lintPlanWithGate(undefined, repoRoot, "governance");
-  } catch {
-    return {
-      messages: ["plan-governance - violation: PLAN governance lint could not run"],
-      ok: false,
-    };
-  }
-}
-
-export function checkPlanReferenceFreshnessAdvisory(repoRoot: string): string[] {
-  if (!existsSync(repoRoot)) return [];
-  try {
-    const freshness = analyzePlanReferenceFreshness(loadPlanGovernanceDocs(repoRoot), repoRoot);
-    return planReferenceFreshnessMessages(freshness).map((message) => `doctor: ${message}`);
-  } catch {
-    return ["doctor: plan-reference-freshness - advisory: skipped (PLAN refs could not be read)"];
-  }
-}
-
 /** doctor 用に agent-slots deps を node I/O で構築 (now 固定は test 注入)。 */
 function doctorSlotsDeps(deps: DoctorDeps): AgentSlotsDeps {
   return {
@@ -496,39 +457,6 @@ export function nodeDoctorDeps(repoRoot: string): DoctorDeps {
     readText: (path) => (existsSync(path) ? readFileSync(path, "utf8") : null),
     listDir: (dir) => (existsSync(dir) ? readdirSync(dir) : []),
   };
-}
-
-/**
- * forward-convergence (fail-close, PLAN-DISCOVERY-08 Step5): spine-外 kind=impl の NEW 未集約 landed を
- * gate する。legacy debt allowlist は grandfather (ok を落とさず surface)。例外時は fail-close。
- */
-export function checkForwardConvergence(repoRoot: string): { messages: string[]; ok: boolean } {
-  try {
-    const docs = loadConvergenceDocs(repoRoot);
-    const r = analyzeForwardConvergence(docs.plans, docs.roadmapSpanIds, docs.reverseReferencedIds);
-    return { messages: forwardConvergenceMessages(r), ok: r.ok };
-  } catch {
-    return {
-      messages: ["forward-convergence — violation: PLAN を読めず spine-外集約を検査できない"],
-      ok: false,
-    };
-  }
-}
-
-/** legacy debt allowlist ↔ audit doc の双方向一致 hard check (Codex Critical B)。 */
-export function checkForwardConvergenceAudit(repoRoot: string): {
-  messages: string[];
-  ok: boolean;
-} {
-  try {
-    const r = loadLegacyAuditDrift(repoRoot);
-    return { messages: legacyAuditDriftMessages(r), ok: r.ok };
-  } catch {
-    return {
-      messages: ["forward-convergence-audit — violation: legacy debt audit を検査できない"],
-      ok: false,
-    };
-  }
 }
 
 function collectDoctorChecks(deps: DoctorDeps, options: DoctorOptions = {}) {

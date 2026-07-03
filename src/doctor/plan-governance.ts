@@ -11,6 +11,13 @@ import {
   planCompletionDriftMessages,
 } from "../lint/plan-completion-drift";
 import {
+  analyzeForwardConvergence,
+  forwardConvergenceMessages,
+  legacyAuditDriftMessages,
+  loadConvergenceDocs,
+  loadLegacyAuditDrift,
+} from "../lint/forward-convergence";
+import {
   analyzePlanSupersession,
   loadSupersedePlans,
   planSupersessionMessages,
@@ -22,6 +29,13 @@ import {
   reviewEvidenceMessages,
 } from "../lint/review-evidence";
 import { analyzeScrumReverse, loadSrPlans, scrumReverseMessages } from "../lint/scrum-reverse";
+import {
+  analyzePlanReferenceFreshness,
+  lintPlan,
+  lintPlanWithGate,
+  loadPlanGovernanceDocs,
+  planReferenceFreshnessMessages,
+} from "../plan/lint";
 import type { GuardrailDecisionInput } from "../state-db/guardrail-invariants";
 import { inspectGuardrailInvariants } from "../state-db/guardrail-invariants";
 import { analyzePairFreeze, loadPairDocs, pairFreezeMessages } from "../vmodel/lint";
@@ -91,6 +105,69 @@ export function checkPlanCompletionDrift(repoRoot: string): { messages: string[]
     return { messages: planCompletionDriftMessages(r), ok: r.ok };
   } catch {
     return { messages: ["plan-completion-drift - violation: PLAN could not be read"], ok: false };
+  }
+}
+
+export function checkPlanSchedule(repoRoot: string): { messages: string[]; ok: boolean } {
+  if (!existsSync(repoRoot)) {
+    return { messages: ["plan-schedule - violation: repo root could not be read"], ok: false };
+  }
+  try {
+    return lintPlan(undefined, repoRoot);
+  } catch {
+    return { messages: ["plan-schedule - violation: PLAN schedule lint could not run"], ok: false };
+  }
+}
+
+export function checkPlanGovernance(repoRoot: string): { messages: string[]; ok: boolean } {
+  if (!existsSync(repoRoot)) {
+    return { messages: ["plan-governance - violation: repo root could not be read"], ok: false };
+  }
+  try {
+    return lintPlanWithGate(undefined, repoRoot, "governance");
+  } catch {
+    return {
+      messages: ["plan-governance - violation: PLAN governance lint could not run"],
+      ok: false,
+    };
+  }
+}
+
+export function checkPlanReferenceFreshnessAdvisory(repoRoot: string): string[] {
+  if (!existsSync(repoRoot)) return [];
+  try {
+    const freshness = analyzePlanReferenceFreshness(loadPlanGovernanceDocs(repoRoot), repoRoot);
+    return planReferenceFreshnessMessages(freshness).map((message) => `doctor: ${message}`);
+  } catch {
+    return ["doctor: plan-reference-freshness - advisory: skipped (PLAN refs could not be read)"];
+  }
+}
+
+export function checkForwardConvergence(repoRoot: string): { messages: string[]; ok: boolean } {
+  try {
+    const docs = loadConvergenceDocs(repoRoot);
+    const r = analyzeForwardConvergence(docs.plans, docs.roadmapSpanIds, docs.reverseReferencedIds);
+    return { messages: forwardConvergenceMessages(r), ok: r.ok };
+  } catch {
+    return {
+      messages: ["forward-convergence — violation: PLAN を読めず spine-外集約を検査できない"],
+      ok: false,
+    };
+  }
+}
+
+export function checkForwardConvergenceAudit(repoRoot: string): {
+  messages: string[];
+  ok: boolean;
+} {
+  try {
+    const r = loadLegacyAuditDrift(repoRoot);
+    return { messages: legacyAuditDriftMessages(r), ok: r.ok };
+  } catch {
+    return {
+      messages: ["forward-convergence-audit — violation: legacy debt audit を検査できない"],
+      ok: false,
+    };
   }
 }
 
