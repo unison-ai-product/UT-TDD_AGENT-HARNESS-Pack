@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = process.cwd();
@@ -90,6 +90,15 @@ function writeFakeUtTdd(binDir: string): string {
   });
   chmodSync(path, 0o755);
   return path;
+}
+
+function withFakeProviderEnv(provider: "codex" | "claude") {
+  const binDir = mkdtempSync(join(tmpdir(), `ut-tdd-cli-${provider}-bin-`));
+  writeFakeProvider(binDir, provider);
+  return {
+    binDir,
+    env: { ...process.env, PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}` },
+  };
 }
 
 describe("L7 CLI surface closure", () => {
@@ -174,49 +183,67 @@ describe("L7 CLI surface closure", () => {
   }, 20_000);
 
   it("injects per-call model/effort overrides into adapter plans (PLAN-L7-255)", () => {
-    const run = runCli([
-      "codex",
-      "--role",
-      "reviewer",
-      "--task",
-      "mechanical ledger check",
-      "--model",
-      "gpt-5.3-codex-spark",
-    ]);
-    const payload = parseCliJson(run);
-    expect(payload.dry_run).toBe(true);
-    expect(payload.model).toBe("gpt-5.3-codex-spark");
-    expect(payload.args).toEqual(["exec", "-m", "gpt-5.3-codex-spark", "-"]);
+    const fake = withFakeProviderEnv("codex");
+    try {
+      const run = runCliIn(
+        repoRoot,
+        [
+          "codex",
+          "--role",
+          "reviewer",
+          "--task",
+          "mechanical ledger check",
+          "--model",
+          "gpt-5.3-codex-spark",
+        ],
+        fake.env,
+      );
+      const payload = parseCliJson(run);
+      expect(payload.dry_run).toBe(true);
+      expect(payload.model).toBe("gpt-5.3-codex-spark");
+      expect(payload.args).toEqual(["exec", "-m", "gpt-5.3-codex-spark", "-"]);
+    } finally {
+      rmSync(fake.binDir, { recursive: true, force: true });
+    }
   }, 20_000);
 
   it("keeps claude runtime command dry-run registered through delegation helper", () => {
-    const run = runCli([
-      "claude",
-      "--role",
-      "reviewer",
-      "--task",
-      "mechanical ledger check",
-      "--model",
-      "claude-opus-4-8",
-      "--effort",
-      "xhigh",
-    ]);
-    const payload = parseCliJson(run);
-    expect(payload).toMatchObject({
-      provider: "claude",
-      dry_run: true,
-      model: "claude-opus-4-8",
-      effort: "high",
-    });
-    expect(payload.args).toEqual([
-      "--print",
-      "--input-format",
-      "text",
-      "--model",
-      "claude-opus-4-8",
-      "--effort",
-      "high",
-    ]);
+    const fake = withFakeProviderEnv("claude");
+    try {
+      const run = runCliIn(
+        repoRoot,
+        [
+          "claude",
+          "--role",
+          "reviewer",
+          "--task",
+          "mechanical ledger check",
+          "--model",
+          "claude-opus-4-8",
+          "--effort",
+          "xhigh",
+        ],
+        fake.env,
+      );
+      const payload = parseCliJson(run);
+      expect(payload).toMatchObject({
+        provider: "claude",
+        dry_run: true,
+        model: "claude-opus-4-8",
+        effort: "high",
+      });
+      expect(payload.args).toEqual([
+        "--print",
+        "--input-format",
+        "text",
+        "--model",
+        "claude-opus-4-8",
+        "--effort",
+        "high",
+      ]);
+    } finally {
+      rmSync(fake.binDir, { recursive: true, force: true });
+    }
   }, 20_000);
 
   it("passes plan skill injection through task route adapter plans", () => {
