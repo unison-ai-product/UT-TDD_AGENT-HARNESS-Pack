@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildAdvisorDecision } from "../src/team/advisor-policy";
-import { inferTaskDifficulty, inferTaskIntent, selectTeamModel } from "../src/team/model-policy";
+import {
+  inferTaskDifficulty,
+  inferTaskIntent,
+  MODEL_IDS,
+  selectTeamModel,
+} from "../src/team/model-policy";
 
 describe("team model policy", () => {
   it("infers critical difficulty from high-risk task terms", () => {
@@ -21,7 +26,7 @@ describe("team model policy", () => {
     expect(selection).toMatchObject({
       difficulty: "trivial",
       model_family: "fast",
-      model: "gpt-5.3-codex-spark",
+      model: MODEL_IDS.codex.spark,
       reasoning_effort: "high",
       task_intent: "docs",
     });
@@ -38,8 +43,8 @@ describe("team model policy", () => {
     expect(selection).toMatchObject({
       difficulty: "critical",
       model_family: "frontier",
-      // frontier = T0 最上位。tier-router TIER_TABLE.T0.codex (gpt-5.5) と整合 (PLAN-L7-75 reconcile)。
-      model: "gpt-5.5",
+      // frontier = T0 最上位。tier-router TIER_TABLE.T0.codex と整合。
+      model: MODEL_IDS.codex.frontier,
       reasoning_effort: "xhigh",
       task_intent: "review",
     });
@@ -54,7 +59,7 @@ describe("team model policy", () => {
     });
 
     expect(selection.model_family).toBe("frontier");
-    expect(selection.model).toBe("claude-sonnet-4-6");
+    expect(selection.model).toBe(MODEL_IDS.claude.sonnet);
     expect(selection.model_source).toBe("engine");
     expect(selection.reasoning_effort).toBe("high");
   });
@@ -73,7 +78,7 @@ describe("team model policy", () => {
         task: "screen visual design",
       }),
     ).toMatchObject({
-      model: "claude-sonnet-4-6",
+      model: MODEL_IDS.claude.sonnet,
       reasoning_effort: "xhigh",
       task_intent: "uiux",
     });
@@ -112,17 +117,17 @@ describe("team model policy", () => {
     const claude = buildAdvisorDecision({
       task: "review whether the release gate is safe to close",
       mode: "hybrid",
-      currentModel: "claude-sonnet-4-6",
+      currentModel: MODEL_IDS.claude.sonnet,
     });
 
     expect(claude).toMatchObject({
       provider: "claude",
-      model: "claude-opus-4-8",
+      model: MODEL_IDS.claude.opus,
       effort: "high",
       current_model_lower_than_advisor: true,
       adapterPlan: {
         provider: "claude",
-        model: "claude-opus-4-8",
+        model: MODEL_IDS.claude.opus,
         effort: "high",
         dry_run: true,
       },
@@ -138,14 +143,30 @@ describe("team model policy", () => {
 
     expect(codex).toMatchObject({
       provider: "codex",
-      model: "gpt-5.5",
+      model: MODEL_IDS.codex.frontier,
       effort: "xhigh",
       adapterPlan: {
         provider: "codex",
-        model: "gpt-5.5",
+        model: MODEL_IDS.codex.frontier,
         dry_run: false,
       },
     });
-    expect(codex.adapterPlan.args).toEqual(["exec", "-m", "gpt-5.5", "-"]);
+    expect(codex.adapterPlan.args).toEqual(["exec", "-m", MODEL_IDS.codex.frontier, "-"]);
+  });
+
+  it("treats older sonnet and haiku generations as lower than the advisor family", () => {
+    for (const currentModel of ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"]) {
+      expect(
+        buildAdvisorDecision({
+          task: "review whether the release gate is safe to close",
+          mode: "hybrid",
+          currentModel,
+        }),
+      ).toMatchObject({
+        provider: "claude",
+        model: MODEL_IDS.claude.opus,
+        current_model_lower_than_advisor: true,
+      });
+    }
   });
 });

@@ -62,12 +62,9 @@ function isLowerThanAdvisor(input: {
   const advisor = input.advisorModel.toLowerCase();
   if (current === advisor) return false;
   if (input.provider === "claude") {
-    return (
-      current === "sonnet" ||
-      current === "haiku" ||
-      current === MODEL_IDS.claude.sonnet ||
-      current === MODEL_IDS.claude.haiku
-    );
+    // family 判定 (exact ID 比較は SSoT の世代更新で旧世代 sonnet/haiku を取りこぼす):
+    // advisor は opus 固定なので、sonnet/haiku family は世代を問わず常に下位。
+    return current.includes("sonnet") || current.includes("haiku");
   }
   return current.startsWith("gpt-") || current.startsWith("codex-");
 }

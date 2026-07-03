@@ -8,6 +8,7 @@ import type { TeamDefinition } from "../src/schema/team";
 import { classifyProposalDocumentCoverage } from "../src/task/classify";
 import { routeTeamMembers } from "../src/task/tier-router";
 import { recommendTeamLaunch } from "../src/team/launch-policy";
+import { MODEL_IDS } from "../src/team/model-policy";
 import {
   buildTeamRunPlan,
   executeTeamRunPlan,
@@ -136,18 +137,18 @@ describe("team run validation", () => {
     expect(result.members.every((m) => m.prompt.includes(TEAM_MEMBER_PROMPT_HEADER))).toBe(true);
     expect(result.members[0].prompt).toContain("provider: codex");
     expect(result.members[1].prompt).toContain("provider: claude");
-    expect(result.members[0].model_selection.model).toBe("gpt-5.3-codex");
+    expect(result.members[0].model_selection.model).toBe(MODEL_IDS.codex.codex);
     expect(result.members[0].adapter).toMatchObject({
       command: "codex",
       dry_run: true,
-      model: "gpt-5.3-codex",
+      model: MODEL_IDS.codex.codex,
     });
     expect(result.members[0].adapter?.args).toContain("-m");
-    expect(result.members[1].model_selection.model).toBe("claude-sonnet-4-6");
+    expect(result.members[1].model_selection.model).toBe(MODEL_IDS.claude.sonnet);
     expect(result.members[1].adapter).toMatchObject({
       command: "claude",
       dry_run: true,
-      model: "claude-sonnet-4-6",
+      model: MODEL_IDS.claude.sonnet,
     });
   });
 

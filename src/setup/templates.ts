@@ -2,105 +2,107 @@ import { join } from "node:path";
 // Hook 配線の単一定義源: 生成 settings.json / hooks.json の command は project-hook lint の
 // wrapper 正規形から構築する (gate 要求と setup 生成物の再乖離防止、PLAN-RECOVERY-06)。
 import { wrapperHookCommand } from "../lint/project-hook";
+// model ID は SSoT (src/team/model-policy.ts MODEL_IDS) 参照のみ。生 literal の二重保持は
+// 世代 drift の温床 (A-177 F-5 / PLAN-L7-256: templates が opus-4-7 のまま SSoT と乖離した実績)。
+import { MODEL_IDS } from "../team/model-policy";
 import type { GeneratedFile } from "./index";
 
 export type TemplateSet = { [name: string]: string };
 
+const CLAUDE_OPUS = MODEL_IDS.claude.opus;
+const CLAUDE_SONNET = MODEL_IDS.claude.sonnet;
+const CLAUDE_HAIKU = MODEL_IDS.claude.haiku;
+const GPT_FRONTIER = MODEL_IDS.codex.frontier;
+const GPT_WORKER = MODEL_IDS.codex.worker;
+const GPT_SPARK = MODEL_IDS.codex.spark;
+
 const CLAUDE_AGENT_TEMPLATES = [
-  [
-    "be-api",
-    "Backend API reviewer for route, contract, and integration concerns.",
-    "claude-sonnet-4-6",
-  ],
+  ["be-api", "Backend API reviewer for route, contract, and integration concerns.", CLAUDE_SONNET],
   [
     "be-logic",
     "Backend domain logic reviewer for invariants, boundaries, and TDD fit.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
   [
     "code-reviewer",
     "Read-only senior engineering reviewer for correctness, security, and maintainability.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
   [
     "db-schema",
     "Database schema reviewer for migrations, indexes, and data contracts.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
-  [
-    "devops-deploy",
-    "CI, deployment, rollback, and release-readiness reviewer.",
-    "claude-sonnet-4-6",
-  ],
+  ["devops-deploy", "CI, deployment, rollback, and release-readiness reviewer.", CLAUDE_SONNET],
   [
     "pdm-innovation-manager",
     "Product management reviewer for opportunity, scope, and portfolio fit.",
-    "claude-opus-4-7",
+    CLAUDE_OPUS,
   ],
   [
     "pdm-marketing-innovation",
     "Market and user-value reviewer for product framing and adoption.",
-    "claude-opus-4-7",
+    CLAUDE_OPUS,
   ],
   [
     "pdm-tech-innovation",
     "Technical product reviewer for feasibility, platform leverage, and risk.",
-    "claude-opus-4-7",
+    CLAUDE_OPUS,
   ],
   [
     "pmo-haiku",
     "Lightweight PMO reviewer for concise status, blockers, and next action.",
-    "claude-haiku-4-5-20251001",
+    CLAUDE_HAIKU,
   ],
   [
     "pmo-project-explorer",
     "Project discovery reviewer for goals, constraints, and evidence gaps.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
   [
     "pmo-project-scout",
     "Project triage reviewer for backlog, ownership, and workflow routing.",
-    "claude-haiku-4-5-20251001",
+    CLAUDE_HAIKU,
   ],
   [
     "pmo-sonnet",
     "PMO reviewer for plan structure, handover quality, and cross-document consistency.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
   [
     "pmo-tech-docs",
     "Technical documentation reviewer for ADR, process, and governance quality.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
   [
     "pmo-tech-fork",
     "Fork, extraction, and distribution reviewer for clean-room boundaries.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
   [
     "pmo-tech-news",
     "Technical research reviewer for external signals and dated source checks.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
   [
     "qa-test",
     "Quality reviewer for test strategy, oracle strength, and regression scope.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
   [
     "refactor-scout",
     "Refactoring reviewer for complexity, duplication, and low-risk extraction candidates.",
-    "claude-haiku-4-5-20251001",
+    CLAUDE_HAIKU,
   ],
   [
     "security-audit",
     "Security reviewer for auth, secrets, PII, and threat-model concerns.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
   [
     "ut-tdd-tl",
     "Technical-lead reviewer for UT-TDD workflow, gates, tests, and release readiness.",
-    "claude-sonnet-4-6",
+    CLAUDE_SONNET,
   ],
 ] as const;
 
@@ -235,6 +237,19 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     '- Claude delegation: `ut-tdd claude --role <role> --task "..."`',
     "- Team run: `ut-tdd team run --definition .ut-tdd/teams/<team>.yaml`",
     "",
+    "## GPT / Codex runtime defaults",
+    "",
+    `- Implementation lanes default to worker-class models (\`${GPT_WORKER}\`); lightweight parallel lanes use spark-class (\`${GPT_SPARK}\`) with no closing authority.`,
+    `- Frontier judgement (\`${GPT_FRONTIER}\`) is gated: use it only for final review or high-risk decisions with explicit authorization.`,
+    "- Default reasoning effort is `middle`; raise to `high`/`xhigh` only for review or critical judgement.",
+    "- State the full task, intent, and constraints up front in one turn; avoid drip-fed instructions.",
+    "",
+    "## Discipline",
+    "",
+    "- Separate creation from judgement: review with a different runtime/model family than the author when feasible.",
+    "- No completion claim without tests or explicit verification evidence.",
+    "- Stage explicit files only; never rewrite or discard another runtime's commits.",
+    "",
     "Project-owned instructions outside this managed block remain consumer-owned.",
     "<!-- UT-TDD:managed:end -->",
     "",
@@ -251,6 +266,23 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     '- `ut-tdd codex --role <role> --task "..."` delegates to Codex.',
     '- `ut-tdd claude --role <role> --task "..."` delegates to Claude.',
     "",
+    "## Model routing defaults",
+    "",
+    "Route work to the cheapest model class that can own the outcome; reserve frontier",
+    "models for judgement.",
+    "",
+    "| Model class | Default use | Effort |",
+    "|---|---|---|",
+    `| Claude Opus (\`${CLAUDE_OPUS}\`) | final review, judgement gates, hardest design decisions | high / xhigh |`,
+    `| Claude Sonnet (\`${CLAUDE_SONNET}\`) | docs, design, UI/UX, structured review | high (xhigh for UI/UX) |`,
+    `| Claude Haiku (\`${CLAUDE_HAIKU}\`) | scouting, triage, lightweight parallel checks | high, small scoped tasks |`,
+    `| GPT/Codex workers (\`${GPT_WORKER}\` / \`${GPT_SPARK}\`) | implementation lanes | middle |`,
+    `| GPT frontier (\`${GPT_FRONTIER}\`) | gated top-tier review/consultation | high / xhigh |`,
+    "",
+    "- Give agents the full goal, constraints, and done-criteria in the first turn.",
+    "- Separate creation from judgement: prefer a different model family for review.",
+    "- No completion claim without tests or explicit verification evidence.",
+    "",
     "Do not put secrets, tokens, or machine-local absolute paths in adapter docs.",
     "<!-- UT-TDD:managed:end -->",
     "",
@@ -265,6 +297,17 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "- Session evidence: `ut-tdd status` and `ut-tdd handover`",
     "- Health check: `ut-tdd doctor`",
     "- Review separation: use another runtime/model family when feasible",
+    "",
+    "## Claude subagent defaults",
+    "",
+    "- Always pass an explicit `model` when spawning subagents; it must match the",
+    "  agent frontmatter family (opus / sonnet / haiku).",
+    `- Opus (\`${CLAUDE_OPUS}\`) = judgement and final review; Sonnet (\`${CLAUDE_SONNET}\`) =`,
+    `  docs/design/structured review; Haiku (\`${CLAUDE_HAIKU}\`) = scouting and triage.`,
+    "- Claude-family reasoning effort defaults to `high`; use `xhigh` only for",
+    "  high-judgement review or UI/UX work.",
+    "- Give the full task specification up front; report findings with file and",
+    "  command evidence before summaries.",
     "",
     "<!-- UT-TDD:managed:end -->",
     "",
@@ -334,8 +377,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "          }",
     "        ]",
     "      }",
-    "    ]",
-    "    ,",
+    "    ],",
     '    "SubagentStop": [',
     "      {",
     '        "hooks": [',

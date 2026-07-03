@@ -33,6 +33,7 @@ import {
   transformCleanDistributionArtifact,
 } from "../src/setup/index";
 import { COMMON_FILES, type TemplateSet } from "../src/setup/templates";
+import { MODEL_IDS } from "../src/team/model-policy";
 
 /** in-memory file store + gh 呼び出し記録の mock deps (now 固定で決定論)。 */
 function mockDeps(
@@ -410,14 +411,29 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         ]),
       );
       expect(templates["adapter/.claude/agents/pmo-sonnet.md"]).toContain(
-        "model: claude-sonnet-4-6",
+        `model: ${MODEL_IDS.claude.sonnet}`,
       );
       expect(templates["adapter/.claude/agents/pmo-haiku.md"]).toContain(
-        "model: claude-haiku-4-5-20251001",
+        `model: ${MODEL_IDS.claude.haiku}`,
       );
       expect(templates["adapter/.claude/agents/pdm-tech-innovation.md"]).toContain(
-        "model: claude-opus-4-7",
+        `model: ${MODEL_IDS.claude.opus}`,
       );
+      const claudeModelCatalog = new Set<string>(Object.values(MODEL_IDS.claude));
+      const agentTemplates = Object.entries(templates).filter(([path]) =>
+        path.startsWith("adapter/.claude/agents/"),
+      );
+      expect(agentTemplates.length).toBeGreaterThan(0);
+      for (const [path, body] of agentTemplates) {
+        const model = body.match(/^model:\s*(\S+)/m)?.[1];
+        expect(model, `${path} must declare a model`).toBeTruthy();
+        expect(claudeModelCatalog.has(model ?? ""), `${path} model must come from MODEL_IDS`).toBe(
+          true,
+        );
+        expect(model, `${path} must not retain legacy model suffixes`).not.toMatch(
+          /claude-opus-4-7|claude-sonnet-4-6|20251001/,
+        );
+      }
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }

@@ -13,7 +13,8 @@ import type { TeamProvider } from "./run";
 export const MODEL_IDS = {
   claude: {
     opus: "claude-opus-4-8",
-    sonnet: "claude-sonnet-4-6",
+    /** Sonnet 5 世代 (2026-06 更新)。coding/agentic で旧 Opus 級、価格帯は 4-6 と同一。 */
+    sonnet: "claude-sonnet-5",
     haiku: "claude-haiku-4-5",
   },
   codex: {

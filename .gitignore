@@ -37,9 +37,6 @@ docs/handover/session-handover-*.md
 # 外部 DL の設計テンプレ研究素材 (transient scratch、アーキ境界外・成果物でない)
 downloads/
 
-# HELIX runtime state
-.helix/
-
 # Python bytecode (旧 W1-W3a port の残骸。ADR-001 で TS rebuild、念のため残置)
 __pycache__/
 *.py[cod]
