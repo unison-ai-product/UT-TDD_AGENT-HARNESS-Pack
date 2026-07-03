@@ -852,10 +852,17 @@ describe("runDoctor", () => {
   });
 
   it("keeps all hard gates wired into runDoctor hard-gate aggregation", () => {
-    const source = readFileSync(join(process.cwd(), "src", "doctor", "index.ts"), "utf8");
-    const checkAggregation = source.match(/const checks = \[([\s\S]*?)\];/)?.[1] ?? "";
-    expect(source).toContain("function collectDoctorChecks");
-    expect(source).toContain("const checks = collectDoctorChecks(deps, options)");
+    const indexSource = readFileSync(join(process.cwd(), "src", "doctor", "index.ts"), "utf8");
+    const registrySource = readFileSync(
+      join(process.cwd(), "src", "doctor", "check-registry.ts"),
+      "utf8",
+    );
+    const checkAggregation = registrySource.match(/const checks = \[([\s\S]*?)\];/)?.[1] ?? "";
+    expect(indexSource).toContain(
+      'import { collectDoctorChecks, type DoctorOptions } from "./check-registry";',
+    );
+    expect(indexSource).toContain("const checks = collectDoctorChecks(deps, options)");
+    expect(registrySource).toContain("export function collectDoctorChecks");
     const expectedHardGates = [
       "backfill",
       "scrumRev",
