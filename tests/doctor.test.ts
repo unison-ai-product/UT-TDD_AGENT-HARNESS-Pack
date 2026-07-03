@@ -61,6 +61,7 @@ import {
   checkVerificationGroupsResult,
   checkVerificationProfile,
   type DoctorDeps,
+  nodeDoctorDeps,
   runDoctor,
 } from "../src/doctor/index";
 import { buildDoctorResult } from "../src/doctor/result";
@@ -404,6 +405,13 @@ describe("runDoctor", () => {
     expect(checkChangeSetIntegrity).toBeTypeOf("function");
     expect(checkVerificationProfile).toBeTypeOf("function");
     expect(checkBranchKind).toBeTypeOf("function");
+  });
+
+  it("keeps doctor runtime-state re-exports stable after extraction", () => {
+    expect(checkHandover).toBeTypeOf("function");
+    expect(checkHandoverDisciplineMessages).toBeTypeOf("function");
+    expect(checkAgentSlots).toBeTypeOf("function");
+    expect(nodeDoctorDeps).toBeTypeOf("function");
   });
 
   it("surfaces draft code-line reference freshness as a leading advisory", () => {
