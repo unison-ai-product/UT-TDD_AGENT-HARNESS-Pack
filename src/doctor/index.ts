@@ -4,11 +4,10 @@
  * gate 判定群を runDoctor.ok に連動させて fail-close する。handover / agent-slots は warning surface。
  */
 
-import type { LintResult } from "../plan/lint";
 import { detectMode } from "../runtime/detect";
-import { collectDoctorChecks, type DoctorOptions } from "./check-registry";
+import { collectDoctorCheckRun, type DoctorOptions } from "./check-registry";
 import { checkPlanReferenceFreshnessAdvisory } from "./plan-governance";
-import { buildDoctorResult } from "./result";
+import { buildDoctorResult, type DoctorResult } from "./result";
 import {
   checkAgentSlots,
   checkHandover,
@@ -119,7 +118,7 @@ export {
 export function runDoctor(
   deps: DoctorDeps = nodeDoctorDeps(process.cwd()),
   options: DoctorOptions = {},
-): LintResult {
+): DoctorResult {
   if (options.setupSmoke === true) return checkSetupSmoke(deps);
 
   const d = detectMode();
@@ -131,7 +130,11 @@ export function runDoctor(
     checkAgentSlots(doctorSlotsDeps(deps)),
     ...checkPlanReferenceFreshnessAdvisory(deps.repoRoot),
   ];
-  const checks = collectDoctorChecks(deps, options);
+  const { checks, timings } = collectDoctorCheckRun(deps, options);
 
-  return buildDoctorResult({ leadingMessages, checks });
+  return buildDoctorResult({
+    leadingMessages,
+    checks,
+    timings: options.timing === true ? timings : undefined,
+  });
 }

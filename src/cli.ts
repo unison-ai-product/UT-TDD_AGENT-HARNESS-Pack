@@ -481,23 +481,34 @@ program
     "--setup-smoke",
     "run only the fresh-consumer setup smoke checks for wrapper and adapter hooks",
   )
+  .option("--timing", "include per-check doctor timing diagnostics")
   .option("--json", "JSON output")
   .action(
     (opts: {
       strictTelemetryProvenance?: boolean;
       strictGreenCommandDigest?: boolean;
       setupSmoke?: boolean;
+      timing?: boolean;
       json?: boolean;
     }) => {
       const r = runDoctor(undefined, {
         strictTelemetryProvenance: opts.strictTelemetryProvenance === true,
         strictGreenCommandDigest: opts.strictGreenCommandDigest === true,
         setupSmoke: opts.setupSmoke === true,
+        timing: opts.timing === true,
       });
       if (opts.json) {
         process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
       } else {
         for (const m of r.messages) process.stdout.write(`${m}\n`);
+        if (opts.timing === true && r.timings) {
+          const slowest = [...r.timings].sort((a, b) => b.duration_ms - a.duration_ms).slice(0, 10);
+          for (const timing of slowest) {
+            process.stdout.write(
+              `doctor: timing - ${timing.id} ${timing.duration_ms.toFixed(3)}ms messages=${timing.message_count} ok=${timing.ok}\n`,
+            );
+          }
+        }
       }
       process.exitCode = r.ok ? 0 : 1;
     },

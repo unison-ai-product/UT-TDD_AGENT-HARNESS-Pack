@@ -138,6 +138,7 @@ describe("L7 CLI surface closure", () => {
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("--json");
     expect(run.stdout).toContain("--setup-smoke");
+    expect(run.stdout).toContain("--timing");
     expect(run.stdout).toContain("--strict-telemetry-provenance");
     expect(run.stdout).toContain("--strict-green-command-digest");
   }, 15_000);

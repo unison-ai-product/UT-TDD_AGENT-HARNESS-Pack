@@ -90,6 +90,20 @@ describe("buildDoctorResult", () => {
       "doctor: beta - violation",
     ]);
   });
+
+  it("preserves optional timing diagnostics without changing ok/messages", () => {
+    const result = buildDoctorResult({
+      leadingMessages: ["doctor: mode=standalone"],
+      checks: [{ ok: true, messages: ["alpha - OK"] }],
+      timings: [{ id: "alpha", duration_ms: 1.25, ok: true, message_count: 1 }],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      messages: ["doctor: mode=standalone", "doctor: alpha - OK"],
+      timings: [{ id: "alpha", duration_ms: 1.25, ok: true, message_count: 1 }],
+    });
+  });
 });
 
 function codexWrapperParityFiles(root: string, overrides: Record<string, string> = {}) {
@@ -859,9 +873,12 @@ describe("runDoctor", () => {
     );
     const checkAggregation = registrySource.match(/const checks = \[([\s\S]*?)\];/)?.[1] ?? "";
     expect(indexSource).toContain(
-      'import { collectDoctorChecks, type DoctorOptions } from "./check-registry";',
+      'import { collectDoctorCheckRun, type DoctorOptions } from "./check-registry";',
     );
-    expect(indexSource).toContain("const checks = collectDoctorChecks(deps, options)");
+    expect(indexSource).toContain(
+      "const { checks, timings } = collectDoctorCheckRun(deps, options)",
+    );
+    expect(registrySource).toContain("export function collectDoctorCheckRun");
     expect(registrySource).toContain("export function collectDoctorChecks");
     const expectedHardGates = [
       "backfill",
