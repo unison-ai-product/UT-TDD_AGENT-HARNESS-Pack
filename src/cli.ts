@@ -2001,6 +2001,7 @@ routeCommand
   .option("--finding-type <type>", "audit/research finding type")
   .option("--route-map <path>", "route-map YAML override")
   .option("--format <format>", "output format: text or json", "text")
+  .option("--json", "JSON output (alias for --format json)")
   .action(
     (opts: {
       signal: string;
@@ -2009,6 +2010,7 @@ routeCommand
       findingType?: string;
       routeMap?: string;
       format?: string;
+      json?: boolean;
     }) => {
       const repoRoot = process.cwd();
       const routeMap = loadRouteMap(repoRoot, opts.routeMap);
@@ -2023,7 +2025,7 @@ routeCommand
       });
       const auditPath =
         evaluated.exit_code === 1 ? appendRouteApprovalAudit(repoRoot, evaluated) : "";
-      if (opts.format === "json") {
+      if (opts.json || opts.format === "json") {
         process.stdout.write(
           `${JSON.stringify(auditPath ? { ...evaluated, audit_path: auditPath } : evaluated, null, 2)}\n`,
         );

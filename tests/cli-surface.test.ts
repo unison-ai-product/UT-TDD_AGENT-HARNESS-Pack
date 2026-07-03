@@ -844,6 +844,15 @@ describe("L7 CLI surface closure", () => {
     expect(payload).toHaveProperty("byCode");
   }, 20_000);
 
+  it("exposes route eval --json as an alias for --format json", () => {
+    const legacy = runCli(["route", "eval", "--signal", "reverse", "--format", "json"]);
+    const alias = runCli(["route", "eval", "--signal", "reverse", "--json"]);
+
+    expect(legacy.status).toBe(0);
+    expect(alias.status).toBe(0);
+    expect(JSON.parse(alias.stdout)).toEqual(JSON.parse(legacy.stdout));
+  }, 20_000);
+
   it("exposes roster list and check as JSON command surfaces", () => {
     const list = runCli(["roster", "list", "--json"]);
     const listed = JSON.parse(list.stdout);
