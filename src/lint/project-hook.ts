@@ -16,6 +16,7 @@ export interface ProjectHookViolation {
     | "missing_hook"
     | "missing_project_dir"
     | "missing_block_on_failure"
+    | "tracked_permissions"
     | "forbidden_path";
 }
 
@@ -38,6 +39,7 @@ interface HookEntry {
 
 interface ClaudeSettings {
   hooks?: Record<string, HookEntry[]>;
+  permissions?: unknown;
 }
 
 interface RequiredProjectHook {
@@ -158,6 +160,9 @@ export function analyzeProjectHooks(docs: ProjectHookDoc[]): ProjectHookResult {
       continue;
     }
     const hooks = settings.hooks ?? {};
+    if (settings.permissions !== undefined) {
+      violations.push({ file: doc.file, reason: "tracked_permissions" });
+    }
     for (const [event, entries] of Object.entries(hooks)) {
       for (const entry of entries ?? []) {
         for (const hook of entry.hooks ?? []) {

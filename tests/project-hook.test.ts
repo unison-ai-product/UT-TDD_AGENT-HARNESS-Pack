@@ -87,6 +87,23 @@ describe("project-hook lint", () => {
     });
   });
 
+  it("rejects tracked Claude permissions because they are local runtime state", () => {
+    const settings = {
+      permissions: { allow: ["Bash(git add *)"] },
+      ...teamStandardSettings(),
+    };
+
+    const result = analyzeProjectHooks([
+      { file: ".claude/settings.json", content: JSON.stringify(settings) },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContainEqual({
+      file: ".claude/settings.json",
+      reason: "tracked_permissions",
+    });
+  });
+
   // isWrapperForm は includes 部分一致のため、wrapperCommand 同士が prefix 関係になると
   // クロス判定 (別 hook での偽充足) が起きうる。エントリ追加時の回帰を構造で防ぐ。
   it("keeps required wrapper commands mutually non-substring", () => {
