@@ -32,6 +32,8 @@ import type {
   PlanGovernanceDoc,
   PlanGovernanceResult,
   PlanGovernanceViolation,
+  PlanReferenceFreshnessFinding,
+  PlanReferenceFreshnessResult,
   PlanScheduleDoc,
   PlanScheduleResult,
   PlanScheduleViolation,
@@ -43,10 +45,16 @@ export type {
   PlanGovernanceResult,
   PlanGovernanceViolation,
   PlanGovernanceViolationReason,
+  PlanReferenceFreshnessFinding,
+  PlanReferenceFreshnessFindingReason,
+  PlanReferenceFreshnessResult,
   PlanScheduleDoc,
   PlanScheduleResult,
   PlanScheduleViolation,
 } from "./lint-types";
+
+const ROUTE_MODE_KIND_DEBT_GUIDANCE =
+  "see docs/governance/route-mode-kind-debt-audit-2026-07-02.md and docs/plans/PLAN-L7-263-route-mode-kind-certificate.md";
 
 function section(content: string, start: RegExp, end: RegExp): string {
   const m = content.match(start);
@@ -346,7 +354,7 @@ function routeModeKindViolations(
       return [
         {
           reason: "route_mode_kind_mismatch",
-          detail: "route_mode removed from ledgered debt plan (bypass attempt fails closed)",
+          detail: `route_mode removed from ledgered debt plan (bypass attempt fails closed); ${ROUTE_MODE_KIND_DEBT_GUIDANCE}`,
         },
       ];
     }
@@ -363,7 +371,7 @@ function routeModeKindViolations(
   if (ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS.has(planId) && status === "draft") return [];
 
   const debtNote = ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS.has(planId)
-    ? " (debt plan must be promoted to add-impl + Reverse pairing before leaving draft)"
+    ? ` (debt plan must be promoted to add-impl + Reverse pairing before leaving draft; ${ROUTE_MODE_KIND_DEBT_GUIDANCE})`
     : "";
   return [
     {
@@ -371,6 +379,51 @@ function routeModeKindViolations(
       detail: `route_mode=${mode} allows kind=${allowedKinds.join("|")} but kind=${kind}${debtNote}`,
     },
   ];
+}
+
+const PLAN_CODE_LINE_REFERENCE_PATTERN = /\b([A-Za-z0-9_.\/\\-]+\.tsx?):(\d+)\b/g;
+
+function fileLineCount(path: string): number {
+  return readFileSync(path, "utf8").split(/\r?\n/).length;
+}
+
+export function analyzePlanReferenceFreshness(
+  docs: PlanGovernanceDoc[],
+  repoRoot: string = process.cwd(),
+): PlanReferenceFreshnessResult {
+  const findings: PlanReferenceFreshnessFinding[] = [];
+  for (const doc of docs) {
+    const raw = parsePlanFrontmatter(doc);
+    if (!raw || stringField(raw.status) !== "draft") continue;
+    const seen = new Set<string>();
+    for (const match of doc.content.matchAll(PLAN_CODE_LINE_REFERENCE_PATTERN)) {
+      const rawPath = normalizeArtifactPath(match[1]);
+      const line = Number(match[2]);
+      const reference = `${rawPath}:${line}`;
+      if (seen.has(reference)) continue;
+      seen.add(reference);
+      const absolutePath = join(repoRoot, rawPath);
+      if (!existsSync(absolutePath)) {
+        findings.push({
+          file: doc.file,
+          reason: "reference_path_missing",
+          reference,
+          detail: rawPath,
+        });
+        continue;
+      }
+      const lines = fileLineCount(absolutePath);
+      if (line > lines) {
+        findings.push({
+          file: doc.file,
+          reason: "reference_line_out_of_range",
+          reference,
+          detail: `${rawPath} has ${lines} lines`,
+        });
+      }
+    }
+  }
+  return { findings, checked: docs.length, ok: findings.length === 0 };
 }
 
 function expectedArtifactTypeForPath(path: string): string | null {

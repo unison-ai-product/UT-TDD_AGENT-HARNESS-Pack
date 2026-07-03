@@ -65,12 +65,30 @@ interface PlanGovernanceResult {
   ok: boolean;
 }
 
+type PlanReferenceFreshnessFindingReason = "reference_path_missing" | "reference_line_out_of_range";
+
+interface PlanReferenceFreshnessFinding {
+  file: string;
+  reason: PlanReferenceFreshnessFindingReason;
+  reference: string;
+  detail: string;
+}
+
+interface PlanReferenceFreshnessResult {
+  findings: PlanReferenceFreshnessFinding[];
+  checked: number;
+  ok: boolean;
+}
+
 export type {
   LintResult,
   PlanGovernanceDoc,
   PlanGovernanceResult,
   PlanGovernanceViolation,
   PlanGovernanceViolationReason,
+  PlanReferenceFreshnessFinding,
+  PlanReferenceFreshnessFindingReason,
+  PlanReferenceFreshnessResult,
   PlanScheduleDoc,
   PlanScheduleResult,
   PlanScheduleViolation,

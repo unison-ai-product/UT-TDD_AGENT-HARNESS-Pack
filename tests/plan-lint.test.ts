@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  analyzePlanReferenceFreshness,
   analyzePlanGovernance,
   analyzePlanSchedule,
   extractScheduleSection,
@@ -971,10 +972,12 @@ dependencies:
     );
     expect(draftReasons).not.toContain("route_mode_kind_mismatch");
 
-    const startedReasons = analyzePlanGovernance([draftDebt("confirmed")]).violations.map(
-      (v) => v.reason,
-    );
+    const started = analyzePlanGovernance([draftDebt("confirmed")]);
+    const startedReasons = started.violations.map((v) => v.reason);
     expect(startedReasons).toContain("route_mode_kind_mismatch");
+    const detail = started.violations.find((v) => v.reason === "route_mode_kind_mismatch")?.detail;
+    expect(detail).toContain("docs/governance/route-mode-kind-debt-audit-2026-07-02.md");
+    expect(detail).toContain("docs/plans/PLAN-L7-263-route-mode-kind-certificate.md");
   });
 
   it("U-PLANGOV-011x: legacy landed debt is permanently exempt", () => {
@@ -1005,9 +1008,13 @@ dependencies:
       }),
     ];
 
-    const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
+    const result = analyzePlanGovernance(docs);
+    const reasons = result.violations.map((v) => v.reason);
 
     expect(reasons).toContain("route_mode_kind_mismatch");
+    expect(result.violations[0].detail).toContain(
+      "docs/governance/route-mode-kind-debt-audit-2026-07-02.md",
+    );
   });
 
   it("U-PLANGOV-011y: route_mode_kind debt ledger doc stays in sync with lint allowlists", () => {
@@ -1026,6 +1033,42 @@ dependencies:
 
     expect(idsOf(legacySection)).toEqual(ROUTE_MODE_KIND_LEGACY_LANDED_PLAN_IDS);
     expect(idsOf(draftSection)).toEqual(ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS);
+  });
+
+  it("U-PLANGOV-011z: draft PLAN code-line references surface missing paths and stale line numbers as advisory findings", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-plan-ref-fresh-"));
+    try {
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(join(root, "src", "short.ts"), "export const x = 1;\n", "utf8");
+      const docs = [
+        {
+          file: "docs/plans/PLAN-DRAFT.md",
+          content:
+            "---\nplan_id: PLAN-DRAFT\nstatus: draft\n---\n\nSee src/missing.ts:1 and src/short.ts:99.\n",
+        },
+        {
+          file: "docs/plans/PLAN-CONFIRMED.md",
+          content:
+            "---\nplan_id: PLAN-CONFIRMED\nstatus: confirmed\n---\n\nHistorical src/missing.ts:1 is ignored.\n",
+        },
+      ];
+
+      const result = analyzePlanReferenceFreshness(docs, root);
+
+      expect(result.ok).toBe(false);
+      expect(result.checked).toBe(2);
+      expect(result.findings.map((finding) => finding.reason)).toEqual([
+        "reference_path_missing",
+        "reference_line_out_of_range",
+      ]);
+      expect(result.findings.map((finding) => finding.reference)).toEqual([
+        "src/missing.ts:1",
+        "src/short.ts:99",
+      ]);
+      expect(result.findings.every((finding) => finding.file.includes("PLAN-DRAFT"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("U-PLANGOV-012: docs/design generated artifacts must use design_doc", () => {
