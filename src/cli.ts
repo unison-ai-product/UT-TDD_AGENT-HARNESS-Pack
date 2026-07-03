@@ -2180,146 +2180,156 @@ program
   );
 
 function runtimeCommand(provider: AdapterProvider): Command {
-  return program
-    .command(provider)
-    .description(`${provider} runtime adapter command`)
-    .requiredOption("--role <role>", "delegation role")
-    .option("--task <text>", "task text")
-    .option("--task-file <path>", TASK_FILE_OPTION_DESCRIPTION)
-    .option("--plan <id>", "PLAN id")
-    .option("--execute", "execute provider CLI instead of dry-run")
-    .option("--json", "JSON output")
-    .action(
-      (opts: {
-        role: string;
-        task?: string;
-        taskFile?: string;
-        plan?: string;
-        execute?: boolean;
-        json?: boolean;
-      }) => {
-        const task = resolveTaskText(opts);
-        if (!task) {
-          process.stderr.write("adapter requires exactly one of --task or --task-file\n");
-          process.exitCode = 1;
-          return;
-        }
-        const mode = detectMode().mode;
-        const contextInjection = resolveSkillContextInjection(opts.plan);
-        const plan = buildAdapterPlan(
-          {
-            provider,
-            role: opts.role,
-            task,
-            planId: opts.plan,
-            execute: Boolean(opts.execute),
-            contextInjection,
-          },
-          mode,
-        );
-        if (!plan.available) {
-          process.stderr.write(`${plan.messages.join("\n")}\n`);
-          process.exitCode = 1;
-          return;
-        }
-        // dry-run (非 execute) は plan JSON を出して終了。plan.dry_run は execute=false ゆえ true。
-        // --json は出力形式であって実行抑止ではない (team run と同契約)。--execute --json は
-        // 実行まで進み、末尾で実行結果 JSON (dry_run=false, exit_code) を返す。
-        if (!opts.execute) {
-          process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
-          return;
-        }
-        const jsonOut = Boolean(opts.json);
-        const sessionId = `${provider}-${Date.now()}`;
-        const repoRoot = process.cwd();
-        const deps = nodeDeps(repoRoot, gitBranch, gitHead);
-        const startInput: SessionHookInput = {
-          hook_event_name: HOOK_EVENT_SESSION_START,
-          session_id: sessionId,
-          ...(opts.plan ? { plan_id: opts.plan } : {}),
-        };
-        runSessionStartSideEffects(repoRoot, startInput, deps);
-        dispatch(startInput, deps, HOOK_EVENT_SESSION_START);
-        // review-guard (IMP-137): read-only (相談/検証) ロールの委譲 session が working tree を
-        // 変更したら検知するため、spawn 前の変更パスを snapshot する。
-        const guardActive = isReadOnlyDelegationRole(opts.role);
-        const treeBefore = guardActive ? safeLoadChangedFiles(repoRoot) : [];
-        const invocation = buildProviderInvocation({
-          provider,
-          command: plan.command,
-          args: plan.args,
-        });
-        const child = spawnSync(invocation.command, invocation.args, {
-          // Provider prompts are passed through stdin; argv carries only fixed
-          // command flags so shell metacharacters and tool markup stay inert.
-          // codex はプロンプトを stdin で受ける (plan.stdin)。cmd.exe shell-wrap が
-          // 引数の改行/メタ文字を切り詰めるのを回避する (PLAN-L7-77)。
-          input: plan.stdin,
-          // json 時は provider の stdout を fd 2 (stderr) へ逃がし、parent stdout を実行結果 JSON
-          // 専用に保つ (機械パース可能性を守る)。非 json は従来どおり stdout を inherit。
-          stdio:
-            plan.stdin === undefined
-              ? ["inherit", jsonOut ? 2 : "inherit", "inherit"]
-              : ["pipe", jsonOut ? 2 : "inherit", "inherit"],
-          env: adapterExecutionEnv(provider, plan.env),
-          shell: invocation.shell ?? false,
-          windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
-        });
-        if (child.error) {
-          // spawn 自体の失敗 (ENOENT 等) は status=null のまま沈黙するため理由を surface する (A-128 F-5 / IMP-130(d))。
-          process.stderr.write(`${provider}: failed to launch (${String(child.error)})\n`);
-        }
-        if (guardActive) {
-          // read-only 委譲が tree を変更したら warning で surface する (検知/隔離、IMP-137)。
-          // exit code は変えない (レビュー成果は有効でも、混入を staged 前に弾く規律へ繋ぐ)。
-          const assessment = assessReviewSession({
-            role: opts.role,
-            before: treeBefore,
-            after: safeLoadChangedFiles(repoRoot),
-          });
-          for (const m of reviewGuardMessages(assessment)) process.stderr.write(`${m}\n`);
-        }
-        dispatch(
-          {
-            hook_event_name: "PostToolUse",
-            session_id: sessionId,
-            ...(opts.plan ? { plan_id: opts.plan } : {}),
-            tool_name: provider,
-            tool_input: { command: `${plan.command} ${plan.args.join(" ")}` },
-            tool_response: { outcome: child.status === 0 ? "ok" : "error" },
-          },
-          deps,
-          "PostToolUse",
-        );
-        dispatch(
-          {
-            hook_event_name: "Stop",
-            session_id: sessionId,
-            ...(opts.plan ? { plan_id: opts.plan } : {}),
-          },
-          deps,
-          "Stop",
-        );
-        writeHandoverWarnings();
-        if (jsonOut) {
-          // 実行が起きたことを正直に反映する実行結果 JSON。plan.dry_run は execute=true ゆえ false。
-          // signal 終了時は exit_code=null になるため signal も併記する (機械判定が exit/signal を区別できる)。
-          process.stdout.write(
-            `${JSON.stringify(
-              {
-                ...plan,
-                executed: true,
-                exit_code: child.status ?? null,
-                signal: child.signal ?? null,
-              },
-              null,
-              2,
-            )}\n`,
+  return (
+    program
+      .command(provider)
+      .description(`${provider} runtime adapter command`)
+      .requiredOption("--role <role>", "delegation role")
+      .option("--task <text>", "task text")
+      .option("--task-file <path>", TASK_FILE_OPTION_DESCRIPTION)
+      .option("--plan <id>", "PLAN id")
+      // PLAN-L7-255: per-call model/effort 注入。config.toml / settings の既定 model を
+      // 呼び出し単位で上書きし、spark/mini 級の軽量 lane を governed 経路で使えるようにする。
+      .option("--model <model>", "provider model override for this call")
+      .option("--effort <level>", "provider reasoning effort override for this call")
+      .option("--execute", "execute provider CLI instead of dry-run")
+      .option("--json", "JSON output")
+      .action(
+        (opts: {
+          role: string;
+          task?: string;
+          taskFile?: string;
+          plan?: string;
+          model?: string;
+          effort?: string;
+          execute?: boolean;
+          json?: boolean;
+        }) => {
+          const task = resolveTaskText(opts);
+          if (!task) {
+            process.stderr.write("adapter requires exactly one of --task or --task-file\n");
+            process.exitCode = 1;
+            return;
+          }
+          const mode = detectMode().mode;
+          const contextInjection = resolveSkillContextInjection(opts.plan);
+          const plan = buildAdapterPlan(
+            {
+              provider,
+              role: opts.role,
+              task,
+              planId: opts.plan,
+              model: opts.model,
+              effort: opts.effort,
+              execute: Boolean(opts.execute),
+              contextInjection,
+            },
+            mode,
           );
-        }
-        process.exitCode = child.status ?? 1;
-      },
-    );
+          if (!plan.available) {
+            process.stderr.write(`${plan.messages.join("\n")}\n`);
+            process.exitCode = 1;
+            return;
+          }
+          // dry-run (非 execute) は plan JSON を出して終了。plan.dry_run は execute=false ゆえ true。
+          // --json は出力形式であって実行抑止ではない (team run と同契約)。--execute --json は
+          // 実行まで進み、末尾で実行結果 JSON (dry_run=false, exit_code) を返す。
+          if (!opts.execute) {
+            process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+            return;
+          }
+          const jsonOut = Boolean(opts.json);
+          const sessionId = `${provider}-${Date.now()}`;
+          const repoRoot = process.cwd();
+          const deps = nodeDeps(repoRoot, gitBranch, gitHead);
+          const startInput: SessionHookInput = {
+            hook_event_name: HOOK_EVENT_SESSION_START,
+            session_id: sessionId,
+            ...(opts.plan ? { plan_id: opts.plan } : {}),
+          };
+          runSessionStartSideEffects(repoRoot, startInput, deps);
+          dispatch(startInput, deps, HOOK_EVENT_SESSION_START);
+          // review-guard (IMP-137): read-only (相談/検証) ロールの委譲 session が working tree を
+          // 変更したら検知するため、spawn 前の変更パスを snapshot する。
+          const guardActive = isReadOnlyDelegationRole(opts.role);
+          const treeBefore = guardActive ? safeLoadChangedFiles(repoRoot) : [];
+          const invocation = buildProviderInvocation({
+            provider,
+            command: plan.command,
+            args: plan.args,
+          });
+          const child = spawnSync(invocation.command, invocation.args, {
+            // Provider prompts are passed through stdin; argv carries only fixed
+            // command flags so shell metacharacters and tool markup stay inert.
+            // codex はプロンプトを stdin で受ける (plan.stdin)。cmd.exe shell-wrap が
+            // 引数の改行/メタ文字を切り詰めるのを回避する (PLAN-L7-77)。
+            input: plan.stdin,
+            // json 時は provider の stdout を fd 2 (stderr) へ逃がし、parent stdout を実行結果 JSON
+            // 専用に保つ (機械パース可能性を守る)。非 json は従来どおり stdout を inherit。
+            stdio:
+              plan.stdin === undefined
+                ? ["inherit", jsonOut ? 2 : "inherit", "inherit"]
+                : ["pipe", jsonOut ? 2 : "inherit", "inherit"],
+            env: adapterExecutionEnv(provider, plan.env),
+            shell: invocation.shell ?? false,
+            windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
+          });
+          if (child.error) {
+            // spawn 自体の失敗 (ENOENT 等) は status=null のまま沈黙するため理由を surface する (A-128 F-5 / IMP-130(d))。
+            process.stderr.write(`${provider}: failed to launch (${String(child.error)})\n`);
+          }
+          if (guardActive) {
+            // read-only 委譲が tree を変更したら warning で surface する (検知/隔離、IMP-137)。
+            // exit code は変えない (レビュー成果は有効でも、混入を staged 前に弾く規律へ繋ぐ)。
+            const assessment = assessReviewSession({
+              role: opts.role,
+              before: treeBefore,
+              after: safeLoadChangedFiles(repoRoot),
+            });
+            for (const m of reviewGuardMessages(assessment)) process.stderr.write(`${m}\n`);
+          }
+          dispatch(
+            {
+              hook_event_name: "PostToolUse",
+              session_id: sessionId,
+              ...(opts.plan ? { plan_id: opts.plan } : {}),
+              tool_name: provider,
+              tool_input: { command: `${plan.command} ${plan.args.join(" ")}` },
+              tool_response: { outcome: child.status === 0 ? "ok" : "error" },
+            },
+            deps,
+            "PostToolUse",
+          );
+          dispatch(
+            {
+              hook_event_name: "Stop",
+              session_id: sessionId,
+              ...(opts.plan ? { plan_id: opts.plan } : {}),
+            },
+            deps,
+            "Stop",
+          );
+          writeHandoverWarnings();
+          if (jsonOut) {
+            // 実行が起きたことを正直に反映する実行結果 JSON。plan.dry_run は execute=true ゆえ false。
+            // signal 終了時は exit_code=null になるため signal も併記する (機械判定が exit/signal を区別できる)。
+            process.stdout.write(
+              `${JSON.stringify(
+                {
+                  ...plan,
+                  executed: true,
+                  exit_code: child.status ?? null,
+                  signal: child.signal ?? null,
+                },
+                null,
+                2,
+              )}\n`,
+            );
+          }
+          process.exitCode = child.status ?? 1;
+        },
+      )
+  );
 }
 
 runtimeCommand("codex");

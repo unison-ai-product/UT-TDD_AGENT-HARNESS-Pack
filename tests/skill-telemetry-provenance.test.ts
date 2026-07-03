@@ -14,11 +14,16 @@ import {
   type SessionLogDeps,
   SKILL_INJECTION_UNKNOWN_SESSION_ID,
 } from "../src/runtime/session-log";
-import { resolveRuntimeSessionId, UNKNOWN_RUNTIME_SESSION_ID } from "../src/skill-engine/recommend";
+import {
+  recommendSkillsForPlan,
+  resolveRuntimeSessionId,
+  UNKNOWN_RUNTIME_SESSION_ID,
+} from "../src/skill-engine/recommend";
 import { openHarnessDb, upsertRow } from "../src/state-db/index";
 import { migrate } from "../src/state-db/migration";
 import {
   projectSkillMetrics,
+  projectSkillTelemetry,
   REBUILD_INDIRECT_SESSION_ID,
   RUNTIME_SKILL_SOURCE_PREFIX,
 } from "../src/state-db/skill-projections";
@@ -192,5 +197,118 @@ describe("PLAN-L7-262: skill telemetry provenance separation", () => {
     // 正常系 skip は PlanDigest failures (outcome=error 収集) へ混入させない。
     expect(event.outcome).toBe("ok");
     expect(event.target).toContain("no-matching-skills");
+  });
+
+  it("projectSkillTelemetry rows carry the rebuild marker session_id (never empty)", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      upsertRow(db, {
+        table: "automation_assets",
+        primaryKey: "asset_id",
+        row: {
+          asset_id: SKILL_ID,
+          asset_type: "skill",
+          path: "skills/review-checklist.md",
+          trigger: "review",
+          role: "reviewer",
+          capability: "review checklist",
+          skill_type: "workflow",
+          applies_layers: "L7",
+          applies_drive_models: "Add-feature",
+        },
+      });
+      upsertRow(db, {
+        table: "review_evidence_registry",
+        primaryKey: "review_evidence_id",
+        row: { review_evidence_id: `rev:${PLAN_ID}`, plan_id: PLAN_ID, has_evidence: 1 },
+      });
+      projectSkillTelemetry({
+        db,
+        plans: new Map([
+          [
+            PLAN_ID,
+            {
+              planId: PLAN_ID,
+              kind: "add-impl",
+              layer: "L7",
+              drive: "db",
+              status: "confirmed",
+              updatedAt: "2026-07-02T00:00:00.000Z",
+            },
+          ],
+        ]),
+        deps: {
+          nowIso: () => "2026-07-02T00:05:00.000Z",
+          stableId: (prefix, value) => `${prefix}:${value}`,
+          recordProjectionEvent: (target, event) => {
+            upsertRow(target, {
+              table: event.table,
+              primaryKey:
+                event.table === "skill_invocations"
+                  ? "skill_invocation_id"
+                  : "skill_recommendation_id",
+              row: event.row,
+            });
+          },
+          skillDriveModelForPlan: () => "Add-feature",
+        },
+      });
+      const recs = db.prepare("SELECT session_id FROM skill_recommendations").all() as {
+        session_id: string;
+      }[];
+      const invs = db.prepare("SELECT session_id FROM skill_invocations").all() as {
+        session_id: string;
+      }[];
+      expect(recs.length).toBeGreaterThan(0);
+      expect(invs.length).toBeGreaterThan(0);
+      for (const row of [...recs, ...invs]) {
+        expect(row.session_id).toBe(REBUILD_INDIRECT_SESSION_ID);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recommendSkillsForPlan output rows never carry an empty session_id", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      upsertRow(db, {
+        table: "plan_registry",
+        primaryKey: "plan_id",
+        row: {
+          plan_id: PLAN_ID,
+          kind: "add-impl",
+          layer: "L7",
+          drive: "db",
+          status: "draft",
+          route_mode: "add-feature",
+        },
+      });
+      upsertRow(db, {
+        table: "automation_assets",
+        primaryKey: "asset_id",
+        row: {
+          asset_id: SKILL_ID,
+          asset_type: "skill",
+          path: "skills/review-checklist.md",
+          trigger: "review",
+          role: "reviewer",
+          capability: "review checklist",
+          skill_type: "workflow",
+          applies_layers: "L7",
+          applies_drive_models: "Add-feature",
+        },
+      });
+      const recs = recommendSkillsForPlan(db, PLAN_ID);
+      expect(recs.length).toBeGreaterThan(0);
+      for (const rec of recs) {
+        expect(rec.session_id).not.toBe("");
+        expect(rec.session_id.length).toBeGreaterThan(0);
+      }
+    } finally {
+      db.close();
+    }
   });
 });

@@ -31,7 +31,7 @@
 | Step | 内容 | 成果物 |
 |------|------|--------|
 | 1. 現状把握 | 移行対象の構造・依存・構成を把握する | — |
-| 2. 影響評価 | `retrofit-matrix`: 旧→新 対応と影響範囲を整理。`upgrade` 高リスク時は `ut-tdd doctor --preflight upgrade` 必須 (§7.8.3 requires_preflight) | retrofit-matrix.md |
+| 2. 影響評価 | `retrofit-matrix`: 旧→新 対応と影響範囲を整理。`upgrade` 高リスク時は前段検証として `ut-tdd doctor` full pass 必須 (§7.8.3 requires_preflight。専用 `--preflight` フラグは存在しない — PLAN-L7-238 訂正) | retrofit-matrix.md |
 | 3. 移行計画 | 段階・順序・ロールバック手順を確定する | 計画 note (PLAN 本文) |
 | 4. 段階移行 | config 更新・並行稼働で段階的に移す | config 差分 (②) |
 | 5. 検証 | 回帰テスト (L8)・性能テスト・データ整合性を確認 | CI pass 記録 |
@@ -81,7 +81,7 @@
 |------|----------|
 | 依存更新の影響評価が必要 | **Reverse** (upgrade type) を前段に挟む |
 | 要件変更が伴う | **Add-feature** (add-design) を並走 |
-| `upgrade` preflight fail | `ut-tdd doctor --preflight upgrade` pass まで移行計画に進まない |
+| `upgrade` preflight fail | 前段検証 `ut-tdd doctor` pass まで移行計画に進まない |
 | Refactor との区別 | Refactor = コード構造のみ。Retrofit = 依存・基盤・構成レベル |
 
 注: `config_drift` trigger は必ず tl による承認記録を残す。未承認で当該コマンドを実行した場合 exit 1 (§7.8.3)。

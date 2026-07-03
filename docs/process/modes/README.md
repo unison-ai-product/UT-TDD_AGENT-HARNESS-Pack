@@ -81,6 +81,9 @@ concept §2.5 の **9-mode** は legacy framing として **Forward + 上表 8 m
 - **出口 = Forward 合流**: どの mode も最終的に L0-L14 へ戻る。mode 固有で設計・テスト・検証を完結させない。
 - **承認境界**: Recovery / prod Incident / config_drift Retrofit は人間サインオフ必須 (§2.6.3、承認者は本台帳列)。
 - **execution mode 参照**: cross-agent review が self-review に化けないよう判断ゲートは `ut-tdd status` の execution mode を参照する (§2.6.4 / §2.1.2.1)。
+- **doc 記載コマンドの実在保証 (PLAN-L7-238)**: docs/process が backtick 引用する `ut-tdd <sub>` の
+  subcommand は CLI に実在しなければならない (`tests/cited-command-existence.test.ts` が CI fail-close)。
+  未実装コマンドを意図的に引用する行は「実装予定」または「未実装」を同一行に明記する。
 - **mode 連鎖**: Discovery 終点 → Reverse 昇華 / Scrum increment → Reverse fullback / Incident・Add-feature の前段に Discovery (要件未確定時) or Reverse (既存逆引き時) / Retrofit の影響評価前段に Reverse (`upgrade`) / Research で「作れるか不明」→ Discovery 切替 / **Add-feature (最頻) の bottom-up build (L6/L7) → 後段 Reverse fullback で L3 要件 back-fill (常態、add-feature.md §1.1 経路 B)**。
 
 ---
