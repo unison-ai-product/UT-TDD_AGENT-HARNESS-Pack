@@ -6,6 +6,7 @@ Consumer-owned Claude instructions can be added outside this managed block.
 
 - Session evidence: `ut-tdd status` and `ut-tdd handover`
 - Health check: `ut-tdd doctor --profile consumer-setup-smoke`
+- Toolchain check: `ut-tdd doctor --profile consumer-toolchain`
 - Review separation: use another runtime/model family when feasible
 
 ## Claude subagent defaults

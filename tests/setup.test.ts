@@ -105,6 +105,7 @@ const baseTemplates: TemplateSet = {
     "",
     "- Status: `ut-tdd status`",
     "- Setup doctor: `ut-tdd doctor --profile consumer-setup-smoke`",
+    "- Toolchain doctor: `ut-tdd doctor --profile consumer-toolchain`",
     "- Full doctor: `ut-tdd doctor` (source/governance repositories only)",
     "- Handover: `ut-tdd handover`",
     "<!-- UT-TDD:managed:end -->",
@@ -116,6 +117,7 @@ const baseTemplates: TemplateSet = {
     "",
     "- `ut-tdd status`",
     "- `ut-tdd doctor --profile consumer-setup-smoke`",
+    "- `ut-tdd doctor --profile consumer-toolchain`",
     "<!-- UT-TDD:managed:end -->",
     "",
   ].join("\n"),
@@ -268,11 +270,20 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       expect(templates["adapter/AGENTS.md"]).toContain(
         "ut-tdd doctor --profile consumer-setup-smoke",
       );
+      expect(templates["adapter/AGENTS.md"]).toContain(
+        "ut-tdd doctor --profile consumer-toolchain",
+      );
       expect(templates["adapter/CLAUDE.md"]).toContain(
         "Full `ut-tdd doctor` is for source/governance repositories",
       );
+      expect(templates["adapter/CLAUDE.md"]).toContain(
+        "ut-tdd doctor --profile consumer-toolchain",
+      );
       expect(templates["adapter/.claude/commands/ut-tdd-status.md"]).toContain(
         "ut-tdd doctor --profile consumer-setup-smoke",
+      );
+      expect(templates["adapter/.claude/commands/ut-tdd-status.md"]).toContain(
+        "ut-tdd doctor --profile consumer-toolchain",
       );
       const claudeMarkdownTemplates = Object.entries(templates).filter(
         ([path]) => path.startsWith("adapter/.claude/") && path.endsWith(".md"),
@@ -280,6 +291,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       expect(claudeMarkdownTemplates.length).toBeGreaterThan(0);
       for (const [path, body] of claudeMarkdownTemplates) {
         expect(body, path).toContain("doctor --profile consumer-setup-smoke");
+        expect(body, path).toContain("doctor --profile consumer-toolchain");
         expect(body, path).not.toContain("finish with `ut-tdd doctor`");
         expect(body, path).not.toContain("Run `ut-tdd status --json` and `ut-tdd doctor`");
         expect(body, path).not.toContain("Health check: `ut-tdd doctor`");
@@ -612,6 +624,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(agents).toContain("# Consumer Rules\n\nKeep this line.\n");
     expect(agents).toContain("<!-- UT-TDD:managed:start -->");
     expect(agents).toContain("`ut-tdd doctor --profile consumer-setup-smoke`");
+    expect(agents).toContain("`ut-tdd doctor --profile consumer-toolchain`");
     expect(deps.files.get(join("/repo", ".claude", "settings.json"))).toBe('{"consumer":true}\n');
 
     const beforeSecondRun = deps.files.get(join("/repo", "AGENTS.md"));

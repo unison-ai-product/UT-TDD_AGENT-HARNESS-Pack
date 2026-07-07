@@ -5,6 +5,7 @@ This project uses UT-TDD Agent Harness commands as the local orchestration surfa
 
 - Status: `ut-tdd status`
 - Setup doctor: `ut-tdd doctor --profile consumer-setup-smoke`
+- Toolchain doctor: `ut-tdd doctor --profile consumer-toolchain`
 - Full doctor: `ut-tdd doctor` (source/governance repositories only)
 - Handover: `ut-tdd handover`
 - Codex delegation: `ut-tdd codex --role <role> --task "..."`
