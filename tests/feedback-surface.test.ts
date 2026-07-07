@@ -29,6 +29,39 @@ function insertFinding(
   });
 }
 
+function insertFeedbackEvent(
+  db: ReturnType<typeof openHarnessDb>,
+  input: {
+    id: string;
+    signalType: string;
+    severity: string;
+    status?: string;
+    planId?: string;
+    nextAction?: string;
+    sourceTable?: string;
+    sourceId?: string;
+    findingId?: string;
+  },
+): void {
+  upsertRow(db, {
+    table: "feedback_events",
+    primaryKey: "feedback_event_id",
+    row: {
+      feedback_event_id: input.id,
+      finding_id: input.findingId ?? "",
+      plan_id: input.planId ?? "",
+      source_table: input.sourceTable ?? "",
+      source_id: input.sourceId ?? "",
+      source_color: "",
+      signal_type: input.signalType,
+      severity: input.severity,
+      status: input.status ?? "open",
+      next_action: input.nextAction ?? `review ${input.id}`,
+      created_at: "2026-07-07T00:00:00.000Z",
+    },
+  });
+}
+
 describe("takeover feedback surface (PLAN-L7-110)", () => {
   it("surfaces open findings from harness.db as takeover feedback (DB が正本、prose でない)", () => {
     const db = openHarnessDb(":memory:");
@@ -88,6 +121,7 @@ describe("takeover feedback surface (PLAN-L7-110)", () => {
       expect(result.total).toBe(1);
       expect(result.items).toEqual([]);
       expect(result.byBucket.telemetry).toBe(1);
+      expect(result.bySeverity.warn).toBe(1);
       expect(result.telemetryBySignal.skill_firing_rate).toBe(1);
       expect(renderTakeoverFeedback(result)).toContain("telemetry summarized: skill_firing_rate=1");
 
@@ -132,6 +166,133 @@ describe("takeover feedback surface (PLAN-L7-110)", () => {
       expect(result.total).toBe(5);
       expect(result.items.length).toBe(2);
       expect(renderTakeoverFeedback(result)).toContain("+3 more");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("surfaces open feedback_events rows as the primary takeover source", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      insertFeedbackEvent(db, {
+        id: "feedback:queue:PLAN-L7-366",
+        signalType: "unresolved-join",
+        severity: "warn",
+        planId: "PLAN-L7-366",
+        nextAction: "review queued feedback",
+      });
+
+      const result = selectTakeoverFeedback(db);
+      expect(result.total).toBe(1);
+      expect(result.items[0]).toMatchObject({
+        feedback_event_id: "feedback:queue:PLAN-L7-366",
+        signal_type: "unresolved-join",
+        severity: "warn",
+        plan_id: "PLAN-L7-366",
+        bucket: "actionable",
+      });
+      expect(renderTakeoverFeedback(result)).toContain("review queued feedback");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not surface closed feedback_events rows", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      insertFeedbackEvent(db, {
+        id: "feedback:queue:closed",
+        signalType: "unresolved-join",
+        severity: "warn",
+        status: "closed",
+        planId: "PLAN-CLOSED",
+      });
+
+      const result = selectTakeoverFeedback(db);
+      expect(result.total).toBe(0);
+      expect(renderTakeoverFeedback(result)).toBe("");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("deduplicates findings and quality_signals already represented by feedback_events", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      insertFinding(db, "finding:takeover-drift:PLAN-L7-366", "warn", "PLAN-L7-366");
+      insertFeedbackEvent(db, {
+        id: "feedback:finding:finding:takeover-drift:PLAN-L7-366",
+        signalType: "takeover-drift",
+        severity: "warn",
+        planId: "PLAN-L7-366",
+        sourceTable: "findings",
+        sourceId: "finding:takeover-drift:PLAN-L7-366",
+        findingId: "finding:takeover-drift:PLAN-L7-366",
+      });
+      upsertRow(db, {
+        table: "quality_signals",
+        primaryKey: "signal_id",
+        row: {
+          signal_id: "refactor:PLAN-L7-366",
+          source: "test",
+          subject_id: "PLAN-L7-366",
+          metric: "refactor_candidate:split-module",
+          value: 1,
+          threshold: 1,
+          status: "warn",
+          computed_at: "2026-07-07T00:00:00.000Z",
+        },
+      });
+      insertFeedbackEvent(db, {
+        id: "feedback:signal:refactor:PLAN-L7-366",
+        signalType: "refactor_candidate:split-module",
+        severity: "warn",
+        planId: "PLAN-L7-366",
+        sourceTable: "quality_signals",
+        sourceId: "refactor:PLAN-L7-366",
+      });
+
+      const result = selectTakeoverFeedback(db);
+      expect(result.total).toBe(2);
+      expect(result.items.map((item) => item.feedback_event_id)).toEqual([
+        "feedback:finding:finding:takeover-drift:PLAN-L7-366",
+        "feedback:signal:refactor:PLAN-L7-366",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps high-confidence refactor warning signals actionable instead of telemetry-only", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      upsertRow(db, {
+        table: "quality_signals",
+        primaryKey: "signal_id",
+        row: {
+          signal_id: "refactor:src/large.ts",
+          source: "test",
+          subject_id: "src/large.ts",
+          metric: "refactor_candidate:split-module",
+          value: 950,
+          threshold: 700,
+          status: "warn",
+          computed_at: "2026-07-07T00:00:00.000Z",
+        },
+      });
+
+      const result = selectTakeoverFeedback(db);
+      expect(result.total).toBe(1);
+      expect(result.items[0]).toMatchObject({
+        signal_type: "refactor_candidate:split-module",
+        severity: "warn",
+        bucket: "actionable",
+      });
+      expect(result.byBucket.actionable).toBe(1);
     } finally {
       db.close();
     }

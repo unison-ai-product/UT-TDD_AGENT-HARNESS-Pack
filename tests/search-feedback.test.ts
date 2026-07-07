@@ -166,12 +166,30 @@ describe("IT-SEARCH-01 / IT-DB-03 / IT-FEEDBACK-01", () => {
           computed_at: "2026-06-11T00:02:00.000Z",
         },
       });
+      upsertRow(db, {
+        table: "quality_signals",
+        primaryKey: "signal_id",
+        row: {
+          signal_id: "signal-2",
+          source: "refactor-candidate-detector",
+          subject_id: "PLAN-L7-47-search-metrics-feedback",
+          metric: "refactor_candidate:split-module",
+          value: 950,
+          threshold: 700,
+          status: "warn",
+          computed_at: "2026-06-11T00:03:00.000Z",
+        },
+      });
 
       const events = emitFeedbackEvents(db);
 
-      expect(events.length).toBe(2);
+      expect(events.length).toBe(3);
       expect(events.every((event) => event.status === "open")).toBe(true);
       expect(events.every((event) => event.next_action.includes("review"))).toBe(true);
+      expect(events.find((event) => event.signal_type === "schedule_lint")?.severity).toBe("fail");
+      expect(
+        events.find((event) => event.signal_type === "refactor_candidate:split-module")?.severity,
+      ).toBe("warn");
       const plan = db.prepare("SELECT * FROM plan_registry").get();
       expect(plan).toBeUndefined();
     } finally {

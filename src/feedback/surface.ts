@@ -39,6 +39,9 @@ export interface FeedbackEventRowLike {
   severity?: unknown;
   plan_id?: unknown;
   next_action?: unknown;
+  finding_id?: unknown;
+  source_table?: unknown;
+  source_id?: unknown;
 }
 
 const BUCKET_RANK: Record<FeedbackSurfaceBucket, number> = { gate: 0, actionable: 1, telemetry: 2 };
@@ -75,6 +78,27 @@ function feedbackId(prefix: string, subject: string): string {
 
 function planIdOf(subject: string): string {
   return subject.startsWith("PLAN-") ? subject : "";
+}
+
+function signalSeverity(status: unknown): string {
+  const normalized = String(status ?? "warn").toLowerCase();
+  if (normalized === "fail" || normalized === "error") return normalized;
+  if (normalized === "warn") return "warn";
+  return "info";
+}
+
+function findingFeedbackId(findingId: unknown, subject: string): string {
+  return feedbackId("feedback:finding", String(findingId ?? subject));
+}
+
+function signalFeedbackId(signalId: unknown, subject: string): string {
+  return feedbackId("feedback:signal", String(signalId ?? subject));
+}
+
+function sourceKey(sourceTable: unknown, sourceId: unknown): string {
+  const table = String(sourceTable ?? "");
+  const id = String(sourceId ?? "");
+  return table && id ? `${table}:${id}` : "";
 }
 
 function renderGroupedItems(items: SurfacedFeedback[], indent = "    "): string[] {
@@ -134,14 +158,45 @@ export function selectTakeoverFeedback(
 ): TakeoverFeedbackResult {
   const limit = opts.limit ?? 10;
   const items: SurfacedFeedback[] = [];
+  const representedFeedbackIds = new Set<string>();
+  const representedSources = new Set<string>();
+
+  const openFeedbackEvents = db
+    .prepare(
+      `SELECT feedback_event_id, finding_id, plan_id, source_table, source_id, signal_type, severity, next_action
+       FROM feedback_events
+       WHERE status = 'open'`,
+    )
+    .all() as Array<Record<string, unknown>>;
+  for (const event of openFeedbackEvents) {
+    const signalType = String(event.signal_type ?? "feedback");
+    const severity = String(event.severity ?? "warn").toLowerCase();
+    const feedbackEventId = String(event.feedback_event_id ?? "");
+    if (feedbackEventId) representedFeedbackIds.add(feedbackEventId);
+    const key = sourceKey(event.source_table, event.source_id);
+    if (key) representedSources.add(key);
+    const findingId = String(event.finding_id ?? "");
+    if (findingId) representedSources.add(sourceKey("findings", findingId));
+    items.push({
+      feedback_event_id: feedbackEventId,
+      signal_type: signalType,
+      severity,
+      plan_id: String(event.plan_id ?? ""),
+      next_action: String(event.next_action ?? ""),
+      bucket: classifyFeedbackBucket({ severity, signal_type: signalType }),
+    });
+  }
 
   const openFindings = db
     .prepare("SELECT finding_id, kind, severity, subject_id FROM findings WHERE status = 'open'")
     .all() as Array<Record<string, unknown>>;
   for (const finding of openFindings) {
     const subject = String(finding.subject_id ?? finding.finding_id ?? "");
+    const feedbackEventId = findingFeedbackId(finding.finding_id, subject);
+    const key = sourceKey("findings", finding.finding_id ?? subject);
+    if (representedFeedbackIds.has(feedbackEventId) || representedSources.has(key)) continue;
     items.push({
-      feedback_event_id: feedbackId("feedback:finding", String(finding.finding_id ?? subject)),
+      feedback_event_id: feedbackEventId,
       signal_type: String(finding.kind ?? "finding"),
       severity: String(finding.severity ?? "warn"),
       plan_id: planIdOf(subject),
@@ -160,16 +215,18 @@ export function selectTakeoverFeedback(
     .all() as Array<Record<string, unknown>>;
   for (const signal of failedSignals) {
     const subject = String(signal.subject_id ?? signal.signal_id ?? "");
+    const feedbackEventId = signalFeedbackId(signal.signal_id, subject);
+    const key = sourceKey("quality_signals", signal.signal_id ?? subject);
+    if (representedFeedbackIds.has(feedbackEventId) || representedSources.has(key)) continue;
+    const severity = signalSeverity(signal.status);
+    const signalType = String(signal.metric ?? "quality_signal");
     items.push({
-      feedback_event_id: feedbackId("feedback:signal", String(signal.signal_id ?? subject)),
-      signal_type: String(signal.metric ?? "quality_signal"),
-      severity: String(signal.status ?? "warn") === "fail" ? "warn" : "info",
+      feedback_event_id: feedbackEventId,
+      signal_type: signalType,
+      severity,
       plan_id: planIdOf(subject),
       next_action: `review quality signal ${signal.signal_id ?? subject}`,
-      bucket: classifyFeedbackBucket({
-        severity: String(signal.status ?? "warn") === "fail" ? "warn" : "info",
-        signal_type: String(signal.metric ?? "quality_signal"),
-      }),
+      bucket: classifyFeedbackBucket({ severity, signal_type: signalType }),
     });
   }
 
@@ -219,7 +276,7 @@ export function renderTakeoverFeedback(result: TakeoverFeedbackResult): string {
   lines.push(...renderGroupedItems(actionableItems));
   const hiddenActionable = result.byBucket.gate + result.byBucket.actionable - result.items.length;
   if (hiddenActionable > 0) {
-    lines.push(`  - (+${hiddenActionable} more actionable - ut-tdd feedback list --emit)`);
+    lines.push(`  - (+${hiddenActionable} more actionable - ut-tdd feedback list --json)`);
   }
   if (result.byBucket.telemetry > 0) {
     const topTelemetry = Object.entries(result.telemetryBySignal)

@@ -399,12 +399,13 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
 
         const feedback = db
           .prepare(
-            "SELECT source_table, signal_type, next_action FROM feedback_events WHERE signal_type = ?",
+            "SELECT source_table, signal_type, severity, next_action FROM feedback_events WHERE signal_type = ?",
           )
           .get("refactor_candidate:split-module");
         expect(feedback).toMatchObject({
           source_table: "quality_signals",
           signal_type: "refactor_candidate:split-module",
+          severity: "warn",
         });
         expect(String(feedback?.next_action ?? "")).toContain("review quality signal");
       } finally {

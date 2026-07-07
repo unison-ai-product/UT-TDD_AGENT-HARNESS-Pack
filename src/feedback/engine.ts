@@ -127,6 +127,13 @@ function feedbackId(prefix: string, subject: string): string {
   return `${prefix}:${subject}`.replace(/[^A-Za-z0-9._:-]+/g, "-");
 }
 
+function signalSeverity(status: unknown): string {
+  const normalized = String(status ?? "warn").toLowerCase();
+  if (normalized === "fail" || normalized === "error") return normalized;
+  if (normalized === "warn") return "warn";
+  return "info";
+}
+
 export function emitFeedbackEvents(db: HarnessDb): FeedbackEvent[] {
   const openFindings = db.prepare("SELECT * FROM findings WHERE status = 'open'").all();
   const failedSignals = db
@@ -158,7 +165,7 @@ export function emitFeedbackEvents(db: HarnessDb): FeedbackEvent[] {
       finding_id: "",
       plan_id: subject.startsWith("PLAN-") ? subject : "",
       signal_type: String(signal.metric ?? "quality_signal"),
-      severity: String(signal.status ?? "warn") === "fail" ? "warn" : "info",
+      severity: signalSeverity(signal.status),
       status: "open",
       next_action: `review quality signal ${signal.signal_id ?? subject}`,
       created_at: createdAt,

@@ -18,6 +18,13 @@ interface FeedbackProjectionDeps {
 
 const refactorCandidateCache = new Map<string, RefactorCandidate[]>();
 
+function signalSeverity(status: unknown): string {
+  const normalized = String(status ?? "warn").toLowerCase();
+  if (normalized === "fail" || normalized === "error") return normalized;
+  if (normalized === "warn") return "warn";
+  return "info";
+}
+
 export function projectRefactorCandidateSignals(
   repoRoot: string,
   db: HarnessDb,
@@ -98,7 +105,7 @@ export function projectFeedbackEvents(db: HarnessDb, deps: FeedbackProjectionDep
         source_id: signalId || subject,
         source_color: "",
         signal_type: String(signal.metric ?? "quality_signal"),
-        severity: String(signal.status ?? "warn") === "fail" ? "warn" : "info",
+        severity: signalSeverity(signal.status),
         status: "open",
         next_action: `review quality signal ${signalId || subject}`,
         created_at: createdAt,
