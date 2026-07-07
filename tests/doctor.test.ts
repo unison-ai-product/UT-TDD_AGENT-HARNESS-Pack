@@ -5,7 +5,9 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   buildFullDoctorCheckDefinitions,
   collectDoctorCheckRun,
+  doctorOutputIdsForScope,
   FULL_DOCTOR_OUTPUT_IDS,
+  selectDoctorCheckDefinitions,
 } from "../src/doctor/check-registry";
 import {
   checkDependencyDrift as checkDependencyDriftAdapter,
@@ -345,11 +347,15 @@ describe("runDoctor", () => {
   });
 
   it("runs only the toolchain gate when doctor scope is toolchain", () => {
+    const definitions = buildFullDoctorCheckDefinitions(nodeDoctorDeps(process.cwd()));
+    const selected = selectDoctorCheckDefinitions(definitions, "toolchain");
     const run = collectDoctorCheckRun(nodeDoctorDeps(process.cwd()), {
       scope: "toolchain",
       timing: true,
     });
 
+    expect(doctorOutputIdsForScope("toolchain")).toEqual(["toolchain-pin"]);
+    expect(selected.map((definition) => definition.id)).toEqual(["toolchain-pin"]);
     expect(run.checks).toHaveLength(1);
     expect(run.checks[0]?.messages[0]).toContain("toolchain-pin");
     expect(run.timings).toEqual([
@@ -901,8 +907,8 @@ describe("runDoctor", () => {
     expect(registrySource).toContain("export function collectDoctorCheckRun");
     expect(registrySource).toContain("export function collectDoctorChecks");
     expect(registrySource).toContain("export function buildFullDoctorCheckDefinitions");
+    expect(registrySource).toContain("export function selectDoctorCheckDefinitions");
     expect(registrySource).toContain('export type DoctorScope = "full" | "toolchain"');
-    expect(registrySource).toContain('if (scope === "toolchain")');
     const expectedHardGates = [
       "backfill",
       "scrum-reverse",
@@ -960,10 +966,23 @@ describe("runDoctor", () => {
     expect(new Set(checkIds).size).toBe(checkIds.length);
     expect(new Set(outputIds).size).toBe(outputIds.length);
     expect(checkIds).toEqual(expect.arrayContaining(outputIds));
+    expect(
+      selectDoctorCheckDefinitions(definitions, "full").map((definition) => definition.id),
+    ).toEqual(checkIds);
+    expect(doctorOutputIdsForScope("full")).toEqual(outputIds);
     expect(outputIds).toEqual(expect.arrayContaining(expectedHardGates));
     expect(checkIds).not.toContain("plan-reference-freshness");
     expect(outputIds).not.toContain("plan-reference-freshness");
     expect(registrySource).not.toContain("checkPlanReferenceFreshnessAdvisory");
+    const definitionsById = new Map(definitions.map((definition) => [definition.id, definition]));
+    for (const definition of definitions) {
+      for (const requiredId of definition.requires ?? []) {
+        const required = definitionsById.get(requiredId);
+        expect(required).toBeDefined();
+        expect(checkIds.indexOf(requiredId)).toBeLessThan(checkIds.indexOf(definition.id));
+        expect(required?.profiles).toEqual(expect.arrayContaining([...definition.profiles]));
+      }
+    }
     expect(checkIds.indexOf("review-evidence")).toBeLessThan(checkIds.indexOf("pair-freeze"));
     expect(outputIds.indexOf("l7-completion")).toBeLessThan(outputIds.indexOf("review-evidence"));
     expect(checkIds.indexOf("guardrail-invariants")).toBeGreaterThan(

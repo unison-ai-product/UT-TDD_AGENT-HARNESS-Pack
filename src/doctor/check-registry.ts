@@ -188,11 +188,29 @@ export const FULL_DOCTOR_OUTPUT_IDS = [
   "forward-convergence-audit",
 ] as const;
 
+export const TOOLCHAIN_DOCTOR_OUTPUT_IDS = ["toolchain-pin"] as const;
+
+export function doctorOutputIdsForScope(scope: DoctorScope): readonly string[] {
+  if (scope === "toolchain") return TOOLCHAIN_DOCTOR_OUTPUT_IDS;
+  return FULL_DOCTOR_OUTPUT_IDS;
+}
+
+export function selectDoctorCheckDefinitions(
+  definitions: readonly DoctorCheckDefinition[],
+  scope: DoctorScope,
+): DoctorCheckDefinition[] {
+  const outputIds = new Set(doctorOutputIdsForScope(scope));
+  return definitions.filter(
+    (definition) => definition.profiles.includes(scope) && outputIds.has(definition.id),
+  );
+}
+
 export function buildFullDoctorCheckDefinitions(
   deps: DoctorDeps,
   options: DoctorOptions = {},
 ): DoctorCheckDefinition[] {
   const fullProfile = ["full"] as const;
+  const fullAndToolchainProfiles = ["full", "toolchain"] as const;
   let dependencyDriftResult: ReturnType<typeof checkDependencyDrift>["result"] = null;
 
   return [
@@ -341,7 +359,11 @@ export function buildFullDoctorCheckDefinitions(
       profiles: fullProfile,
       run: () => checkCodexWrapperParity(deps),
     },
-    { id: "toolchain-pin", profiles: fullProfile, run: () => checkToolchainPin(deps.repoRoot) },
+    {
+      id: "toolchain-pin",
+      profiles: fullAndToolchainProfiles,
+      run: () => checkToolchainPin(deps.repoRoot),
+    },
     { id: "l6-fr-coverage", profiles: fullProfile, run: () => checkL6FrCoverage(deps.repoRoot) },
     { id: "readability", profiles: fullProfile, run: () => checkReadability(deps.repoRoot) },
     {
@@ -508,16 +530,14 @@ export function collectDoctorCheckRun(
     return result;
   };
 
-  if (scope === "toolchain") {
-    const toolchainPin = record("toolchain-pin", () => checkToolchainPin(deps.repoRoot));
-    return { checks: [toolchainPin], timings };
-  }
-
   const resultsById = new Map<string, LintResult>();
-  for (const definition of buildFullDoctorCheckDefinitions(deps, options)) {
+  for (const definition of selectDoctorCheckDefinitions(
+    buildFullDoctorCheckDefinitions(deps, options),
+    scope,
+  )) {
     resultsById.set(definition.id, record(definition.id, definition.run));
   }
-  const checks = FULL_DOCTOR_OUTPUT_IDS.map((id) => {
+  const checks = doctorOutputIdsForScope(scope).map((id) => {
     const result = resultsById.get(id);
     if (!result) {
       return {
