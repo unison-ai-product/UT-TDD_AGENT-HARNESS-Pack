@@ -261,17 +261,31 @@ export function doctorOutputIdsForScope(scope: DoctorScope): readonly string[] {
   return FULL_DOCTOR_OUTPUT_IDS;
 }
 
+export function isConsumerSafeDoctorRunProfile(profile: DoctorRunProfile): boolean {
+  return profile.sourceOnly === false;
+}
+
 export function resolveDoctorRunProfile(options: DoctorOptions = {}): DoctorRunProfile {
   if (options.setupSmoke === true) {
-    return { ...DOCTOR_RUN_PROFILES["consumer-setup-smoke"] };
+    return consumerSafeDoctorRunProfile("consumer-setup-smoke");
   }
 
   const scope = options.scope ?? "full";
   if (scope === "toolchain") {
-    return { ...DOCTOR_RUN_PROFILES["source-toolchain"] };
+    return consumerSafeDoctorRunProfile("source-toolchain");
   }
 
   return { ...DOCTOR_RUN_PROFILES["source-full"] };
+}
+
+function consumerSafeDoctorRunProfile(id: DoctorRunProfileId): DoctorRunProfile {
+  const profile = DOCTOR_RUN_PROFILES[id];
+  if (!isConsumerSafeDoctorRunProfile(profile)) {
+    throw new Error(
+      `doctor run profile '${id}' is source-only and cannot be used by consumer-safe routes`,
+    );
+  }
+  return { ...profile };
 }
 
 export function doctorRunProfilesForAudience(
@@ -284,7 +298,7 @@ export function doctorRunProfilesForAudience(
 
 export function consumerSafeDoctorRunProfiles(): DoctorRunProfile[] {
   return DOCTOR_RUN_PROFILE_IDS.map((id) => DOCTOR_RUN_PROFILES[id])
-    .filter((profile) => profile.sourceOnly === false)
+    .filter(isConsumerSafeDoctorRunProfile)
     .map((profile) => ({ ...profile }));
 }
 
