@@ -5,7 +5,11 @@
  */
 
 import { detectMode } from "../runtime/detect";
-import { collectDoctorCheckRun, type DoctorOptions } from "./check-registry";
+import {
+  collectDoctorCheckRun,
+  type DoctorOptions,
+  resolveDoctorRunProfile,
+} from "./check-registry";
 import { checkPlanReferenceFreshnessAdvisory } from "./plan-governance";
 import { buildDoctorResult, type DoctorResult } from "./result";
 import {
@@ -119,7 +123,8 @@ export function runDoctor(
   deps: DoctorDeps = nodeDoctorDeps(process.cwd()),
   options: DoctorOptions = {},
 ): DoctorResult {
-  if (options.setupSmoke === true) return checkSetupSmoke(deps);
+  const profile = resolveDoctorRunProfile(options);
+  if (profile.invocation === "setup-smoke") return checkSetupSmoke(deps);
 
   const d = detectMode();
   // handover / agent-slots are warning surfaces. Verification profile is a hard gate.

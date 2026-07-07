@@ -109,6 +109,36 @@ export interface DoctorCheckDefinition {
   run: () => LintResult;
 }
 
+export type DoctorRunProfileId = "source-full" | "source-toolchain" | "consumer-setup-smoke";
+
+export type DoctorRunProfile =
+  | {
+      id: "source-full";
+      audience: "source";
+      invocation: "registry";
+      scope: "full";
+      setupSmoke: false;
+      outputIds: readonly string[];
+      sourceOnly: true;
+    }
+  | {
+      id: "source-toolchain";
+      audience: "source";
+      invocation: "registry";
+      scope: "toolchain";
+      setupSmoke: false;
+      outputIds: readonly string[];
+      sourceOnly: false;
+    }
+  | {
+      id: "consumer-setup-smoke";
+      audience: "consumer";
+      invocation: "setup-smoke";
+      setupSmoke: true;
+      outputIds: readonly string[];
+      sourceOnly: false;
+    };
+
 export const FULL_DOCTOR_OUTPUT_IDS = [
   "backfill",
   "scrum-reverse",
@@ -193,6 +223,42 @@ export const TOOLCHAIN_DOCTOR_OUTPUT_IDS = ["toolchain-pin"] as const;
 export function doctorOutputIdsForScope(scope: DoctorScope): readonly string[] {
   if (scope === "toolchain") return TOOLCHAIN_DOCTOR_OUTPUT_IDS;
   return FULL_DOCTOR_OUTPUT_IDS;
+}
+
+export function resolveDoctorRunProfile(options: DoctorOptions = {}): DoctorRunProfile {
+  if (options.setupSmoke === true) {
+    return {
+      id: "consumer-setup-smoke",
+      audience: "consumer",
+      invocation: "setup-smoke",
+      setupSmoke: true,
+      outputIds: [],
+      sourceOnly: false,
+    };
+  }
+
+  const scope = options.scope ?? "full";
+  if (scope === "toolchain") {
+    return {
+      id: "source-toolchain",
+      audience: "source",
+      invocation: "registry",
+      scope,
+      setupSmoke: false,
+      outputIds: doctorOutputIdsForScope(scope),
+      sourceOnly: false,
+    };
+  }
+
+  return {
+    id: "source-full",
+    audience: "source",
+    invocation: "registry",
+    scope,
+    setupSmoke: false,
+    outputIds: doctorOutputIdsForScope(scope),
+    sourceOnly: true,
+  };
 }
 
 export function selectDoctorCheckDefinitions(

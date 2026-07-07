@@ -7,6 +7,7 @@ import {
   collectDoctorCheckRun,
   doctorOutputIdsForScope,
   FULL_DOCTOR_OUTPUT_IDS,
+  resolveDoctorRunProfile,
   selectDoctorCheckDefinitions,
 } from "../src/doctor/check-registry";
 import {
@@ -342,6 +343,19 @@ describe("runDoctor", () => {
 
     const r = runDoctor(deps({ files }), { setupSmoke: true });
 
+    expect(resolveDoctorRunProfile({ setupSmoke: true })).toMatchObject({
+      id: "consumer-setup-smoke",
+      audience: "consumer",
+      invocation: "setup-smoke",
+      setupSmoke: true,
+      outputIds: [],
+      sourceOnly: false,
+    });
+    expect(resolveDoctorRunProfile({ setupSmoke: true, scope: "toolchain" })).toMatchObject({
+      id: "consumer-setup-smoke",
+      invocation: "setup-smoke",
+      setupSmoke: true,
+    });
     expect(r.ok).toBe(true);
     expect(r.messages).toEqual(["doctor: setup-smoke - OK (checked=22, failed=0)"]);
   });
@@ -354,6 +368,24 @@ describe("runDoctor", () => {
       timing: true,
     });
 
+    expect(resolveDoctorRunProfile()).toMatchObject({
+      id: "source-full",
+      audience: "source",
+      invocation: "registry",
+      scope: "full",
+      setupSmoke: false,
+      outputIds: FULL_DOCTOR_OUTPUT_IDS,
+      sourceOnly: true,
+    });
+    expect(resolveDoctorRunProfile({ scope: "toolchain" })).toMatchObject({
+      id: "source-toolchain",
+      audience: "source",
+      invocation: "registry",
+      scope: "toolchain",
+      setupSmoke: false,
+      outputIds: ["toolchain-pin"],
+      sourceOnly: false,
+    });
     expect(doctorOutputIdsForScope("toolchain")).toEqual(["toolchain-pin"]);
     expect(selected.map((definition) => definition.id)).toEqual(["toolchain-pin"]);
     expect(run.checks).toHaveLength(1);
@@ -898,15 +930,16 @@ describe("runDoctor", () => {
     const definitions = buildFullDoctorCheckDefinitions(nodeDoctorDeps(process.cwd()));
     const checkIds = definitions.map((definition) => definition.id);
     const outputIds = [...FULL_DOCTOR_OUTPUT_IDS];
-    expect(indexSource).toContain(
-      'import { collectDoctorCheckRun, type DoctorOptions } from "./check-registry";',
-    );
+    expect(indexSource).toContain("resolveDoctorRunProfile");
+    expect(indexSource).toContain("const profile = resolveDoctorRunProfile(options)");
+    expect(indexSource).toContain('if (profile.invocation === "setup-smoke")');
     expect(indexSource).toContain(
       "const { checks, timings } = collectDoctorCheckRun(deps, options)",
     );
     expect(registrySource).toContain("export function collectDoctorCheckRun");
     expect(registrySource).toContain("export function collectDoctorChecks");
     expect(registrySource).toContain("export function buildFullDoctorCheckDefinitions");
+    expect(registrySource).toContain("export function resolveDoctorRunProfile");
     expect(registrySource).toContain("export function selectDoctorCheckDefinitions");
     expect(registrySource).toContain('export type DoctorScope = "full" | "toolchain"');
     const expectedHardGates = [
