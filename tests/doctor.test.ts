@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildDoctorCheckDefinitionGroups } from "../src/doctor/check-definition-groups";
 import {
   buildFullDoctorCheckDefinitions,
@@ -304,11 +304,11 @@ describe("checkAgentSlots (doctor agent-slots surface, IMP-050)", () => {
 });
 
 describe("runDoctor", () => {
-  let realRepoDoctor: ReturnType<typeof runDoctor>;
-
-  beforeAll(() => {
-    realRepoDoctor = runDoctor();
-  }, 240_000);
+  let cachedRealRepoDoctor: ReturnType<typeof runDoctor> | null = null;
+  const realRepoDoctor = () => {
+    cachedRealRepoDoctor ??= runDoctor();
+    return cachedRealRepoDoctor;
+  };
 
   it("ok=true includes handover and agent-slots surfaces as warnings", () => {
     const r = runDoctor(deps());
@@ -479,7 +479,7 @@ describe("runDoctor", () => {
   });
 
   it("includes asset-drift hard gate in doctor output", () => {
-    const r = realRepoDoctor;
+    const r = realRepoDoctor();
     expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: asset-drift") && m.includes("OK"))).toBe(
       true,
@@ -487,7 +487,7 @@ describe("runDoctor", () => {
   });
 
   it("includes skill-assignment hard gate in doctor output", () => {
-    const r = realRepoDoctor;
+    const r = realRepoDoctor();
     expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: skill-assignment - OK"))).toBe(true);
   });
@@ -496,7 +496,7 @@ describe("runDoctor", () => {
   // invoked by runDoctor (invocation fence — guards against re-introducing the absence-blindness
   // where a lint module is reachable/tested but its audit never runs in a runtime path).
   it("invokes the 4 newly-wired lint audits + lint-wiring meta-gate in doctor output", () => {
-    const r = realRepoDoctor;
+    const r = realRepoDoctor();
     expect(r.ok).toBe(true);
     for (const gate of [
       "doctor: doc-consistency — OK",
@@ -510,19 +510,19 @@ describe("runDoctor", () => {
   });
 
   it("includes branch-kind-check in doctor output", () => {
-    const r = realRepoDoctor;
+    const r = realRepoDoctor();
     expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: branch-kind-check - OK"))).toBe(true);
   });
 
   it("includes GitHub CI policy hard gate in doctor output", () => {
-    const r = realRepoDoctor;
+    const r = realRepoDoctor();
     expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: github-ci-policy - OK"))).toBe(true);
   });
 
   it("includes G1/G3 trace gates in doctor output", () => {
-    const r = realRepoDoctor;
+    const r = realRepoDoctor();
     expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: g1-trace - OK"))).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: g3-trace - OK"))).toBe(true);
@@ -530,7 +530,7 @@ describe("runDoctor", () => {
 
   it("hard-gates PLAN governance once repo frontmatter debt is closed", () => {
     const governance = checkPlanGovernance(process.cwd());
-    const r = realRepoDoctor;
+    const r = realRepoDoctor();
 
     expect(governance.ok).toBe(true);
     expect(governance.messages[0]).toContain("plan-governance - OK");
@@ -612,7 +612,7 @@ describe("runDoctor", () => {
   });
 
   it("surfaces dependency-drift and regression expansion instead of scaffold stub", () => {
-    const r = realRepoDoctor;
+    const r = realRepoDoctor();
     expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: dependency-drift"))).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: regression-expansion"))).toBe(true);
@@ -620,7 +620,7 @@ describe("runDoctor", () => {
   });
 
   it("surfaces roadmap-rollup as a hard gate summary line", () => {
-    const r = realRepoDoctor;
+    const r = realRepoDoctor();
     const rollupLines = r.messages.filter((m) => m.startsWith("doctor: roadmap-rollup"));
 
     expect(r.ok).toBe(true);
@@ -632,7 +632,7 @@ describe("runDoctor", () => {
   });
 
   it("surfaces Cycle P4 closure audit as a hard gate", () => {
-    const r = realRepoDoctor;
+    const r = realRepoDoctor();
 
     expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: cycle-p4-verification - OK"))).toBe(true);
