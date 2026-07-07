@@ -391,6 +391,9 @@ describe("runDoctor", () => {
       setupSmoke: true,
       sourceOnly: false,
     });
+    expect(resolveDoctorRunProfile({ profile: "consumer-setup-smoke" })).toEqual(
+      DOCTOR_RUN_PROFILES["consumer-setup-smoke"],
+    );
     expect(r.ok).toBe(true);
     expect(r.messages).toEqual(["doctor: setup-smoke - OK (checked=22, failed=0)"]);
   });
@@ -434,6 +437,12 @@ describe("runDoctor", () => {
       outputIds: ["toolchain-pin"],
       sourceOnly: false,
     });
+    expect(resolveDoctorRunProfile({ profile: "source-full", setupSmoke: true })).toEqual(
+      DOCTOR_RUN_PROFILES["source-full"],
+    );
+    expect(resolveDoctorRunProfile({ profile: "source-toolchain" })).toEqual(
+      DOCTOR_RUN_PROFILES["source-toolchain"],
+    );
     expect(DOCTOR_RUN_PROFILES["source-full"].outputIds).toEqual(doctorOutputIdsForScope("full"));
     expect(DOCTOR_RUN_PROFILES["source-toolchain"].outputIds).toEqual(
       doctorOutputIdsForScope("toolchain"),

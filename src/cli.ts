@@ -34,6 +34,11 @@ import { registerDistributionCommands } from "./cli/distribution";
 import { registerFeedbackCommands } from "./cli/feedback";
 import { contextSuggest } from "./context/doc-router";
 import { runDoctor } from "./doctor";
+import {
+  DOCTOR_RUN_PROFILE_IDS,
+  DOCTOR_RUN_PROFILES,
+  type DoctorRunProfileId,
+} from "./doctor/check-registry";
 import { computeSkillMetrics } from "./feedback/engine";
 import { renderTakeoverFeedback, selectTakeoverFeedback } from "./feedback/surface";
 import { evaluateGateReview, loadReviewChecklistIfPresent } from "./gate/review-tier";
@@ -501,6 +506,8 @@ program
     "--setup-smoke",
     "run only the fresh-consumer setup smoke checks for wrapper and adapter hooks",
   )
+  .option("--profile <profile>", `run a named doctor profile (${DOCTOR_RUN_PROFILE_IDS.join("|")})`)
+  .option("--profiles", "list available doctor profiles and exit")
   .option("--scope <scope>", "limit doctor checks to a supported scope (full|toolchain)")
   .option("--timing", "include per-check doctor timing diagnostics")
   .option("--json", "JSON output")
@@ -509,10 +516,37 @@ program
       strictTelemetryProvenance?: boolean;
       strictGreenCommandDigest?: boolean;
       setupSmoke?: boolean;
+      profile?: string;
+      profiles?: boolean;
       scope?: string;
       timing?: boolean;
       json?: boolean;
     }) => {
+      if (opts.profiles === true) {
+        const profiles = DOCTOR_RUN_PROFILE_IDS.map((id) => DOCTOR_RUN_PROFILES[id]);
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify(profiles, null, 2)}\n`);
+        } else {
+          for (const profile of profiles) {
+            const scope = "scope" in profile ? ` scope=${profile.scope}` : "";
+            process.stdout.write(
+              `doctor profile: ${profile.id} audience=${profile.audience} invocation=${profile.invocation}${scope} sourceOnly=${profile.sourceOnly}\n`,
+            );
+          }
+        }
+        return;
+      }
+      const profile = opts.profile;
+      if (profile && !DOCTOR_RUN_PROFILE_IDS.includes(profile as DoctorRunProfileId)) {
+        const message = `doctor: invalid --profile "${profile}" (expected: ${DOCTOR_RUN_PROFILE_IDS.join(", ")})`;
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify({ ok: false, messages: [message] }, null, 2)}\n`);
+        } else {
+          process.stderr.write(`${message}\n`);
+        }
+        process.exitCode = 1;
+        return;
+      }
       const scope = opts.scope ?? "full";
       if (scope !== "full" && scope !== "toolchain") {
         const message = `doctor: invalid --scope "${scope}" (expected: full, toolchain)`;
@@ -528,6 +562,7 @@ program
         strictTelemetryProvenance: opts.strictTelemetryProvenance === true,
         strictGreenCommandDigest: opts.strictGreenCommandDigest === true,
         setupSmoke: opts.setupSmoke === true,
+        ...(profile ? { profile: profile as DoctorRunProfileId } : {}),
         scope,
         timing: opts.timing === true,
       });

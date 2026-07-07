@@ -138,10 +138,61 @@ describe("L7 CLI surface closure", () => {
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("--json");
     expect(run.stdout).toContain("--setup-smoke");
+    expect(run.stdout).toContain("--profile");
+    expect(run.stdout).toContain("--profiles");
     expect(run.stdout).toContain("--scope");
     expect(run.stdout).toContain("--timing");
     expect(run.stdout).toContain("--strict-telemetry-provenance");
     expect(run.stdout).toContain("--strict-green-command-digest");
+  }, 15_000);
+
+  it("lists doctor profiles as a machine-readable public surface", () => {
+    const run = runCli(["doctor", "--profiles", "--json"]);
+    const payload = JSON.parse(run.stdout);
+
+    expect(run.status).toBe(0);
+    expect(payload.map((profile: { id: string }) => profile.id)).toEqual([
+      "source-full",
+      "source-toolchain",
+      "consumer-setup-smoke",
+    ]);
+    expect(payload).toContainEqual(
+      expect.objectContaining({
+        id: "consumer-setup-smoke",
+        audience: "consumer",
+        invocation: "setup-smoke",
+        sourceOnly: false,
+      }),
+    );
+    expect(payload).toContainEqual(
+      expect.objectContaining({
+        id: "source-full",
+        sourceOnly: true,
+      }),
+    );
+  }, 15_000);
+
+  it("runs a named consumer-safe doctor profile without relying on setup-smoke alias", () => {
+    const run = runCli(["doctor", "--profile", "source-toolchain", "--json"]);
+    const payload = JSON.parse(run.stdout);
+
+    expect(run.status).toBe(0);
+    expect(payload.ok).toBe(true);
+    expect(payload.messages).toEqual(
+      expect.arrayContaining([expect.stringContaining("doctor: toolchain-pin - OK")]),
+    );
+    expect(payload.messages.join("\n")).not.toContain("plan-governance");
+  }, 20_000);
+
+  it("fail-closes unsupported doctor profile as machine-readable JSON", () => {
+    const run = runCli(["doctor", "--profile", "bogus", "--json"]);
+    const payload = JSON.parse(run.stdout);
+
+    expect(run.status).toBe(1);
+    expect(payload.ok).toBe(false);
+    expect(payload.messages).toEqual([
+      'doctor: invalid --profile "bogus" (expected: source-full, source-toolchain, consumer-setup-smoke)',
+    ]);
   }, 15_000);
 
   it("fail-closes unsupported doctor scope as machine-readable JSON", () => {

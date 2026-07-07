@@ -96,6 +96,7 @@ export interface DoctorOptions {
   setupSmoke?: boolean;
   timing?: boolean;
   scope?: DoctorScope;
+  profile?: DoctorRunProfileId;
 }
 
 export interface DoctorCheckRun {
@@ -268,6 +269,10 @@ export function isConsumerSafeDoctorRunProfile(profile: DoctorRunProfile): boole
 }
 
 export function resolveDoctorRunProfile(options: DoctorOptions = {}): DoctorRunProfile {
+  if (options.profile) {
+    return { ...DOCTOR_RUN_PROFILES[options.profile] };
+  }
+
   if (options.setupSmoke === true) {
     return consumerSafeDoctorRunProfile("consumer-setup-smoke");
   }
@@ -626,7 +631,8 @@ export function collectDoctorCheckRun(
   deps: DoctorDeps,
   options: DoctorOptions = {},
 ): DoctorCheckRun {
-  const scope = options.scope ?? "full";
+  const profile = resolveDoctorRunProfile(options);
+  const scope = profile.invocation === "registry" ? profile.scope : (options.scope ?? "full");
   const timings: DoctorTiming[] = [];
   const record = <T extends LintResult>(id: string, run: () => T): T => {
     if (options.timing !== true) return run();
