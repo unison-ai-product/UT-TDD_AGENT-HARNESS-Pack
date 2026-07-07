@@ -104,7 +104,8 @@ const baseTemplates: TemplateSet = {
     "# UT-TDD Agent Harness Adapter",
     "",
     "- Status: `ut-tdd status`",
-    "- Doctor: `ut-tdd doctor`",
+    "- Setup doctor: `ut-tdd doctor --profile consumer-setup-smoke`",
+    "- Full doctor: `ut-tdd doctor` (source/governance repositories only)",
     "- Handover: `ut-tdd handover`",
     "<!-- UT-TDD:managed:end -->",
     "",
@@ -114,7 +115,7 @@ const baseTemplates: TemplateSet = {
     "# UT-TDD Agent Harness Shared Context",
     "",
     "- `ut-tdd status`",
-    "- `ut-tdd doctor`",
+    "- `ut-tdd doctor --profile consumer-setup-smoke`",
     "<!-- UT-TDD:managed:end -->",
     "",
   ].join("\n"),
@@ -264,6 +265,26 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     try {
       const templates = loadTemplates(repo);
       expect(templates["adapter/AGENTS.md"]).toContain("UT-TDD Agent Harness Adapter");
+      expect(templates["adapter/AGENTS.md"]).toContain(
+        "ut-tdd doctor --profile consumer-setup-smoke",
+      );
+      expect(templates["adapter/CLAUDE.md"]).toContain(
+        "Full `ut-tdd doctor` is for source/governance repositories",
+      );
+      expect(templates["adapter/.claude/commands/ut-tdd-status.md"]).toContain(
+        "ut-tdd doctor --profile consumer-setup-smoke",
+      );
+      const claudeMarkdownTemplates = Object.entries(templates).filter(
+        ([path]) => path.startsWith("adapter/.claude/") && path.endsWith(".md"),
+      );
+      expect(claudeMarkdownTemplates.length).toBeGreaterThan(0);
+      for (const [path, body] of claudeMarkdownTemplates) {
+        expect(body, path).toContain("doctor --profile consumer-setup-smoke");
+        expect(body, path).not.toContain("finish with `ut-tdd doctor`");
+        expect(body, path).not.toContain("Run `ut-tdd status --json` and `ut-tdd doctor`");
+        expect(body, path).not.toContain("Health check: `ut-tdd doctor`");
+        expect(body, path).not.toContain("Use `ut-tdd status` and `ut-tdd doctor`");
+      }
       expect(templates["common/harness-check.yml"]).toContain("harness-check");
       expect(templates["common/harness-check.yml"]).toContain("github guard");
       expect(templates["common/harness-check.yml"]).toContain("audit quality --include-tests");
@@ -590,7 +611,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     const agents = deps.files.get(join("/repo", "AGENTS.md")) as string;
     expect(agents).toContain("# Consumer Rules\n\nKeep this line.\n");
     expect(agents).toContain("<!-- UT-TDD:managed:start -->");
-    expect(agents).toContain("`ut-tdd doctor`");
+    expect(agents).toContain("`ut-tdd doctor --profile consumer-setup-smoke`");
     expect(deps.files.get(join("/repo", ".claude", "settings.json"))).toBe('{"consumer":true}\n');
 
     const beforeSecondRun = deps.files.get(join("/repo", "AGENTS.md"));

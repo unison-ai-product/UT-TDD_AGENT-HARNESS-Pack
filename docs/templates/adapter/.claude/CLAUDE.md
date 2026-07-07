@@ -5,7 +5,7 @@ Claude Code sessions should route harness lifecycle work through `ut-tdd`.
 Consumer-owned Claude instructions can be added outside this managed block.
 
 - Session evidence: `ut-tdd status` and `ut-tdd handover`
-- Health check: `ut-tdd doctor`
+- Health check: `ut-tdd doctor --profile consumer-setup-smoke`
 - Review separation: use another runtime/model family when feasible
 
 ## Claude subagent defaults

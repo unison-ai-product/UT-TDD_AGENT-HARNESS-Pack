@@ -7,4 +7,4 @@ Command: build
 
 Target: $ARGUMENTS
 
-Use repository-local UT-TDD commands. Start with `ut-tdd status --json`, run the narrow verification for the target, and finish with `ut-tdd doctor` when workflow or gate behavior is affected.
+Use repository-local UT-TDD commands. Start with `ut-tdd status --json`, run the narrow verification for the target, and use `ut-tdd doctor --profile consumer-setup-smoke` for generated adapter/setup health. Full `ut-tdd doctor` is for source/governance repositories with PLAN/design/test-design artifacts.
