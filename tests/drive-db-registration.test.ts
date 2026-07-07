@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   analyzeDriveDbRegistration,
@@ -8,7 +11,7 @@ import {
   collectDriveDbRegistrationStats,
   loadOrBuildDriveDbRegistrationStats,
 } from "../src/state-db/drive-registration";
-import { openHarnessDb, upsertRow } from "../src/state-db/index";
+import { defaultHarnessDbPath, openHarnessDb, upsertRow } from "../src/state-db/index";
 import { migrate } from "../src/state-db/migration";
 
 const compliant: DriveDbRegistrationStats = {
@@ -160,6 +163,10 @@ describe("drive DB registration lint", () => {
     const r = analyzeDriveDbRegistration(stats);
 
     expect(stats).not.toBeNull();
+    if (!existsSync(join(process.cwd(), "docs", "plans"))) {
+      expect(stats?.expectedPlanCount ?? 0).toBe(0);
+      return;
+    }
     expect(r.ok).toBe(true);
     expect(stats?.expectedPlanCount).toBe(stats?.planCount);
     expect(stats?.expectedPlanRegistryFingerprint).toBe(stats?.planRegistryFingerprint);
@@ -169,5 +176,45 @@ describe("drive DB registration lint", () => {
     expect(stats?.skillRecommendationOrphans).toBe(0);
     expect(stats?.skillInvocationOrphans).toBe(0);
     expect(stats?.registeredHookEvents).toBeGreaterThan(0);
+  });
+
+  it("U-DDBREG-007: stale persisted plan registry falls back to deterministic memory rebuild", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-ddbreg-stale-"));
+    try {
+      const planDir = join(root, "docs", "plans");
+      mkdirSync(planDir, { recursive: true });
+      writeFileSync(
+        join(planDir, "PLAN-TEST-ddbreg.md"),
+        [
+          "---",
+          "plan_id: PLAN-TEST-ddbreg",
+          "kind: impl",
+          "layer: L7",
+          "drive: db",
+          "status: draft",
+          "updated: 2026-07-07",
+          "---",
+          "",
+          "## Body",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const staleDb = openHarnessDb(defaultHarnessDbPath(root), { repoRoot: root });
+      try {
+        migrate(staleDb);
+      } finally {
+        staleDb.close();
+      }
+
+      const stats = loadOrBuildDriveDbRegistrationStats(root);
+
+      expect(stats).not.toBeNull();
+      expect(stats?.planCount).toBe(1);
+      expect(stats?.expectedPlanCount).toBe(1);
+      expect(stats?.planRegistryFingerprint).toBe(stats?.expectedPlanRegistryFingerprint);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

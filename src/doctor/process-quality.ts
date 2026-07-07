@@ -5,6 +5,7 @@ import {
   cycleP4VerificationMessages,
   loadCycleP4VerificationDocs,
 } from "../lint/cycle-p4-verification";
+import { analyzeDbCurrency, dbCurrencyMessages } from "../lint/db-currency";
 import {
   analyzeDriveDbRegistration,
   driveDbRegistrationMessages,
@@ -77,7 +78,10 @@ import {
   telemetryClosureMessages,
 } from "../lint/telemetry-closure";
 import { lintPlanWithGate } from "../plan/lint";
-import { loadOrBuildDriveDbRegistrationStats } from "../state-db/drive-registration";
+import {
+  loadDriveDbRegistrationStats,
+  loadOrBuildDriveDbRegistrationStats,
+} from "../state-db/drive-registration";
 
 export function checkPlanDod(repoRoot: string): { messages: string[]; ok: boolean } {
   if (!existsSync(repoRoot)) {
@@ -172,6 +176,24 @@ export function checkDriveDbRegistration(repoRoot: string): { messages: string[]
   } catch {
     return {
       messages: ["drive-db-registration - violation: harness.db registration could not be read"],
+      ok: false,
+    };
+  }
+}
+
+export function checkDbCurrency(repoRoot: string): { messages: string[]; ok: boolean } {
+  if (!existsSync(repoRoot)) {
+    return {
+      messages: ["db-currency - violation: repo root could not be read"],
+      ok: false,
+    };
+  }
+  try {
+    const r = analyzeDbCurrency(loadDriveDbRegistrationStats(repoRoot));
+    return { messages: dbCurrencyMessages(r), ok: r.ok };
+  } catch {
+    return {
+      messages: ["db-currency - violation: harness.db currency could not be read"],
       ok: false,
     };
   }

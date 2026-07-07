@@ -32,6 +32,7 @@ import {
 } from "./plan-governance";
 import {
   checkCycleP4Verification,
+  checkDbCurrency,
   checkDriveDbRegistration,
   checkDriveModelPassage,
   checkFeedbackLog,
@@ -173,6 +174,7 @@ export const FULL_DOCTOR_OUTPUT_IDS = [
   "rule-automation-closure",
   "drive-model-passage",
   "drive-db-registration",
+  "db-currency",
   "fr-roadmap-coverage",
   "telemetry-closure",
   "cycle-p4-verification",
@@ -429,6 +431,11 @@ export function buildFullDoctorCheckDefinitions(
       id: "drive-db-registration",
       profiles: fullProfile,
       run: () => checkDriveDbRegistration(deps.repoRoot),
+    },
+    {
+      id: "db-currency",
+      profiles: fullProfile,
+      run: () => checkDbCurrency(deps.repoRoot),
     },
     {
       id: "fr-roadmap-coverage",

@@ -55,6 +55,7 @@ export {
 } from "./plan-governance";
 export {
   checkCycleP4Verification,
+  checkDbCurrency,
   checkDriveDbRegistration,
   checkDriveModelPassage,
   checkFeedbackLog,

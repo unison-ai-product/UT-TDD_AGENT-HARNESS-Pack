@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { checkDriveModelPassage as checkDriveModelPassageFromIndex } from "../src/doctor/index";
 import {
   checkCycleP4Verification,
+  checkDbCurrency,
   checkDriveDbRegistration,
   checkDriveModelPassage,
   checkFeedbackLog,
@@ -34,6 +35,7 @@ describe("doctor process quality checks", () => {
       ["rule-automation-closure", checkRuleAutomationClosure(missingRoot)],
       ["drive-model-passage", checkDriveModelPassage(missingRoot)],
       ["drive-db-registration", checkDriveDbRegistration(missingRoot)],
+      ["db-currency", checkDbCurrency(missingRoot)],
       ["fr-roadmap-coverage", checkFrRoadmapCoverage(missingRoot)],
       ["telemetry-closure", checkTelemetryClosure(missingRoot)],
       ["cycle-p4-verification", checkCycleP4Verification(missingRoot)],
