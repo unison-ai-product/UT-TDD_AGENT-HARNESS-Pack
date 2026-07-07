@@ -930,6 +930,24 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       ]),
     );
 
+    const standaloneReady = buildConsumerReadinessPlan({
+      bunVersion: "1.3.2",
+      hasGit: true,
+      hasGh: false,
+      hasUtTddCli: true,
+      hasClaude: false,
+      hasCodex: false,
+      repoRoot: "/repo",
+    });
+    expect(standaloneReady.ok).toBe(true);
+    expect(standaloneReady.mode).toBe("standalone");
+    expect(standaloneReady.checks.find((c) => c.name === "runtime-cli")).toMatchObject({
+      ok: true,
+    });
+    expect(standaloneReady.checks.find((c) => c.name === "runtime-cli")?.message).toContain(
+      "judgment gates require human review",
+    );
+
     const customRepo = buildConsumerReadinessPlan({
       bunVersion: "1.3.0",
       hasGit: true,
@@ -957,7 +975,6 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       "git",
       "gh",
       "ut-tdd-cli",
-      "runtime-cli",
     ]);
     expect(blocked.checks.find((c) => c.name === "ut-tdd-cli")?.message).toContain(
       "Generated Claude/Codex hooks call `bun .ut-tdd/bin/ut-tdd.mjs ...`",

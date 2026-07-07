@@ -282,7 +282,6 @@ export function buildConsumerReadinessPlan(input: {
         : input.hasCodex
           ? "codex-only"
           : "standalone";
-  const runtimeOk = input.hasClaude || input.hasCodex;
   const checks = [
     {
       name: "bun>=1.3",
@@ -317,17 +316,18 @@ export function buildConsumerReadinessPlan(input: {
     },
     {
       name: "runtime-cli",
-      ok: runtimeOk,
-      message: runtimeOk
-        ? `mode=${mode}`
-        : "Install or login to claude or codex before review gates",
+      ok: true,
+      message:
+        input.hasClaude || input.hasCodex
+          ? `mode=${mode}`
+          : "mode=standalone; setup can continue, but judgment gates require human review or a later Claude/Codex login",
     },
   ];
   const packageRoot = input.packageRoot ?? input.repoRoot;
   const tag = input.tag ?? "v0.1.0";
   const cleanRepo = input.cleanRepo ?? DEFAULT_PACK_REPO;
   return {
-    ok: bunOk && input.hasGit && (input.hasUtTddCli ?? true) && runtimeOk,
+    ok: bunOk && input.hasGit && (input.hasUtTddCli ?? true),
     checks,
     mode,
     workspace: {
