@@ -1,6 +1,10 @@
 export type DoctorScope = "full" | "toolchain";
 
-export type DoctorRunProfileId = "source-full" | "source-toolchain" | "consumer-setup-smoke";
+export type DoctorRunProfileId =
+  | "source-full"
+  | "source-toolchain"
+  | "consumer-toolchain"
+  | "consumer-setup-smoke";
 export type DoctorRunProfileAudience = DoctorRunProfile["audience"];
 
 export type DoctorRunProfile =
@@ -16,6 +20,15 @@ export type DoctorRunProfile =
   | {
       id: "source-toolchain";
       audience: "source";
+      invocation: "registry";
+      scope: "toolchain";
+      setupSmoke: false;
+      outputIds: readonly string[];
+      sourceOnly: false;
+    }
+  | {
+      id: "consumer-toolchain";
+      audience: "consumer";
       invocation: "registry";
       scope: "toolchain";
       setupSmoke: false;
@@ -138,6 +151,15 @@ export const DOCTOR_RUN_PROFILES = {
     outputIds: TOOLCHAIN_DOCTOR_OUTPUT_IDS,
     sourceOnly: false,
   },
+  "consumer-toolchain": {
+    id: "consumer-toolchain",
+    audience: "consumer",
+    invocation: "registry",
+    scope: "toolchain",
+    setupSmoke: false,
+    outputIds: TOOLCHAIN_DOCTOR_OUTPUT_IDS,
+    sourceOnly: false,
+  },
   "consumer-setup-smoke": {
     id: "consumer-setup-smoke",
     audience: "consumer",
@@ -151,6 +173,7 @@ export const DOCTOR_RUN_PROFILES = {
 export const DOCTOR_RUN_PROFILE_IDS = [
   "source-full",
   "source-toolchain",
+  "consumer-toolchain",
   "consumer-setup-smoke",
 ] as const satisfies readonly DoctorRunProfileId[];
 

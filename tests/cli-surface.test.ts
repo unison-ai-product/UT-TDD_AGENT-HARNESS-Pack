@@ -154,8 +154,17 @@ describe("L7 CLI surface closure", () => {
     expect(payload.map((profile: { id: string }) => profile.id)).toEqual([
       "source-full",
       "source-toolchain",
+      "consumer-toolchain",
       "consumer-setup-smoke",
     ]);
+    expect(payload).toContainEqual(
+      expect.objectContaining({
+        id: "consumer-toolchain",
+        audience: "consumer",
+        invocation: "registry",
+        sourceOnly: false,
+      }),
+    );
     expect(payload).toContainEqual(
       expect.objectContaining({
         id: "consumer-setup-smoke",
@@ -173,7 +182,7 @@ describe("L7 CLI surface closure", () => {
   }, 15_000);
 
   it("runs a named consumer-safe doctor profile without relying on setup-smoke alias", () => {
-    const run = runCli(["doctor", "--profile", "source-toolchain", "--json"]);
+    const run = runCli(["doctor", "--profile", "consumer-toolchain", "--json"]);
     const payload = JSON.parse(run.stdout);
 
     expect(run.status).toBe(0);
@@ -191,7 +200,7 @@ describe("L7 CLI surface closure", () => {
     expect(run.status).toBe(1);
     expect(payload.ok).toBe(false);
     expect(payload.messages).toEqual([
-      'doctor: invalid --profile "bogus" (expected: source-full, source-toolchain, consumer-setup-smoke)',
+      'doctor: invalid --profile "bogus" (expected: source-full, source-toolchain, consumer-toolchain, consumer-setup-smoke)',
     ]);
   }, 15_000);
 

@@ -352,11 +352,13 @@ describe("runDoctor", () => {
     expect(DOCTOR_RUN_PROFILE_IDS).toEqual([
       "source-full",
       "source-toolchain",
+      "consumer-toolchain",
       "consumer-setup-smoke",
     ]);
     expect(new Set(DOCTOR_RUN_PROFILE_IDS).size).toBe(DOCTOR_RUN_PROFILE_IDS.length);
     expect(Object.keys(DOCTOR_RUN_PROFILES).sort()).toEqual([...DOCTOR_RUN_PROFILE_IDS].sort());
     expect(doctorRunProfilesForAudience("consumer")).toEqual([
+      DOCTOR_RUN_PROFILES["consumer-toolchain"],
       DOCTOR_RUN_PROFILES["consumer-setup-smoke"],
     ]);
     expect(doctorRunProfilesForAudience("consumer").every(isConsumerSafeDoctorRunProfile)).toBe(
@@ -364,6 +366,7 @@ describe("runDoctor", () => {
     );
     expect(consumerSafeDoctorRunProfiles().map((profile) => profile.id)).toEqual([
       "source-toolchain",
+      "consumer-toolchain",
       "consumer-setup-smoke",
     ]);
     expect(consumerSafeDoctorRunProfiles().every(isConsumerSafeDoctorRunProfile)).toBe(true);
@@ -373,7 +376,10 @@ describe("runDoctor", () => {
     );
     expect(
       consumerSafeDoctorRunProfiles().filter((profile) => profile.audience === "consumer"),
-    ).toEqual([DOCTOR_RUN_PROFILES["consumer-setup-smoke"]]);
+    ).toEqual([
+      DOCTOR_RUN_PROFILES["consumer-toolchain"],
+      DOCTOR_RUN_PROFILES["consumer-setup-smoke"],
+    ]);
     expect(resolveDoctorRunProfile({ setupSmoke: true })).toEqual(
       DOCTOR_RUN_PROFILES["consumer-setup-smoke"],
     );
@@ -393,6 +399,9 @@ describe("runDoctor", () => {
     });
     expect(resolveDoctorRunProfile({ profile: "consumer-setup-smoke" })).toEqual(
       DOCTOR_RUN_PROFILES["consumer-setup-smoke"],
+    );
+    expect(resolveDoctorRunProfile({ profile: "consumer-toolchain" })).toEqual(
+      DOCTOR_RUN_PROFILES["consumer-toolchain"],
     );
     expect(r.ok).toBe(true);
     expect(r.messages).toEqual(["doctor: setup-smoke - OK (checked=22, failed=0)"]);
@@ -443,8 +452,20 @@ describe("runDoctor", () => {
     expect(resolveDoctorRunProfile({ profile: "source-toolchain" })).toEqual(
       DOCTOR_RUN_PROFILES["source-toolchain"],
     );
+    expect(resolveDoctorRunProfile({ profile: "consumer-toolchain" })).toMatchObject({
+      id: "consumer-toolchain",
+      audience: "consumer",
+      invocation: "registry",
+      scope: "toolchain",
+      setupSmoke: false,
+      outputIds: ["toolchain-pin"],
+      sourceOnly: false,
+    });
     expect(DOCTOR_RUN_PROFILES["source-full"].outputIds).toEqual(doctorOutputIdsForScope("full"));
     expect(DOCTOR_RUN_PROFILES["source-toolchain"].outputIds).toEqual(
+      doctorOutputIdsForScope("toolchain"),
+    );
+    expect(DOCTOR_RUN_PROFILES["consumer-toolchain"].outputIds).toEqual(
       doctorOutputIdsForScope("toolchain"),
     );
     expect(doctorOutputIdsForScope("toolchain")).toEqual(["toolchain-pin"]);
