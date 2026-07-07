@@ -5,9 +5,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   buildFullDoctorCheckDefinitions,
   collectDoctorCheckRun,
+  consumerSafeDoctorRunProfiles,
   DOCTOR_RUN_PROFILE_IDS,
   DOCTOR_RUN_PROFILES,
   doctorOutputIdsForScope,
+  doctorRunProfilesForAudience,
   FULL_DOCTOR_OUTPUT_IDS,
   resolveDoctorRunProfile,
   selectDoctorCheckDefinitions,
@@ -352,6 +354,16 @@ describe("runDoctor", () => {
     ]);
     expect(new Set(DOCTOR_RUN_PROFILE_IDS).size).toBe(DOCTOR_RUN_PROFILE_IDS.length);
     expect(Object.keys(DOCTOR_RUN_PROFILES).sort()).toEqual([...DOCTOR_RUN_PROFILE_IDS].sort());
+    expect(doctorRunProfilesForAudience("consumer")).toEqual([
+      DOCTOR_RUN_PROFILES["consumer-setup-smoke"],
+    ]);
+    expect(consumerSafeDoctorRunProfiles().map((profile) => profile.id)).toEqual([
+      "source-toolchain",
+      "consumer-setup-smoke",
+    ]);
+    expect(
+      consumerSafeDoctorRunProfiles().filter((profile) => profile.audience === "consumer"),
+    ).toEqual([DOCTOR_RUN_PROFILES["consumer-setup-smoke"]]);
     expect(resolveDoctorRunProfile({ setupSmoke: true })).toEqual(
       DOCTOR_RUN_PROFILES["consumer-setup-smoke"],
     );
@@ -381,6 +393,13 @@ describe("runDoctor", () => {
     });
 
     expect(resolveDoctorRunProfile()).toEqual(DOCTOR_RUN_PROFILES["source-full"]);
+    expect(doctorRunProfilesForAudience("source").map((profile) => profile.id)).toEqual([
+      "source-full",
+      "source-toolchain",
+    ]);
+    expect(doctorRunProfilesForAudience("source").filter((profile) => profile.sourceOnly)).toEqual([
+      DOCTOR_RUN_PROFILES["source-full"],
+    ]);
     expect(resolveDoctorRunProfile()).toMatchObject({
       id: "source-full",
       audience: "source",
@@ -962,6 +981,8 @@ describe("runDoctor", () => {
     expect(registrySource).toContain("export const DOCTOR_RUN_PROFILES");
     expect(registrySource).toContain("export const DOCTOR_RUN_PROFILE_IDS");
     expect(registrySource).toContain("export function resolveDoctorRunProfile");
+    expect(registrySource).toContain("export function doctorRunProfilesForAudience");
+    expect(registrySource).toContain("export function consumerSafeDoctorRunProfiles");
     expect(registrySource).toContain("export function selectDoctorCheckDefinitions");
     expect(registrySource).toContain('export type DoctorScope = "full" | "toolchain"');
     const expectedHardGates = [

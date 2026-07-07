@@ -110,6 +110,7 @@ export interface DoctorCheckDefinition {
 }
 
 export type DoctorRunProfileId = "source-full" | "source-toolchain" | "consumer-setup-smoke";
+export type DoctorRunProfileAudience = DoctorRunProfile["audience"];
 
 export type DoctorRunProfile =
   | {
@@ -271,6 +272,20 @@ export function resolveDoctorRunProfile(options: DoctorOptions = {}): DoctorRunP
   }
 
   return { ...DOCTOR_RUN_PROFILES["source-full"] };
+}
+
+export function doctorRunProfilesForAudience(
+  audience: DoctorRunProfileAudience,
+): DoctorRunProfile[] {
+  return DOCTOR_RUN_PROFILE_IDS.map((id) => DOCTOR_RUN_PROFILES[id])
+    .filter((profile) => profile.audience === audience)
+    .map((profile) => ({ ...profile }));
+}
+
+export function consumerSafeDoctorRunProfiles(): DoctorRunProfile[] {
+  return DOCTOR_RUN_PROFILE_IDS.map((id) => DOCTOR_RUN_PROFILES[id])
+    .filter((profile) => profile.sourceOnly === false)
+    .map((profile) => ({ ...profile }));
 }
 
 export function selectDoctorCheckDefinitions(
