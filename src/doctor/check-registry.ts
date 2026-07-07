@@ -220,6 +220,41 @@ export const FULL_DOCTOR_OUTPUT_IDS = [
 
 export const TOOLCHAIN_DOCTOR_OUTPUT_IDS = ["toolchain-pin"] as const;
 
+export const DOCTOR_RUN_PROFILES = {
+  "source-full": {
+    id: "source-full",
+    audience: "source",
+    invocation: "registry",
+    scope: "full",
+    setupSmoke: false,
+    outputIds: FULL_DOCTOR_OUTPUT_IDS,
+    sourceOnly: true,
+  },
+  "source-toolchain": {
+    id: "source-toolchain",
+    audience: "source",
+    invocation: "registry",
+    scope: "toolchain",
+    setupSmoke: false,
+    outputIds: TOOLCHAIN_DOCTOR_OUTPUT_IDS,
+    sourceOnly: false,
+  },
+  "consumer-setup-smoke": {
+    id: "consumer-setup-smoke",
+    audience: "consumer",
+    invocation: "setup-smoke",
+    setupSmoke: true,
+    outputIds: [],
+    sourceOnly: false,
+  },
+} as const satisfies Record<DoctorRunProfileId, DoctorRunProfile>;
+
+export const DOCTOR_RUN_PROFILE_IDS = [
+  "source-full",
+  "source-toolchain",
+  "consumer-setup-smoke",
+] as const satisfies readonly DoctorRunProfileId[];
+
 export function doctorOutputIdsForScope(scope: DoctorScope): readonly string[] {
   if (scope === "toolchain") return TOOLCHAIN_DOCTOR_OUTPUT_IDS;
   return FULL_DOCTOR_OUTPUT_IDS;
@@ -227,38 +262,15 @@ export function doctorOutputIdsForScope(scope: DoctorScope): readonly string[] {
 
 export function resolveDoctorRunProfile(options: DoctorOptions = {}): DoctorRunProfile {
   if (options.setupSmoke === true) {
-    return {
-      id: "consumer-setup-smoke",
-      audience: "consumer",
-      invocation: "setup-smoke",
-      setupSmoke: true,
-      outputIds: [],
-      sourceOnly: false,
-    };
+    return { ...DOCTOR_RUN_PROFILES["consumer-setup-smoke"] };
   }
 
   const scope = options.scope ?? "full";
   if (scope === "toolchain") {
-    return {
-      id: "source-toolchain",
-      audience: "source",
-      invocation: "registry",
-      scope,
-      setupSmoke: false,
-      outputIds: doctorOutputIdsForScope(scope),
-      sourceOnly: false,
-    };
+    return { ...DOCTOR_RUN_PROFILES["source-toolchain"] };
   }
 
-  return {
-    id: "source-full",
-    audience: "source",
-    invocation: "registry",
-    scope,
-    setupSmoke: false,
-    outputIds: doctorOutputIdsForScope(scope),
-    sourceOnly: true,
-  };
+  return { ...DOCTOR_RUN_PROFILES["source-full"] };
 }
 
 export function selectDoctorCheckDefinitions(

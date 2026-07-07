@@ -5,6 +5,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   buildFullDoctorCheckDefinitions,
   collectDoctorCheckRun,
+  DOCTOR_RUN_PROFILE_IDS,
+  DOCTOR_RUN_PROFILES,
   doctorOutputIdsForScope,
   FULL_DOCTOR_OUTPUT_IDS,
   resolveDoctorRunProfile,
@@ -343,6 +345,16 @@ describe("runDoctor", () => {
 
     const r = runDoctor(deps({ files }), { setupSmoke: true });
 
+    expect(DOCTOR_RUN_PROFILE_IDS).toEqual([
+      "source-full",
+      "source-toolchain",
+      "consumer-setup-smoke",
+    ]);
+    expect(new Set(DOCTOR_RUN_PROFILE_IDS).size).toBe(DOCTOR_RUN_PROFILE_IDS.length);
+    expect(Object.keys(DOCTOR_RUN_PROFILES).sort()).toEqual([...DOCTOR_RUN_PROFILE_IDS].sort());
+    expect(resolveDoctorRunProfile({ setupSmoke: true })).toEqual(
+      DOCTOR_RUN_PROFILES["consumer-setup-smoke"],
+    );
     expect(resolveDoctorRunProfile({ setupSmoke: true })).toMatchObject({
       id: "consumer-setup-smoke",
       audience: "consumer",
@@ -368,6 +380,7 @@ describe("runDoctor", () => {
       timing: true,
     });
 
+    expect(resolveDoctorRunProfile()).toEqual(DOCTOR_RUN_PROFILES["source-full"]);
     expect(resolveDoctorRunProfile()).toMatchObject({
       id: "source-full",
       audience: "source",
@@ -377,6 +390,9 @@ describe("runDoctor", () => {
       outputIds: FULL_DOCTOR_OUTPUT_IDS,
       sourceOnly: true,
     });
+    expect(resolveDoctorRunProfile({ scope: "toolchain" })).toEqual(
+      DOCTOR_RUN_PROFILES["source-toolchain"],
+    );
     expect(resolveDoctorRunProfile({ scope: "toolchain" })).toMatchObject({
       id: "source-toolchain",
       audience: "source",
@@ -386,6 +402,10 @@ describe("runDoctor", () => {
       outputIds: ["toolchain-pin"],
       sourceOnly: false,
     });
+    expect(DOCTOR_RUN_PROFILES["source-full"].outputIds).toEqual(doctorOutputIdsForScope("full"));
+    expect(DOCTOR_RUN_PROFILES["source-toolchain"].outputIds).toEqual(
+      doctorOutputIdsForScope("toolchain"),
+    );
     expect(doctorOutputIdsForScope("toolchain")).toEqual(["toolchain-pin"]);
     expect(selected.map((definition) => definition.id)).toEqual(["toolchain-pin"]);
     expect(run.checks).toHaveLength(1);
@@ -939,6 +959,8 @@ describe("runDoctor", () => {
     expect(registrySource).toContain("export function collectDoctorCheckRun");
     expect(registrySource).toContain("export function collectDoctorChecks");
     expect(registrySource).toContain("export function buildFullDoctorCheckDefinitions");
+    expect(registrySource).toContain("export const DOCTOR_RUN_PROFILES");
+    expect(registrySource).toContain("export const DOCTOR_RUN_PROFILE_IDS");
     expect(registrySource).toContain("export function resolveDoctorRunProfile");
     expect(registrySource).toContain("export function selectDoctorCheckDefinitions");
     expect(registrySource).toContain('export type DoctorScope = "full" | "toolchain"');
