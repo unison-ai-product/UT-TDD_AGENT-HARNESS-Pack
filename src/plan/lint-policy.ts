@@ -73,6 +73,12 @@ const ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS = new Set([
   "PLAN-L7-274-mutation-oracle-hardening",
   "PLAN-L7-275-glossary-code-consistency",
   "PLAN-L7-279-xml-residue-lint",
+  "PLAN-L7-363-routine-gate-run-projection",
+  "PLAN-L7-364-reverse-stage-db-obligation",
+  "PLAN-L7-365-harness-db-currency-hook",
+  "PLAN-L7-366-takeover-surface-warn-actionable",
+  "PLAN-L7-367-refactor-candidate-lifecycle",
+  "PLAN-L7-368-design-lint-db-projection",
 ]);
 
 const DB_PROJECTION_BACKPROP_REQUIRED_GENERATES = [

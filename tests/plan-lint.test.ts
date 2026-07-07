@@ -980,6 +980,24 @@ dependencies:
     expect(detail).toContain("docs/plans/PLAN-L7-263-route-mode-kind-certificate.md");
   });
 
+  it("U-PLANGOV-011x: DB三ループ/reverse 監査 draft PLAN 群が draft-debt allowlist に登録済み (2026-07-07)", () => {
+    // 2026-07-07 DB三ループ + reverse/refactor/設計層検出 監査で起票した draft-debt intake 群。
+    // route_mode=add-feature + kind=impl を draft の間だけ免除するため allowlist 台帳に固定する。
+    // 着手 (draft→confirmed) 時は add-impl + Reverse pairing へ昇格しないと route_mode_kind_mismatch で
+    // fail-close する (U-PLANGOV-011w と同じ契約)。
+    const auditDraftPlanIds = [
+      "PLAN-L7-363-routine-gate-run-projection",
+      "PLAN-L7-364-reverse-stage-db-obligation",
+      "PLAN-L7-365-harness-db-currency-hook",
+      "PLAN-L7-366-takeover-surface-warn-actionable",
+      "PLAN-L7-367-refactor-candidate-lifecycle",
+      "PLAN-L7-368-design-lint-db-projection",
+    ];
+    for (const planId of auditDraftPlanIds) {
+      expect(ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS.has(planId)).toBe(true);
+    }
+  });
+
   it("U-PLANGOV-011x: legacy landed debt is permanently exempt", () => {
     const docs = [
       planDoc("PLAN-L7-212-route-certificate-governance", {
