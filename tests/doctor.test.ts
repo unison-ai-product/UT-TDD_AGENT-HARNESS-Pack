@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
+import { buildDoctorCheckDefinitionGroups } from "../src/doctor/check-definition-groups";
 import {
   buildFullDoctorCheckDefinitions,
   collectDoctorCheckRun,
@@ -1014,10 +1015,17 @@ describe("runDoctor", () => {
       join(process.cwd(), "src", "doctor", "check-definitions.ts"),
       "utf8",
     );
+    const groupSource = readFileSync(
+      join(process.cwd(), "src", "doctor", "check-definition-groups.ts"),
+      "utf8",
+    );
     const profileSource = readFileSync(join(process.cwd(), "src", "doctor", "profiles.ts"), "utf8");
     const runnerSource = readFileSync(join(process.cwd(), "src", "doctor", "runner.ts"), "utf8");
     const definitions = buildFullDoctorCheckDefinitions(nodeDoctorDeps(process.cwd()));
+    const definitionGroups = buildDoctorCheckDefinitionGroups(nodeDoctorDeps(process.cwd()));
+    const flattenedGroupDefinitions = definitionGroups.flatMap((group) => group.definitions);
     const checkIds = definitions.map((definition) => definition.id);
+    const groupCheckIds = flattenedGroupDefinitions.map((definition) => definition.id);
     const outputIds = [...FULL_DOCTOR_OUTPUT_IDS];
     expect(indexSource).toContain("resolveDoctorRunProfile");
     expect(indexSource).toContain("const profile = resolveDoctorRunProfile(options)");
@@ -1030,6 +1038,8 @@ describe("runDoctor", () => {
     expect(runnerSource).toContain("export function collectDoctorCheckRun");
     expect(runnerSource).toContain("export function collectDoctorChecks");
     expect(definitionsSource).toContain("export function buildFullDoctorCheckDefinitions");
+    expect(definitionsSource).toContain("buildDoctorCheckDefinitionGroups(deps, options)");
+    expect(groupSource).toContain("export function buildDoctorCheckDefinitionGroups");
     expect(runnerSource).toContain("buildFullDoctorCheckDefinitions(deps, options)");
     expect(definitionsSource).not.toContain("checkPlanReferenceFreshnessAdvisory");
     expect(registrySource).toContain('} from "./profiles"');
@@ -1043,6 +1053,15 @@ describe("runDoctor", () => {
     expect(profileSource).toContain('consumerSafeDoctorRunProfile("source-toolchain")');
     expect(runnerSource).toContain("export function selectDoctorCheckDefinitions");
     expect(profileSource).toContain('export type DoctorScope = "full" | "toolchain"');
+    expect(definitionGroups.map((group) => group.id)).toEqual([
+      "plan-governance",
+      "rules-and-process",
+      "runtime-surface",
+      "completion-and-readability",
+      "source-trace",
+      "dependency-and-db",
+      "workflow-and-final",
+    ]);
     const expectedHardGates = [
       "backfill",
       "scrum-reverse",
@@ -1099,6 +1118,8 @@ describe("runDoctor", () => {
     ];
 
     expect(new Set(checkIds).size).toBe(checkIds.length);
+    expect(groupCheckIds).toEqual(checkIds);
+    expect(new Set(definitionGroups.map((group) => group.id)).size).toBe(definitionGroups.length);
     expect(new Set(outputIds).size).toBe(outputIds.length);
     expect(checkIds).toEqual(expect.arrayContaining(outputIds));
     expect(
@@ -1131,5 +1152,15 @@ describe("runDoctor", () => {
     ).toMatchObject({
       requires: ["dependency-drift"],
     });
+    const dependencyGroupIds =
+      definitionGroups
+        .find((group) => group.id === "dependency-and-db")
+        ?.definitions.map((definition) => definition.id) ?? [];
+    expect(dependencyGroupIds).toEqual(
+      expect.arrayContaining(["dependency-drift", "regression-expansion"]),
+    );
+    expect(dependencyGroupIds.indexOf("dependency-drift")).toBeLessThan(
+      dependencyGroupIds.indexOf("regression-expansion"),
+    );
   });
 });
