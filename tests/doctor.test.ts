@@ -989,7 +989,12 @@ describe("runDoctor", () => {
       join(process.cwd(), "src", "doctor", "check-registry.ts"),
       "utf8",
     );
+    const definitionsSource = readFileSync(
+      join(process.cwd(), "src", "doctor", "check-definitions.ts"),
+      "utf8",
+    );
     const profileSource = readFileSync(join(process.cwd(), "src", "doctor", "profiles.ts"), "utf8");
+    const runnerSource = readFileSync(join(process.cwd(), "src", "doctor", "runner.ts"), "utf8");
     const definitions = buildFullDoctorCheckDefinitions(nodeDoctorDeps(process.cwd()));
     const checkIds = definitions.map((definition) => definition.id);
     const outputIds = [...FULL_DOCTOR_OUTPUT_IDS];
@@ -999,9 +1004,13 @@ describe("runDoctor", () => {
     expect(indexSource).toContain(
       "const { checks, timings } = collectDoctorCheckRun(deps, options)",
     );
-    expect(registrySource).toContain("export function collectDoctorCheckRun");
-    expect(registrySource).toContain("export function collectDoctorChecks");
-    expect(registrySource).toContain("export function buildFullDoctorCheckDefinitions");
+    expect(registrySource).toContain('} from "./runner"');
+    expect(registrySource).toContain('} from "./check-definitions"');
+    expect(runnerSource).toContain("export function collectDoctorCheckRun");
+    expect(runnerSource).toContain("export function collectDoctorChecks");
+    expect(definitionsSource).toContain("export function buildFullDoctorCheckDefinitions");
+    expect(runnerSource).toContain("buildFullDoctorCheckDefinitions(deps, options)");
+    expect(definitionsSource).not.toContain("checkPlanReferenceFreshnessAdvisory");
     expect(registrySource).toContain('} from "./profiles"');
     expect(profileSource).toContain("export const DOCTOR_RUN_PROFILES");
     expect(profileSource).toContain("export const DOCTOR_RUN_PROFILE_IDS");
@@ -1011,7 +1020,7 @@ describe("runDoctor", () => {
     expect(profileSource).toContain("export function isConsumerSafeDoctorRunProfile");
     expect(profileSource).toContain('consumerSafeDoctorRunProfile("consumer-setup-smoke")');
     expect(profileSource).toContain('consumerSafeDoctorRunProfile("source-toolchain")');
-    expect(registrySource).toContain("export function selectDoctorCheckDefinitions");
+    expect(runnerSource).toContain("export function selectDoctorCheckDefinitions");
     expect(profileSource).toContain('export type DoctorScope = "full" | "toolchain"');
     const expectedHardGates = [
       "backfill",
