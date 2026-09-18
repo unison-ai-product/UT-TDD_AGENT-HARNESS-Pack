@@ -71,7 +71,7 @@ export interface <ResultType> { /* 同上。エラーは throw か Result 型か
 ## §7 検証接続 <!-- 要素⑦ -->
 
 - pair: frontmatter `pair_artifact` (L7 unit-test-design)。§6 の oracle 列が対応表。
-- 回帰 fence: `bun run test` full green + <対象 doctor check 名> green。
+- 回帰 fence: `npx vitest run` full green + <対象 doctor check 名> green。
 
 ## §8 carry / 非スコープ <!-- 任意 -->
 

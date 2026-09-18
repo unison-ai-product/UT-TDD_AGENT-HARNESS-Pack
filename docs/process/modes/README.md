@@ -164,7 +164,7 @@ All modes use the coding-rule SSoT as a workflow artifact.
 
 - SSoT: `docs/governance/coding-rules.md`.
 - Issue -> PLAN -> branch -> PR+CI must preserve coding-rule impact: `unchanged`, `updated`, or `not_applicable`.
-- Any mode that changes TypeScript/Bun implementation style, lint tooling, naming, typing, error-handling, or generated-code boundaries updates the SSoT before implementation freeze.
+- Any mode that changes TypeScript/Node implementation style, lint tooling, naming, typing, error-handling, or generated-code boundaries updates the SSoT before implementation freeze.
 - Machine gate: `ut-tdd doctor` runs `checkCodingRules`; missing workflow placement or missing SSoT reference is a hard failure.
 ## DDD-TDD-WORKFLOW
 

@@ -684,6 +684,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         "README.md",
         "LICENSE",
         "package.json",
+        ".node-version",
         "src/cli.ts",
         "src/setup/index.ts",
         ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
@@ -781,6 +782,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       "README.md",
       "LICENSE",
       "package.json",
+      ".node-version",
       "src/cli.ts",
       "src/setup/index.ts",
       ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
@@ -926,14 +928,59 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     );
   });
 
-  it("U-SETUP-011f: source package.json points repository at the source development repo (issue #83)", () => {
-    const sourcePackage = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+  it("U-SETUP-011f: package.json repository points at the repo the tree belongs to (source dev repo, or the Pack repo after sync; issue #83)", () => {
+    // This test ships into the clean Pack (test:pack runs it there), where sync-pack has
+    // rewritten the URL to the Pack repo; the artifact profile tells which tree this is.
+    const currentPackage = JSON.parse(
+      readFileSync(join(process.cwd(), "package.json"), "utf8"),
+    ) as {
       repository?: { url?: string };
+      utTdd?: { artifactProfile?: string };
     };
+    const expected =
+      currentPackage.utTdd?.artifactProfile === "pack"
+        ? "git+https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git"
+        : "git+https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS.git";
+    expect(currentPackage.repository?.url).toBe(expected);
+  });
 
-    expect(sourcePackage.repository?.url).toBe(
-      "git+https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS.git",
-    );
+  it("U-SETUP-011g: clean Pack ships .node-version so the Pack CI toolchain-pin check has the same input as source", () => {
+    const plan = buildCleanDistributionPlan({
+      sourceTag: "v0.1.0",
+      cleanRepo: "UNISON-TECHNOLOGY/clean",
+      paths: [
+        ...[
+          "README.md",
+          "LICENSE",
+          "package.json",
+          "src/cli.ts",
+          "src/setup/index.ts",
+          ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
+            (entry) => `docs/templates/${entry.template}`,
+          ),
+          ...AUTHORING_TEMPLATE_SOURCES,
+        ],
+        ".node-version",
+      ],
+    });
+    expect(plan.artifactPaths).toContain(".node-version");
+    // Without it the Pack CI fails closed on node-version-mismatch (observed 2026-09-18, v0.2.0-canary.1 sync).
+    const without = buildCleanDistributionPlan({
+      sourceTag: "v0.1.0",
+      cleanRepo: "UNISON-TECHNOLOGY/clean",
+      paths: [
+        "README.md",
+        "LICENSE",
+        "package.json",
+        "src/cli.ts",
+        "src/setup/index.ts",
+        ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
+          (entry) => `docs/templates/${entry.template}`,
+        ),
+        ...AUTHORING_TEMPLATE_SOURCES,
+      ],
+    });
+    expect(without.missingRequired).toContain(".node-version");
   });
 
   it("U-SETUP-011e: clean Pack workflow reuses the package test:pack script", () => {

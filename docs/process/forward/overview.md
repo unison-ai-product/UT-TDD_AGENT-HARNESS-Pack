@@ -181,7 +181,7 @@ Forward work can convert canonical UT-TDD documents to spreadsheet / Excel / PPT
 
 Forward work can use dependency-cruiser, Knip, Madge, Graphviz, Mermaid, and D2 only as optional graph/diagram adapters.
 
-- Core relation graph collection remains TypeScript/Bun and DB projection based.
+- Core relation graph collection remains TypeScript/Node and DB projection based.
 - `catalogToolAdapters` defines adapter metadata and trigger signals.
 - `probeToolAdapter` checks package/executable/config/workspace readiness without installing packages.
 - Raw adapter output is bounded evidence; gates consume normalized `tool_runs`, `dependency_edges`, `diagram_artifacts`, and findings.

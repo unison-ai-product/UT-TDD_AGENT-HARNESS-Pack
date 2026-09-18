@@ -14,7 +14,7 @@
 
 ## 本書の位置付け
 
-本書は構想書 v3.1 に対する **要件定義 (HOW を満たす条件)** を確定する。**実装詳細 (TypeScript/Bun core / YAML 全文 / hook wrapper 本体)** は将来の個別 PLAN-XXX 詳細設計で詰める。
+本書は構想書 v3.1 に対する **要件定義 (HOW を満たす条件)** を確定する。**実装詳細 (TypeScript/Node core / YAML 全文 / hook wrapper 本体)** は将来の個別 PLAN-XXX 詳細設計で詰める。
 
 | 文書 | 役割 | 抽象レベル |
 |------|------|------------|
@@ -1295,7 +1295,7 @@ Ledgerを直接上書きせず、remote observation eventだけを追加でき�
 - **必須内容**: ① PLAN サマリ (kind/layer/何をしたか) / ② 成果物 (generates 実体 + commit) / ③ **Next Action** (順序付き) / ④ carry (未了・先送り) / ⑤ 未了 PO 判断 (escalation) / ⑥ 壊さない注意。
 - **入力**: **session-log の PLAN ダイジェスト** (`.ut-tdd/logs/plan/<plan_id>.digest.json`、§6.8.1 / PLAN-L6-03) を機械的入力にできる (touched files / commits / failures)。これに人間判断 (Next Action / carry) を足して handover とする。
 - **配置**: チーム継続記録 = `docs/handover/session-handover-<date>[suffix].md` (tracked) / 機械ポインタ = `.ut-tdd/handover/CURRENT.json` (local, gitignored)。
-- **検証 (IMP-047 で機械 surface 化)**: PLAN 活動 (active_plan + digest) があるのに `CURRENT.json` が未生成 / stale / 別 PLAN を指す (drift) → `checkHandoverDiscipline` が warn を返し、**Stop-hook (`ut-tdd session summary` = `bun "$CLAUDE_PROJECT_DIR/src/cli.ts" session summary`、stderr、fail-open) と `ut-tdd doctor` (`checkHandover`) の 2 機構で機械 surface** する (PLAN-L7-06)。`plan-lint` / pre-push への配線は lint engine (`src/plan/lint.ts` stub) 実装時の carry。それまでは本機構 + 人手 binding が併存。
+- **検証 (IMP-047 で機械 surface 化)**: PLAN 活動 (active_plan + digest) があるのに `CURRENT.json` が未生成 / stale / 別 PLAN を指す (drift) → `checkHandoverDiscipline` が warn を返し、**Stop-hook (`ut-tdd session summary` = `node "$CLAUDE_PROJECT_DIR/src/cli.ts" session summary`、stderr、fail-open) と `ut-tdd doctor` (`checkHandover`) の 2 機構で機械 surface** する (PLAN-L7-06)。`plan-lint` / pre-push への配線は lint engine (`src/plan/lint.ts` stub) 実装時の carry。それまでは本機構 + 人手 binding が併存。
 - **手書き bypass 検知 (IMP-078 gap①、enforcement gap の機械着地)**: 上記 discipline は presence/freshness しか見ず、`ut-tdd handover` を経ない**手書き bypass** (手書き markdown + 手書き CURRENT.json) を素通りさせていた (本 harness 開発で実証 = 柱 2 doc×機械厳格化を自分の handover 規律で破った under-design)。`checkHandoverBypass` が ① CURRENT.json の `generated_by` 署名欠落 (手書き pointer) / ② latest_doc の entry 数 > 記録 `doc_entry_count` (手書き追記) で検知し、Stop-hook が discipline と併せて surface する (PLAN-L7-17)。あわせて gap②(active-plan marker stale = current-plan 2 行目 updated_at + `activePlanStale`) / gap③(commit hash 捕捉 = `headCommit`) / gap④(§1-§2 の session scope = `scopeToSession`/`latestSessionId`) / gap⑤(bare plan_id の family 解決で `(unknown)` kind 防止) を同 PLAN で機械担保する。
 - **粒度**: 1 PLAN = 1 handover entry を要しない。**1 作業セッション or 1 駆動サイクル単位で束ねた handover に当該 PLAN の completion を記録**すれば足る (過剰生成を避ける)。
 - **詳細設計 (artifact schema + 自動生成機構)** は **`PLAN-L6-06-handover-mechanism` (設計) / `PLAN-L7-04-handover-mechanism` (実装) で確定済** (2026-06-04)。機械ポインタ正本 = `.ut-tdd/handover/CURRENT.json` (CURRENT.md は廃止、PLAN-REVERSE-05)、生成は `ut-tdd handover` (digest から機械部 ①② prefill + ③-⑥ human placeholder)、活性化は `ut-tdd plan use <id>` で `.ut-tdd/state/current-plan` を設定。
@@ -1331,9 +1331,9 @@ Ledgerを直接上書きせず、remote observation eventだけを追加でき�
 | guardrail の安全性を証跡化できる | agent-guard、review_evidence、same-model approval 禁止、tests-before-review、escalation 境界、human signoff の判定結果を `guardrail_decisions` 相当の projection として持ち、silent pass を finding 化できる。 |
 | skill/roster/command docs を自動化基盤として catalog 化できる | skill/roster/command docs の path、trigger、role/capability、drift status、recommendation reason、search token を catalog projection として持ち、空 catalog・legacy source 前提残存・guard 不整合を検出できる。 |
 | UT evidence history を query できる (A-122 / IMP-109) | `test_cases / test_runs / test_results / test_artifact_edges / test_flake_events` 相当の projection を持ち、どの UT がどの PLAN / FR / U-* oracle / artifact を証明したか、いつ green だったか、flake や duration regression があるかを参照できる。 |
-| 定量 green profile を再現できる (A-122 / IMP-108) | `review_evidence.tests_green_at <= reviewed_at` に加え、`GreenDefinition` として required command profile、runner (`bun` / powershell / bash / ci)、scope、exit code、evidence path、output digest を記録し、定性レビューが正しい定量 green の後に実施されたことを検証できる。 |
-| DB projection 実装 profile を固定する (A-122 / IMP-110) | Core runtime は Bun/TypeScript を前提に `bun:sqlite` を第一候補とし、schema_version、deterministic rebuild、migration fixture、doctor integration、redacted failure digest を持つ。DB は projection であり docs/state/logs を authoring source として残す。 |
-| CI / hook / OS evidence matrix を保持できる (A-122 / IMP-114) | PowerShell / Bash / Bun / Claude hook / CI の smoke と green command evidence を同じ projection profile で比較でき、Windows/POSIX 片側欠落を finding 化できる。 |
+| 定量 green profile を再現できる (A-122 / IMP-108) | `review_evidence.tests_green_at <= reviewed_at` に加え、`GreenDefinition` として required command profile、runner (`node` / powershell / bash / ci)、scope、exit code、evidence path、output digest を記録し、定性レビューが正しい定量 green の後に実施されたことを検証できる。 |
+| DB projection 実装 profile を固定する (A-122 / IMP-110) | Core runtime は Node/TypeScript を前提に `node:sqlite` を第一候補とし、schema_version、deterministic rebuild、migration fixture、doctor integration、redacted failure digest を持つ。DB は projection であり docs/state/logs を authoring source として残す。 |
+| CI / hook / OS evidence matrix を保持できる (A-122 / IMP-114) | PowerShell / Bash / Node / Claude hook / CI の smoke と green command evidence を同じ projection profile で比較でき、Windows/POSIX 片側欠落を finding 化できる。 |
 | 機密を保存しない | provider transcript 本文、secret、credential、PII は保存対象外。DB は ID、digest、metadata、evidence path、redacted summary のみを持つ。 |
 
 補強に使った外部設計 reference: SQLite FTS5 の external/contentless index pattern は再構築可能な検索 projection の参考、OpenTelemetry semantic conventions は traces/logs/metrics/events 命名の参考、W3C PROV entity/activity/agent provenance model は reference graph 思考の参考とする。これらは L5 時点で外部 runtime 依存を追加しない。
@@ -1399,7 +1399,7 @@ UT-TDD は「1 つを直したら、関連する設計・コード・テスト�
 
 **tool adapter 方針**:
 
-- Core collector は TypeScript/Bun で実装し、`bun:sqlite` へ projection する。外部 package は authoring source にしない。
+- Core collector は TypeScript/Node で実装し、`node:sqlite` へ projection する。外部 package は authoring source にしない。
 - `dependency-cruiser` は JS/TS dependency rule + visualization の optional adapter 候補。循環依存、禁止依存、package.json 欠落、orphan 検出を候補にする。
 - `knip` は unused dependency / file / export 検出の optional adapter 候補。relation graph の dead-node 検出補助にする。
 - `madge` は circular dependency / dependency graph の optional adapter 候補。Graphviz 連携が必要な図化は optional とする。
@@ -1553,7 +1553,7 @@ jobs:
         run: ut-tdd doctor --vmodel
       - name: test+coverage (G7)       # src 変更時のみ全量
         if: steps.f.outputs.src == 'true'
-        run: bun test --coverage
+        run: npx vitest run --coverage
       - name: doc-consistency          # docs 変更時のみ
         if: steps.f.outputs.docs == 'true'
         run: ut-tdd plan lint
@@ -1576,7 +1576,7 @@ jobs:
 
 ## 7.1 ut-tdd CLI 構成
 
-`ut-tdd` は **薄い OS 別ラッパー + TypeScript core (Bun)** で実装する (ADR-001)。これは **harness 自身の実装言語**であり、UT-TDD が統制する **対象リポジトリの言語は非依存** (§2.3 等の trace 例に出る `.py` / `tests/*` は target repo の一例で、TS への統一対象ではない)。Windows / macOS / Linux の entrypoint は同一 TypeScript core を呼び、OS 差分は wrapper 層に閉じ込める。Windows では PowerShell entrypoint を提供し、Git Bash が必要な既存 hook / shell script は明示的に bridge する。
+`ut-tdd` は **薄い OS 別ラッパー + TypeScript core (Node)** で実装する (ADR-001)。これは **harness 自身の実装言語**であり、UT-TDD が統制する **対象リポジトリの言語は非依存** (§2.3 等の trace 例に出る `.py` / `tests/*` は target repo の一例で、TS への統一対象ではない)。Windows / macOS / Linux の entrypoint は同一 TypeScript core を呼び、OS 差分は wrapper 層に閉じ込める。Windows では PowerShell entrypoint を提供し、Git Bash が必要な既存 hook / shell script は明示的に bridge する。
 
 ```
 scripts/
@@ -1586,7 +1586,7 @@ scripts/
 └── install-hooks.ps1
 ```
 
-`plan lint` / `vmodel lint` / `doctor` / `gate` は個別 `.sh` ではなく compiled `ut-tdd` の **サブコマンド**として実装する。PowerShell と POSIX shell の entrypoint は同じ **TypeScript core** (開発時 `bun run`、配布時 `bun build --compile` の単一バイナリ) を呼び、検証結果と exit code を一致させる。`scripts/` 配下は薄い entrypoint / installer / CI helper に限定し、validator や runtime 判定などの実体は `src/` (TypeScript) に置く。OS 片系だけが通る状態は Phase 0 受入不可とする。
+`plan lint` / `vmodel lint` / `doctor` / `gate` は個別 `.sh` ではなく compiled `ut-tdd` の **サブコマンド**として実装する。PowerShell と POSIX shell の entrypoint は同じ **TypeScript core** (開発時 `node src/cli.ts`、配布時 `.ut-tdd/bin/ut-tdd.mjs` の thin wrapper (Node)) を呼び、検証結果と exit code を一致させる。`scripts/` 配下は薄い entrypoint / installer / CI helper に限定し、validator や runtime 判定などの実体は `src/` (TypeScript) に置く。OS 片系だけが通る状態は Phase 0 受入不可とする。
 
 ### 実行モード検出
 
@@ -1972,10 +1972,10 @@ output:
 
 ### 7.6.1 Coding Rules SSoT (TypeScript core) の正本
 
-ADR-001 により `src/` core は TypeScript/Bun で実装する。coding rules は本要件定義と `docs/governance/coding-rules.md` を SSoT とし、AGENTS / CLAUDE adapter は再定義せず参照する。
+ADR-001 により `src/` core は TypeScript/Node で実装する。coding rules は本要件定義と `docs/governance/coding-rules.md` を SSoT とし、AGENTS / CLAUDE adapter は再定義せず参照する。
 
-- [x] `tsconfig.json` は `strict: true` / `noImplicitOverride: true` / `noFallthroughCasesInSwitch: true` を維持し、`bun run typecheck` を必須検証に含める。
-- [x] formatter/linter は Biome (`bun run lint`) を正本とし、手動整形ルールではなく tool output を優先する。
+- [x] `tsconfig.json` は `strict: true` / `noImplicitOverride: true` / `noFallthroughCasesInSwitch: true` を維持し、`npm run typecheck` を必須検証に含める。
+- [x] formatter/linter は Biome (`npm run lint`) を正本とし、手動整形ルールではなく tool output を優先する。
 - [x] explicit `any` を禁止する。必要な場合は `unknown`、generic、または具体型を使う。
 - [x] `@ts-ignore` / `@ts-expect-error` / `eslint-disable` / `biome-ignore` を禁止する。例外が必要な場合は先に policy PLAN で例外条件を定義する。
 - [x] `src/**` の function / method / constructor / arrow function は 3 params 以下とする。4 以上は input object 化する。`tests/**` の helper arity は対象外だが、no-any / suppression / file naming は対象内。
@@ -2002,7 +2002,7 @@ DDD/TDD strictness は `docs/governance/ddd-tdd-rules.md` を SSoT とし、doma
 
 # §7.7 source-derived skill pack の curate / 正本化要件
 
-source-derived skill は `vendor source snapshot` から直接実行しない。UT-TDD で使うものだけを `docs/skills/*.md` に **skill pack** として curate / 正本化し、`artifact_type=skill_doc` の PLAN 成果物として管理する。skill 本文は TypeScript literal 化しないが、catalog / recommender / injector / lint は TypeScript/Bun core で実装する。
+source-derived skill は `vendor source snapshot` から直接実行しない。UT-TDD で使うものだけを `docs/skills/*.md` に **skill pack** として curate / 正本化し、`artifact_type=skill_doc` の PLAN 成果物として管理する。skill 本文は TypeScript literal 化しないが、catalog / recommender / injector / lint は TypeScript/Node core で実装する。
 
 ## 7.7.1 curate 候補 skill pack
 
@@ -2470,7 +2470,7 @@ CODEOWNERS は静的 path owner のため、level に応じた動的注入は実
 │   ├── doctor/                                  # A
 │   └── web/                                     # [予定] 中央 Web UI service (ADR-005 D2、Phase 0-A 不要、後続 PLAN で A 化)
 ├── tests/                                        # A (vitest、*.test.ts)
-├── package.json                                  # A (Node/Bun 依存 + scripts)
+├── package.json                                  # A (Node 依存 + scripts)
 ├── tsconfig.json                                 # A (strict)
 ├── scripts/                                        # A (薄い OS entrypoint + installer のみ。core logic 不可 / ADR-001 / repository-structure.md §1)
 │   ├── ut-tdd                                    # A (POSIX / Git Bash)
@@ -2495,7 +2495,7 @@ CODEOWNERS は静的 path owner のため、level に応じた動的注入は実
 - [ ] `.ut-tdd/state/runtime.json` は generated state として Git 管理されない
 - [ ] `.ut-tdd/state/tool-adapters.json` は generated state として Git 管理されない
 - [ ] `.ut-tdd/teams/local*.yaml` は個人 model / command override として Git 管理されない
-- [ ] `package.json` に依存 (`yaml` / `zod` / CLI framework 等) と engine pin、lockfile (`bun.lockb` 等) を伴う
+- [ ] `package.json` に依存 (`yaml` / `zod` / CLI framework 等) と engine pin、lockfile (`package-lock.json` 等) を伴う
 - [ ] `docs/design/` と `docs/test-design/` のディレクトリペアが対応
 
 ---
@@ -2515,7 +2515,7 @@ CODEOWNERS は静的 path owner のため、level に応じた動的注入は実
 | 5 | `commitlint.config.js` 配備 | `npx --no-install commitlint --help` exit 0 |
 | 6 | `scripts/ut-tdd*` 配備 + 動作 | bash: `bash scripts/ut-tdd --help && bash scripts/ut-tdd setup --dry-run && bash scripts/ut-tdd status --json` / PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -Command "& { & ./scripts/ut-tdd.ps1 --help; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; & ./scripts/ut-tdd.ps1 setup --dry-run; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; & ./scripts/ut-tdd.ps1 status --json; exit $LASTEXITCODE }"` がどちらも exit 0 |
 | 7 | `package.json` 配備 | `test -f package.json && grep -q '"zod"' package.json` exit 0 |
-| 8 | Node/Bun 依存導入 | `bun install` (または `npm ci`) exit 0 |
+| 8 | Node 依存導入 | `npm ci` exit 0 |
 | 9 | 実行権限 / Windows shim 確認 | bash: `[ -x scripts/ut-tdd ] && [ -x scripts/install-hooks.sh ]` / PowerShell: `powershell -NoProfile -Command "& { if (!(Test-Path ./scripts/ut-tdd.ps1) -or !(Test-Path ./scripts/install-hooks.ps1)) { exit 1 } }"` がどちらも exit 0 |
 | 10 | hook install 実行 | bash: `bash scripts/install-hooks.sh` / PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-hooks.ps1` がどちらも exit 0 |
 | 11 | gitleaks binary が pre-commit 経由で動作 | **`pre-commit run gitleaks --all-files`** exit 0 — R-I9 |

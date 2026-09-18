@@ -109,6 +109,7 @@ const CLEAN_REQUIRED_PATHS = [
   "README.md",
   "LICENSE",
   "package.json",
+  ".node-version",
   "src/cli.ts",
   "src/setup/index.ts",
   ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
@@ -154,6 +155,8 @@ const CLEAN_ALLOW_FILES = new Set([
   ".editorconfig",
   ".gitattributes",
   ".gitignore",
+  // toolchain-pin (doctor) reads .node-version; the Pack CI runs the same check.
+  ".node-version",
   ".github/workflows/harness-check.yml",
   "CHANGELOG.md",
   "LICENSE",

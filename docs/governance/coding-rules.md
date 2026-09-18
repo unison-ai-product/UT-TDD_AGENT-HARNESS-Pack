@@ -1,6 +1,6 @@
 # UT-TDD コーディング規約
 
-本書は TypeScript/Bun core の coding-rule SSoT である。
+本書は TypeScript/Node core の coding-rule SSoT である。
 Requirements reference: `docs/governance/ut-tdd-agent-harness-requirements_v1.2.md` §7.6.1.
 実行ゲート: `src/lint/coding-rules.ts` を `ut-tdd doctor` から実行する。
 
@@ -20,7 +20,7 @@ coding-rule 文書は workflow step であり、事後の CI note ではない�
 - Forward L6: G6/G7 handoff 前に `docs/governance/coding-rules.md` が不変で現在も適用可能か確認する。差分があれば function design delta として更新する。
 - Add-feature: `add-design` PLAN が coding-rule 影響を記録する。`add-impl` は影響が `unchanged` か、この SSoT と対応 U-CODE tests に反映済みの場合だけ開始する。
 - Refactor / Retrofit / Recovery / Reverse fullback: 実装言語、lint tool、命名、型付け、error-handling style、generated-code boundary を変える場合は implementation freeze 前にこの SSoT を更新する。
-- Review: reviewer approval 前に `bun run typecheck`、`bun run lint`、`npx vitest run`、`ut-tdd doctor` を green にする。
+- Review: reviewer approval 前に `npm run typecheck`、`npm run lint`、`npx vitest run`、`ut-tdd doctor` を green にする。
 
 ## 機械判定ポリシー
 
@@ -118,7 +118,7 @@ token 自体は ASCII のままにする。
 
 ## 人間向けメモ
 
-- `bun run typecheck`、`bun run lint`、`npx vitest run`、`ut-tdd doctor` は TypeScript core 変更の最小 verification set である。
+- `npm run typecheck`、`npm run lint`、`npx vitest run`、`ut-tdd doctor` は TypeScript core 変更の最小 verification set である。
 - test helper の引数数は `max-source-params` の上限対象外とする。ただし tests も no-any、suppression comment 禁止、命名規則には従う。
 - fail-open は catch block が明示 state を返す/記録する、または fail-open intent をその場に文書化する場合だけ許可する。silent catch block と rethrow-only catch block は例外ではない。
 - boundary rules は v2 では意図的に最小とする。`lint` は pure、`runtime` は governance checks より下位、`schema` は feature modules より下位に置く。
