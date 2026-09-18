@@ -27,14 +27,18 @@ interface PlanGovernanceDoc {
 
 type PlanGovernanceViolationReason =
   | "missing_frontmatter"
+  | "target_context_missing"
   | "invalid_frontmatter"
   | "duplicate_plan_id"
+  | "duplicate_plan_identity"
+  | "plan_id_taxonomy"
   | "missing_sub_doc"
   | "invalid_sub_doc"
   | "duplicate_layer_sub_doc"
   | "skip_sub_doc_reason"
   | "parent_missing"
   | "parent_drive_mismatch"
+  | "parent_drive_mismatch_debt_stale"
   | "requires_missing"
   | "requires_not_ready"
   | "parent_design_missing"
@@ -51,7 +55,10 @@ type PlanGovernanceViolationReason =
   | "version_route_certificate_mismatch"
   | "route_certificate_missing"
   | "route_certificate_mismatch"
-  | "route_mode_kind_mismatch";
+  | "route_mode_kind_mismatch"
+  | "route_mode_kind_layer_mismatch"
+  | "verify_gate_missing"
+  | "verify_gate_layer_mismatch";
 
 interface PlanGovernanceViolation {
   file: string;

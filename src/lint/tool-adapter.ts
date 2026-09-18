@@ -1,4 +1,4 @@
-import { normalizePath } from "./shared";
+import { normalizePath } from "./shared.ts";
 
 export type ToolAdapterId =
   | "dependency-cruiser"

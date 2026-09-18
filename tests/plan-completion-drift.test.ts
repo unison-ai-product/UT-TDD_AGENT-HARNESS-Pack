@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkPlanCompletionDrift } from "../src/doctor/index";
+import { checkPlanCompletionDrift } from "../src/doctor/index.ts";
 import {
   analyzePlanCompletionDrift,
   dodChecklistState,
   loadPlanCompletionDriftInput,
-} from "../src/lint/plan-completion-drift";
+} from "../src/lint/plan-completion-drift.ts";
 
 // PLAN-L7-93: 「DoD 全消化なのに status 非終端」= 完了 bookkeeping drift を機械検出する gate の回帰。
 // 動機 = PLAN-RECOVERY-02 が freeze-ready (全 phase 完了 + gated downstream 全 confirmed) なのに

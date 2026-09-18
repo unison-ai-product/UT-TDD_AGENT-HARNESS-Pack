@@ -14,6 +14,35 @@ applies_to:
     - Add-feature
     - Reverse
     - Retrofit
+decision_points:
+  - when: "choosing the runner for CI or local test execution"
+    choose: "npm run test (Vitest snapshot lane)"
+    over: "bare vitest"
+    because: "bare vitest bypasses the detached-HEAD snapshot fence"
+  - when: "a PLAN proposes raising a coverage threshold in vitest.config.ts"
+    choose: "confirm the new tests have meaningful oracles first"
+    over: "raising the threshold once the percentage target is hit"
+    because: "coverage count is not the same as oracle quality; a raised threshold can be satisfied by weak assertions"
+  - when: "building fixtures for harness state in tests"
+    choose: "dedicated fixtures under tests/fixtures/"
+    over: "reusing production .ut-tdd/ state as a test fixture"
+    because: "test runs must be reproducible without depending on a live runtime"
+  - when: "an integration test needs to read harness.db"
+    choose: "set up and tear down its own in-memory or temp-file DB instance"
+    over: "reading the shared/production harness.db"
+    because: "shared DB state makes test runs non-reproducible and can leak state between runs"
+  - when: "a test suite reports high coverage percentage"
+    choose: "verify the assertions would catch a wrong return value or a missing write to .ut-tdd/"
+    over: "accepting the coverage percentage as evidence the tests are useful"
+    because: "a green coverage percentage does not prove the test oracles are meaningful"
+  - when: "a test (or code under test) spawns a Node/npm CLI as a child process and must pass on Windows CI"
+    choose: "resolve the Node executable or npm `.cmd` entrypoint explicitly instead of relying on POSIX-only resolution"
+    over: "spawning the bare command name and relying on POSIX-only resolution"
+    because: "Windows package-manager commands may be `.cmd` shims and plain spawn resolution differs from POSIX; explicit entrypoints keep the suite consistent across native Windows and POSIX CI"
+  - when: "back-filling tests for existing code under a Retrofit or Reverse PLAN"
+    choose: "write characterisation tests describing current behavior before making any design changes"
+    over: "changing the design first and writing tests against the new behavior"
+    because: "characterisation tests establish the regression fence that protects existing behavior during the retrofit"
 ---
 
 # testing
@@ -27,7 +56,7 @@ see the test-driven-development skill.
 
 - Designing or auditing test coverage for a PLAN before pair-freeze.
 - Adding a new test level (unit / integration / system) to the suite.
-- Investigating a `bun run test` failure that is not a simple assertion error.
+- Investigating a `npm run test` failure that is not a simple assertion error.
 - A Retrofit or Reverse PLAN needs to establish baseline coverage for
   existing code before back-filling design docs.
 
@@ -49,17 +78,17 @@ tests are written (FR-L1-02 test-first applies at every level, not only unit).
 **Run the suite:**
 
 ```
-bun run test           # Vitest — CI canonical runner
-bun run test --watch   # local feedback loop
+npm run test           # Vitest — CI canonical runner
+npm run test -- --watch   # local feedback loop
 ```
 
-Never use `bun test` as a CI substitute — its 5-second sync timeout produces
+Never use bare `vitest` as a CI substitute — it bypasses the snapshot runner and produces
 false failures on async Vitest suites.
 
 **Scoped run for a PLAN:**
 
 ```
-bun run test tests/<module>.test.ts
+npm run test tests/<module>.test.ts
 ```
 
 **Coverage (when adding a gate):**
@@ -99,8 +128,8 @@ declaring the coverage useful.
 
 When back-filling tests for existing code under a Retrofit or Reverse PLAN:
 
-1. Run `bun run test` and record the current pass/fail state.
-2. Identify the code paths to be covered using `ut-tdd graph` or manual review.
+1. Run `npm run test` and record the current pass/fail state.
+2. Identify the code paths to be covered using `ut-tdd graph impact --changed <path...>` or manual review.
 3. Write characterisation tests (describe current behaviour as oracle) before
    any design changes — these become the regression fence.
 4. Back-fill L6 unit-test design docs in `docs/test-design/` to pair with the

@@ -2,7 +2,7 @@
 name: security-audit
 description: Security reviewer for auth, secrets, PII, and threat-model concerns.
 tools: Read, Grep, Glob, Bash
-model: claude-sonnet-5
+model: claude-opus-5
 ---
 
 Act as a consumer-safe UT-TDD subagent for the current repository.

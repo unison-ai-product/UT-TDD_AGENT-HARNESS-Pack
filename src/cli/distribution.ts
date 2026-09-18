@@ -1,36 +1,52 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Command } from "commander";
-import { buildReleasePublicationPlan } from "../github/ops-guard";
-import { detectMode } from "../runtime/detect";
+import { buildReleasePublicationPlan } from "../github/ops-guard.ts";
+import {
+  analyzeSecretScan,
+  loadSecretScanArtifactsForPaths,
+  secretScanMessages,
+} from "../lint/secret-scan.ts";
+import { detectMode } from "../runtime/detect.ts";
 import {
   buildCleanDistributionPlan,
   buildConsumerReadinessPlan,
   buildPackSyncPlan,
+  type ConsumerNodeRuntimeReadinessInput,
   cleanDistributionSourcePath,
   DEFAULT_PACK_REPO,
   gitAddPathspecCommands,
+  type PackAuthoringSmokeResult,
+  projectTrackedTeamBlob,
+  releaseArtifactFileNames,
+  runPackAuthoringSmoke,
+  type TrackedGitBlob,
   transformCleanDistributionArtifact,
-} from "../setup/index";
+} from "../setup/index.ts";
+import { ensureDir } from "../shared/fs.ts";
 
 function gitHead(): string | null {
-  try {
-    return execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim();
-  } catch {
-    return null;
-  }
+  // Distribution commands are intentionally valid in an unpacked clean artifact,
+  // where no `.git` directory exists.  `execFileSync` writes rev-parse's fatal
+  // diagnostic to the parent stderr before the exception can be caught (and Bun's
+  // Linux subprocess implementation can retain the failed child status).  Probe
+  // without inheriting stderr so command registration remains side-effect free.
+  const result = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  return result.status === 0 ? result.stdout.trim() : null;
 }
 
 function collectDistributionCandidatePaths(repoRoot: string): string[] {
@@ -52,15 +68,70 @@ function collectDistributionCandidatePaths(repoRoot: string): string[] {
   return out.sort();
 }
 
+const PACK_SYNC_MANIFEST = ".ut-tdd-pack-sync-manifest.json";
+
+function readConsumerRuntimeReadiness(repoRoot: string): ConsumerNodeRuntimeReadinessInput {
+  const runtimeRoot = resolve(repoRoot, ".ut-tdd", "runtime");
+  const pointerPath = join(runtimeRoot, "activation", "active.json");
+  try {
+    const pointer = JSON.parse(readFileSync(pointerPath, "utf8")) as {
+      bundle_path?: unknown;
+      bundle_digest?: unknown;
+    };
+    if (
+      typeof pointer.bundle_path !== "string" ||
+      resolve(pointer.bundle_path) !== pointer.bundle_path
+    )
+      return { status: "blocked", reason: "consumer_runtime_resolution_denied" };
+    const rel = relative(runtimeRoot, pointer.bundle_path);
+    if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+      return { status: "blocked", reason: "consumer_runtime_external_path" };
+    const bundle = JSON.parse(
+      readFileSync(join(pointer.bundle_path, "bundle-manifest.json"), "utf8"),
+    ) as {
+      identity?: unknown;
+      bundle_digest?: unknown;
+      bundle_path?: unknown;
+      files?: unknown;
+      history_sequence?: unknown;
+      prior_bundle_digest?: unknown;
+      prior_history_tip_digest?: unknown;
+    };
+    if (
+      bundle.bundle_path !== pointer.bundle_path ||
+      bundle.bundle_digest !== pointer.bundle_digest
+    )
+      return { status: "blocked", reason: "consumer_runtime_digest_mismatch" };
+    return {
+      status: "ready",
+      identity: bundle.identity as ConsumerNodeRuntimeReadinessInput["identity"],
+      bundle: bundle as ConsumerNodeRuntimeReadinessInput["bundle"],
+    };
+  } catch {
+    return { status: "blocked", reason: "consumer_runtime_absent" };
+  }
+}
+
 function copyCleanDistributionArtifact(input: {
   sourceRoot: string;
   sourcePath: string;
   targetRoot: string;
   artifactPath: string;
 }): void {
+  if (
+    input.sourcePath === ".ut-tdd/teams/example-review-team.yaml" &&
+    input.artifactPath === "docs/templates/team/example-review-team.yaml"
+  ) {
+    const projection = readTrackedTeamBlob(input.sourceRoot);
+    if (!projection.ok) throw new Error(`authoring projection denied: ${projection.error}`);
+    const to = join(input.targetRoot, ...input.artifactPath.split("/"));
+    ensureDir(dirname(to), { recursive: true });
+    writeFileSync(to, projection.bytes, { encoding: "utf8", mode: 0o644 });
+    return;
+  }
   const from = join(input.sourceRoot, ...input.sourcePath.split("/"));
   const to = join(input.targetRoot, ...input.artifactPath.split("/"));
-  mkdirSync(dirname(to), { recursive: true });
+  ensureDir(dirname(to), { recursive: true });
   if (input.artifactPath === "package.json") {
     writeFileSync(
       to,
@@ -72,8 +143,136 @@ function copyCleanDistributionArtifact(input: {
   cpSync(from, to, { recursive: true });
 }
 
+function readTrackedTeamBlob(repoRoot: string) {
+  const tree = spawnSync(
+    "git",
+    ["ls-tree", "-r", "-z", "--full-tree", "HEAD", "--", ".ut-tdd/teams/example-review-team.yaml"],
+    { cwd: repoRoot, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] },
+  );
+  const records = Buffer.from(tree.stdout ?? new Uint8Array())
+    .toString("utf8")
+    .split("\0")
+    .filter(Boolean);
+  const blobs: TrackedGitBlob[] = [];
+  for (const record of records) {
+    const match = /^(\d{6}) blob ([a-f0-9]{40})\t(.+)$/.exec(record);
+    if (!match) continue;
+    const blob = spawnSync("git", ["cat-file", "blob", match[2]], {
+      cwd: repoRoot,
+      encoding: "buffer",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (blob.status !== 0) continue;
+    blobs.push({
+      path: match[3],
+      mode: match[1] === "100644" ? "100644" : match[1],
+      objectId: match[2],
+      bytes: new Uint8Array(blob.stdout ?? new Uint8Array()),
+    });
+  }
+  return projectTrackedTeamBlob({ blobs });
+}
+
+function runDistributionSecretScan(input: {
+  repoRoot: string;
+  sourcePaths: readonly string[];
+  artifactPaths: readonly string[];
+}): ReturnType<typeof analyzeSecretScan> {
+  const sourceArtifactPaths = input.artifactPaths.map((rel) =>
+    cleanDistributionSourcePath(rel, input.sourcePaths),
+  );
+  const artifacts = loadSecretScanArtifactsForPaths(input.repoRoot, sourceArtifactPaths).filter(
+    (artifact) => artifact.path !== ".ut-tdd/teams/example-review-team.yaml",
+  );
+  if (sourceArtifactPaths.includes(".ut-tdd/teams/example-review-team.yaml")) {
+    const projection = readTrackedTeamBlob(input.repoRoot);
+    if (!projection.ok)
+      return {
+        checked: artifacts.length,
+        violations: [
+          {
+            path: ".ut-tdd/teams/example-review-team.yaml",
+            line: 1,
+            marker: `authoring-projection-${projection.error}`,
+          },
+        ],
+        ok: false,
+      };
+    try {
+      artifacts.push({
+        path: ".ut-tdd/teams/example-review-team.yaml",
+        text: new TextDecoder("utf-8", { fatal: true }).decode(projection.bytes),
+      });
+    } catch {
+      return {
+        checked: artifacts.length,
+        violations: [
+          {
+            path: ".ut-tdd/teams/example-review-team.yaml",
+            line: 1,
+            marker: "authoring-projection-invalid-utf8",
+          },
+        ],
+        ok: false,
+      };
+    }
+  }
+  return analyzeSecretScan(artifacts);
+}
+
+/**
+ * PLAN-L7-462 step 2: ut-tdd のグローバル CLI は .cmd shim 配布のため、node の
+ * spawn では PATH 解決されない。win32 は ComSpec 経由で CLI shim を探す
+ * (fail-soft は従来どおり)。単体テスト U-DIST-CLI-PROBE が「素の spawn に戻すと
+ * ENOENT で status=null になる」ことを fail-close で固定する。
+ */
+export function utTddCliProbe(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): SpawnSyncReturns<string> {
+  if (platform === "win32") {
+    const cmdExe = env.ComSpec ?? join(env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
+    return spawnSync(cmdExe, ["/d", "/c", "ut-tdd", "--help"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      env,
+    });
+  }
+  return spawnSync("ut-tdd", ["--help"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env,
+  });
+}
+
 export function registerDistributionCommands(program: Command): void {
   const distribution = program.command("distribution").description("clean distribution planning");
+
+  distribution
+    .command("authoring-smoke")
+    .alias("smoke")
+    .description("verify authoring templates from a Pack tree without source dependencies")
+    .option("--root <dir>", "Pack tree root", ".")
+    .option("--json", "JSON output")
+    .action((opts: { root?: string; json?: boolean }) => {
+      const root = opts.root
+        ? isAbsolute(opts.root)
+          ? opts.root
+          : join(process.cwd(), opts.root)
+        : process.cwd();
+      const smoke = runPackAuthoringSmoke(root);
+      const output = { ok: smoke.ok, root, smoke };
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+        process.exitCode = smoke.ok ? 0 : 1;
+        return;
+      }
+      process.stdout.write(`distribution authoring-smoke: ${smoke.ok ? "ok" : "blocked"}\n`);
+      process.stdout.write(`  checked: ${smoke.checked.length}\n`);
+      for (const error of smoke.errors) process.stdout.write(`  ${error}\n`);
+      process.exitCode = smoke.ok ? 0 : 1;
+    });
 
   distribution
     .command("plan")
@@ -85,66 +284,43 @@ export function registerDistributionCommands(program: Command): void {
     .action((opts: { tag?: string; cleanRepo?: string; packageRoot?: string; json?: boolean }) => {
       const repoRoot = process.cwd();
       const detection = detectMode();
-      let bunVersion: string | null = null;
-      try {
-        bunVersion = execFileSync("bun", ["--version"], { encoding: "utf8" }).trim();
-      } catch {
-        bunVersion = null;
-      }
+      // PLAN-L7-522 §2.2 (S1-a): readiness の runtime 検査は Bun ではなく Node を見る。
+      // 実行中の node 自身が観測値であり、外部 probe を spawn しない。
+      const nodeVersion = process.versions.node;
       const hasGit = spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0;
       const hasGh = spawnSync("gh", ["--version"], { stdio: "ignore" }).status === 0;
       const packageRoot = opts.packageRoot ? join(repoRoot, opts.packageRoot) : repoRoot;
-      const hookWrapperPath = join(packageRoot, ".ut-tdd", "bin", "ut-tdd.mjs");
-      const packageBinPath = join(
-        packageRoot,
-        "node_modules",
-        ".bin",
-        process.platform === "win32" ? "ut-tdd.cmd" : "ut-tdd",
-      );
-      const sourceSetupEntrypoint = join(packageRoot, "src", "cli.ts");
-      const hasProjectLocalUtTdd = existsSync(hookWrapperPath) || existsSync(packageBinPath);
-      const hasSourceSetupEntrypoint = existsSync(sourceSetupEntrypoint);
-      const utTddCli = spawnSync("ut-tdd", ["--help"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      const hasUtTddCli = hasProjectLocalUtTdd || hasSourceSetupEntrypoint || utTddCli.status === 0;
-      const utTddCliObserved =
-        utTddCli.error?.message || utTddCli.stderr.trim() || `exit ${utTddCli.status ?? "unknown"}`;
-      const utTddCliHints = [
-        join(homedir(), ".bun", "bin", "ut-tdd.exe"),
-        join(homedir(), ".bun", "bin", "ut-tdd"),
-        process.env.APPDATA ? join(process.env.APPDATA, "npm", "node_modules", "bun", "bin") : "",
-      ].filter((p) => p && existsSync(p));
-      const utTddCliMessage = hasUtTddCli
-        ? undefined
-        : [
-            "Generated Claude/Codex hooks call `bun .ut-tdd/bin/ut-tdd.mjs ...` so each project can use its own pinned UT-TDD package.",
-            `Expected wrapper: ${hookWrapperPath}`,
-            `Expected package bin: ${packageBinPath}`,
-            `Expected source setup entrypoint: ${sourceSetupEntrypoint}`,
-            `Observed: ${utTddCliObserved}`,
-            utTddCliHints.length > 0
-              ? `Detected global candidate path(s): ${utTddCliHints.join(", ")}. Prefer the project-local wrapper when multiple projects on one PC pin different harness versions.`
-              : "Add UT-TDD as a project dependency, run setup to emit the wrapper, and ensure Bun resolves on the hook shell PATH.",
-          ].join(" ");
+      // engines.node は consumer package root の package.json が正本 (第二の pin を持たない)。
+      const requiredNodeVersion = ((): string | null => {
+        const manifestPath = join(packageRoot, "package.json");
+        if (!existsSync(manifestPath)) return null;
+        try {
+          const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+            engines?: { node?: unknown };
+          };
+          const node = parsed.engines?.node;
+          return typeof node === "string" && node.trim() !== "" ? node.trim() : null;
+        } catch {
+          return null;
+        }
+      })();
       const exportPlan = buildCleanDistributionPlan({
         paths: collectDistributionCandidatePaths(repoRoot),
         sourceTag: opts.tag,
         cleanRepo: opts.cleanRepo,
       });
       const readiness = buildConsumerReadinessPlan({
-        bunVersion,
+        nodeVersion,
+        requiredNodeVersion,
         hasGit,
         hasGh,
-        hasUtTddCli,
-        utTddCliMessage,
         hasClaude: detection.claude,
         hasCodex: detection.codex,
         repoRoot,
         packageRoot,
         tag: opts.tag,
         cleanRepo: opts.cleanRepo,
+        consumerRuntime: readConsumerRuntimeReadiness(repoRoot),
       });
       const output = {
         ok: exportPlan.ok && readiness.ok,
@@ -252,6 +428,11 @@ export function registerDistributionCommands(program: Command): void {
           sourceTag: opts.tag,
           cleanRepo: opts.cleanRepo,
         });
+        const secretScan = runDistributionSecretScan({
+          repoRoot,
+          sourcePaths,
+          artifactPaths: exportPlan.artifactPaths,
+        });
         const outDir = opts.out
           ? isAbsolute(opts.out)
             ? opts.out
@@ -263,13 +444,19 @@ export function registerDistributionCommands(program: Command): void {
           stagingDir: outDir,
           branch: opts.branch,
         });
-        mkdirSync(outDir, { recursive: true });
+        ensureDir(outDir, { recursive: true });
         const plannedArtifacts = new Set(exportPlan.artifactPaths);
         const unmanagedExistingPaths = collectDistributionCandidatePaths(outDir).filter(
-          (path) => !plannedArtifacts.has(path) && !path.startsWith(".git/"),
+          (path) =>
+            !plannedArtifacts.has(path) && !path.startsWith(".git/") && path !== PACK_SYNC_MANIFEST,
         );
         let copyError: string | null = null;
-        if (exportPlan.ok) {
+        let authoringSmoke: PackAuthoringSmokeResult = {
+          ok: false,
+          checked: [],
+          errors: ["not-run"],
+        };
+        if (exportPlan.ok && secretScan.ok) {
           try {
             for (const rel of exportPlan.artifactPaths) {
               const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
@@ -283,17 +470,31 @@ export function registerDistributionCommands(program: Command): void {
           } catch (error) {
             copyError = error instanceof Error ? error.message : String(error);
           }
+          if (copyError === null) authoringSmoke = runPackAuthoringSmoke(outDir);
         }
-        const manifest = join(outDir, ".ut-tdd-pack-sync-manifest.json");
+        const manifest = join(outDir, PACK_SYNC_MANIFEST);
         const output = {
-          ok: exportPlan.ok && copyError === null && unmanagedExistingPaths.length === 0,
+          ok:
+            exportPlan.ok &&
+            secretScan.ok &&
+            copyError === null &&
+            authoringSmoke.ok &&
+            unmanagedExistingPaths.length === 0,
           export: exportPlan,
+          secretScan: {
+            ok: secretScan.ok,
+            checked: secretScan.checked,
+            violations: secretScan.violations,
+          },
+          authoringSmoke,
           sync,
           stage: {
             outDir,
             manifest,
             copiedArtifacts:
-              copyError === null && exportPlan.ok ? exportPlan.artifactPaths.length : 0,
+              copyError === null && exportPlan.ok && secretScan.ok
+                ? exportPlan.artifactPaths.length
+                : 0,
             unmanagedExistingPaths,
             copyError,
             destructiveRemoteMutation: false,
@@ -311,6 +512,9 @@ export function registerDistributionCommands(program: Command): void {
         );
         process.stdout.write(`  out: ${outDir}\n`);
         process.stdout.write(`  copied-artifacts: ${output.stage.copiedArtifacts}\n`);
+        if (!secretScan.ok) {
+          process.stdout.write(`  ${secretScanMessages(secretScan)[0]}\n`);
+        }
         process.stdout.write(`  unmanaged-existing: ${unmanagedExistingPaths.length}\n`);
         process.stdout.write(
           "  remote mutation: requires PO approval; no push/release was executed\n",
@@ -348,6 +552,11 @@ export function registerDistributionCommands(program: Command): void {
           sourceTag: opts.tag,
           cleanRepo: opts.cleanRepo,
         });
+        const secretScan = runDistributionSecretScan({
+          repoRoot,
+          sourcePaths,
+          artifactPaths: exportPlan.artifactPaths,
+        });
         const sync = buildPackSyncPlan({
           exportPlan,
           sourcePaths,
@@ -361,8 +570,13 @@ export function registerDistributionCommands(program: Command): void {
         const prunedPaths: string[] = [];
         let copyError: string | null = null;
         let pruneError: string | null = null;
+        let authoringSmoke: PackAuthoringSmokeResult = {
+          ok: false,
+          checked: [],
+          errors: ["not-run"],
+        };
 
-        if (repoExists && opts.pruneLocal) {
+        if (repoExists && opts.pruneLocal && exportPlan.ok && secretScan.ok) {
           try {
             for (const rel of existingBefore) {
               rmSync(join(repoDir, ...rel.split("/")), { force: true });
@@ -373,7 +587,7 @@ export function registerDistributionCommands(program: Command): void {
           }
         }
 
-        if (repoExists && exportPlan.ok && pruneError === null) {
+        if (repoExists && exportPlan.ok && secretScan.ok && pruneError === null) {
           try {
             for (const rel of exportPlan.artifactPaths) {
               const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
@@ -387,6 +601,7 @@ export function registerDistributionCommands(program: Command): void {
           } catch (error) {
             copyError = error instanceof Error ? error.message : String(error);
           }
+          if (copyError === null) authoringSmoke = runPackAuthoringSmoke(repoDir);
         }
 
         const unmanagedExistingPaths =
@@ -396,7 +611,7 @@ export function registerDistributionCommands(program: Command): void {
               )
             : existingBefore;
         const manifestDir = join(repoRoot, ".ut-tdd", "pack-sync");
-        mkdirSync(manifestDir, { recursive: true });
+        ensureDir(manifestDir, { recursive: true });
         const manifest = join(
           manifestDir,
           `${exportPlan.sourceTag.replace(/[^A-Za-z0-9._-]+/g, "-")}.sync-pack.json`,
@@ -405,10 +620,18 @@ export function registerDistributionCommands(program: Command): void {
           ok:
             repoExists &&
             exportPlan.ok &&
+            secretScan.ok &&
             pruneError === null &&
             copyError === null &&
+            authoringSmoke.ok &&
             unmanagedExistingPaths.length === 0,
           export: exportPlan,
+          secretScan: {
+            ok: secretScan.ok,
+            checked: secretScan.checked,
+            violations: secretScan.violations,
+          },
+          authoringSmoke,
           sync,
           pack: {
             repoDir,
@@ -428,7 +651,7 @@ export function registerDistributionCommands(program: Command): void {
             actualRemoteMutationRequiresPoApproval: true,
             nextCommands: [
               `git -C ${repoDir} status --short`,
-              ...gitAddPathspecCommands(repoDir, exportPlan.artifactPaths),
+              ...gitAddPathspecCommands(repoDir, exportPlan.artifactPaths, existingBefore),
               `git -C ${repoDir} commit -m "chore: sync clean pack ${exportPlan.sourceTag}"`,
               `git -C ${repoDir} push origin ${opts.branch ?? "main"}`,
             ],
@@ -445,6 +668,9 @@ export function registerDistributionCommands(program: Command): void {
         );
         process.stdout.write(`  repo-dir: ${repoDir}\n`);
         process.stdout.write(`  copied-artifacts: ${output.pack.copiedArtifacts}\n`);
+        if (!secretScan.ok) {
+          process.stdout.write(`  ${secretScanMessages(secretScan)[0]}\n`);
+        }
         process.stdout.write(`  unmanaged-existing: ${unmanagedExistingPaths.length}\n`);
         process.stdout.write(`  pruned-local: ${prunedPaths.length}\n`);
         process.stdout.write(
@@ -495,78 +721,91 @@ export function registerDistributionCommands(program: Command): void {
         sourceTag: opts.tag,
         cleanRepo: opts.cleanRepo,
       });
+      const sourcePaths = collectDistributionCandidatePaths(repoRoot);
+      const secretScan = runDistributionSecretScan({
+        repoRoot,
+        sourcePaths,
+        artifactPaths: exportPlan.artifactPaths,
+      });
       const outDir = opts.out
         ? isAbsolute(opts.out)
           ? opts.out
           : join(repoRoot, opts.out)
         : join(repoRoot, ".ut-tdd", "release");
-      const artifactStem = exportPlan.sourceTag.replace(/[^A-Za-z0-9._-]+/g, "-");
-      const tarball = join(outDir, `${artifactStem}.tar.gz`);
-      const checksum = `${tarball}.sha256`;
-      const manifest = join(outDir, `${artifactStem}.manifest.json`);
-      const signature = `${tarball}.sig`;
+      const artifactNames = releaseArtifactFileNames(exportPlan.sourceTag);
+      const tarball = join(outDir, artifactNames.tarball);
+      const checksum = join(outDir, artifactNames.checksum);
+      const manifest = join(outDir, artifactNames.manifest);
       const stage = mkdtempSync(join(tmpdir(), "ut-tdd-clean-package-"));
       let tarResult: ReturnType<typeof spawnSync> | null = null;
       try {
-        mkdirSync(outDir, { recursive: true });
-        const sourcePaths = collectDistributionCandidatePaths(repoRoot);
-        for (const rel of exportPlan.artifactPaths) {
-          const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
-          copyCleanDistributionArtifact({
-            sourceRoot: repoRoot,
-            sourcePath: sourceRel,
-            targetRoot: stage,
-            artifactPath: rel,
+        if (exportPlan.ok && secretScan.ok) {
+          ensureDir(outDir, { recursive: true });
+          for (const rel of exportPlan.artifactPaths) {
+            const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
+            copyCleanDistributionArtifact({
+              sourceRoot: repoRoot,
+              sourcePath: sourceRel,
+              targetRoot: stage,
+              artifactPath: rel,
+            });
+          }
+          // -f はドライブレター (C:) を含む絶対パスだと GNU tar (Git Bash 同梱) がリモートホスト名と
+          // 解釈して "Cannot connect to C:" で必ず失敗する。cwd を outDir に固定し -f を相対 basename に
+          // することで bsdtar/GNU tar の両実装で動く (PLAN-L7-361)。-C の引数は remote 解釈されない。
+          tarResult = spawnSync("tar", ["-czf", basename(tarball), "-C", stage, "."], {
+            cwd: outDir,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
           });
-        }
-        // -f はドライブレター (C:) を含む絶対パスだと GNU tar (Git Bash 同梱) がリモートホスト名と
-        // 解釈して "Cannot connect to C:" で必ず失敗する。cwd を outDir に固定し -f を相対 basename に
-        // することで bsdtar/GNU tar の両実装で動く (PLAN-L7-361)。-C の引数は remote 解釈されない。
-        tarResult = spawnSync("tar", ["-czf", basename(tarball), "-C", stage, "."], {
-          cwd: outDir,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        if (tarResult.status === 0) {
-          const digest = createHash("sha256").update(readFileSync(tarball)).digest("hex");
-          writeFileSync(checksum, `${digest}  ${basename(tarball)}\n`, "utf8");
-          writeFileSync(
-            manifest,
-            `${JSON.stringify(
-              {
-                ok: exportPlan.ok,
-                sourceTag: exportPlan.sourceTag,
-                cleanRepo: exportPlan.cleanRepo,
-                tarball,
-                checksum,
-                signature,
-                signatureRequired: true,
-                signatureCreated: false,
-                artifactCount: exportPlan.artifactPaths.length,
-                missingRequired: exportPlan.missingRequired,
-                denylistViolations: exportPlan.denylistViolations,
-              },
-              null,
-              2,
-            )}\n`,
-            "utf8",
-          );
+          if (tarResult.status === 0) {
+            const digest = createHash("sha256").update(readFileSync(tarball)).digest("hex");
+            writeFileSync(checksum, `${digest}  ${basename(tarball)}\n`, "utf8");
+            writeFileSync(
+              manifest,
+              `${JSON.stringify(
+                {
+                  ok: exportPlan.ok,
+                  sourceTag: exportPlan.sourceTag,
+                  cleanRepo: exportPlan.cleanRepo,
+                  tarball,
+                  checksum,
+                  artifactCount: exportPlan.artifactPaths.length,
+                  missingRequired: exportPlan.missingRequired,
+                  denylistViolations: exportPlan.denylistViolations,
+                },
+                null,
+                2,
+              )}\n`,
+              "utf8",
+            );
+          }
+        } else {
+          rmSync(tarball, { force: true });
+          rmSync(checksum, { force: true });
+          rmSync(manifest, { force: true });
         }
       } finally {
         rmSync(stage, { recursive: true, force: true });
       }
       const ok =
-        exportPlan.ok && tarResult?.status === 0 && existsSync(tarball) && existsSync(checksum);
+        exportPlan.ok &&
+        secretScan.ok &&
+        tarResult?.status === 0 &&
+        existsSync(tarball) &&
+        existsSync(checksum);
       const output = {
         ok,
         export: exportPlan,
+        secretScan: {
+          ok: secretScan.ok,
+          checked: secretScan.checked,
+          violations: secretScan.violations,
+        },
         artifacts: {
           tarball,
           checksum,
           manifest,
-          signature,
-          signatureRequired: true,
-          signatureCreated: false,
         },
         tar: {
           exitCode: tarResult?.status ?? null,
@@ -590,9 +829,11 @@ export function registerDistributionCommands(program: Command): void {
           `  tar: error exit=${tarResult.status ?? "null"}${stderrHead ? ` (${stderrHead})` : ""} - artifacts not created\n`,
         );
       }
+      if (!secretScan.ok) {
+        process.stdout.write(`  ${secretScanMessages(secretScan)[0]}\n`);
+      }
       process.stdout.write(`  tarball: ${tarball}\n`);
       process.stdout.write(`  checksum: ${checksum}\n`);
-      process.stdout.write("  signature: required but not created (external signing boundary)\n");
       process.stdout.write("  publish: requires PO approval\n");
       process.exitCode = ok ? 0 : 1;
     });

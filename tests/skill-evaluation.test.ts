@@ -13,9 +13,9 @@
  * AC-FR-BR21-36-02: skill with 0 adoption in last 30 days => unused_flag 1; no auto-delete
  */
 import { describe, expect, it } from "vitest";
-import { openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate, rowCounts } from "../src/state-db/migration";
-import { projectSkillEvaluations } from "../src/state-db/projection-writer";
+import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate, rowCounts } from "../src/state-db/migration.ts";
+import { projectSkillEvaluations } from "../src/state-db/projection-writer.ts";
 
 function seedPlan(db: ReturnType<typeof openHarnessDb>, planId: string, status: string): void {
   upsertRow(db, {
@@ -40,7 +40,7 @@ function seedInvocation(
       layer: "L7",
       drive: "db",
       fired_at: opts.firedAt,
-      source: "test",
+      source: "runtime-hook:skill-suggest",
       accepted: opts.accepted,
     },
   });

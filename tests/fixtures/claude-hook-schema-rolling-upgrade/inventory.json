@@ -1,0 +1,22 @@
+{
+  "schema": "ut-tdd.claude-hook-schema-upgrade-fixture-inventory/v1",
+  "observations": [
+    {
+      "pr": 423,
+      "request": "pr-423-request.json",
+      "requestSha256": "7003aaf749833abfff8de71768e47939fea4284c98fb498767e772c371f49b18",
+      "claim": "pr-423-claim.json",
+      "claimSha256": "9a8e832a5c14b41651e62c9789512eaed4f98dd38e147a3f8b2ed3254605a392",
+      "correspondingInbox": "absent_claimed_operation",
+      "historicalPayload": "unavailable_do_not_reconstruct"
+    },
+    {
+      "pr": 410,
+      "request": "pr-410-request.json",
+      "requestSha256": "75defbd585e1328cf25c4638ce6fb7d49c7e819a0d951e6a9b00dfebba41d47f",
+      "claim": "pr-410-claim.json",
+      "claimSha256": "d9e936a6b1b0486ac40b084ab2b8bda175ff55e6324acaf50f62ba28da264210",
+      "correspondingInbox": "absent_claimed_operation"
+    }
+  ]
+}

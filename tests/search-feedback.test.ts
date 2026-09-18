@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { computeSkillMetrics, emitFeedbackEvents } from "../src/feedback/engine";
-import { findReference, upsertSearchReference } from "../src/search/index";
-import { openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate, rowCounts } from "../src/state-db/migration";
+import { computeSkillMetrics, emitFeedbackEvents } from "../src/feedback/engine.ts";
+import { findReference, upsertSearchReference } from "../src/search/index.ts";
+import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate, rowCounts } from "../src/state-db/migration.ts";
 
 describe("IT-SEARCH-01 / IT-DB-03 / IT-FEEDBACK-01", () => {
   it("findReference returns exact ID matches before fuzzy token matches without mutating sources", () => {
@@ -192,6 +192,70 @@ describe("IT-SEARCH-01 / IT-DB-03 / IT-FEEDBACK-01", () => {
       ).toBe("warn");
       const plan = db.prepare("SELECT * FROM plan_registry").get();
       expect(plan).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("emitFeedbackEvents promotes detector route candidates and suppresses duplicate source findings", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      upsertRow(db, {
+        table: "findings",
+        primaryKey: "finding_id",
+        row: {
+          finding_id: "finding:spec-ir-orphan",
+          kind: "spec-ir-orphan-relation",
+          severity: "warn",
+          subject_id: "spec-relation:missing",
+          source: "spec-ir-projection",
+          status: "open",
+          evidence_path: "docs/plans/PLAN-L6-39-vmodel-spec-ir-function-contracts.md",
+        },
+      });
+      upsertRow(db, {
+        table: "detector_route_candidates",
+        primaryKey: "route_candidate_id",
+        row: {
+          route_candidate_id: "candidate:spec-ir-orphan",
+          source_table: "findings",
+          source_id: "finding:spec-ir-orphan",
+          detector_id: "spec-ir-integrity",
+          finding_kind: "spec-ir-orphan-relation",
+          severity: "warn",
+          subject_kind: "spec_ir",
+          subject_id: "spec-relation:missing",
+          filing_target_id: "routeFiling:feature_addition",
+          target_layer: "L6",
+          target_sub_doc: "function-spec",
+          candidate_status: "non_ready",
+          reason: "routeFiling SSoT evaluation required",
+          evidence_path: "docs/plans/PLAN-L6-39-vmodel-spec-ir-function-contracts.md",
+          computed_at: "2026-07-08T00:00:00.000Z",
+        },
+      });
+
+      const events = emitFeedbackEvents(db);
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        feedback_event_id: "feedback:detector-route-candidate:candidate:spec-ir-orphan",
+        source_table: "detector_route_candidates",
+        source_id: "candidate:spec-ir-orphan",
+        source_color: "non_ready",
+        signal_type: "detector_route_candidate:spec-ir-orphan-relation",
+        severity: "warn",
+      });
+      expect(events[0]?.next_action).toContain("routeFiling SSoT");
+      expect(events[0]?.next_action).toContain("route_eval_mode=add-feature");
+      expect(events[0]?.next_action).toContain("allowed_kinds=add-design,add-impl");
+      expect(events[0]?.next_action).toContain("requires_human_approval=false");
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS n FROM feedback_events WHERE source_table = ?")
+          .get("findings"),
+      ).toMatchObject({ n: 0 });
     } finally {
       db.close();
     }

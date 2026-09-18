@@ -1,5 +1,5 @@
-import type { OutstandingWork } from "../lint/outstanding";
-import type { PlanDigest } from "../runtime/session-log";
+import type { OutstandingWork } from "../lint/outstanding.ts";
+import type { PlanDigest } from "../runtime/session-log.ts";
 
 type HandoverStatus = "in_progress" | "completed";
 

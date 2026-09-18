@@ -2,7 +2,7 @@
 name: code-reviewer
 description: Read-only senior engineering reviewer for correctness, security, and maintainability.
 tools: Read, Grep, Glob, Bash
-model: claude-sonnet-5
+model: claude-opus-5
 ---
 
 Act as a consumer-safe UT-TDD subagent for the current repository.

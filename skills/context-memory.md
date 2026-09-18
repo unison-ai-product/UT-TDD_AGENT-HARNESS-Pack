@@ -20,6 +20,31 @@ applies_to:
     - Incident
     - Refactor
     - Retrofit
+decision_points:
+  - when: "A session starts and `CURRENT.json` lists `carry` items from the previous session."
+    choose: "Cross-check each carry item against `git log` and current file state before acting on it."
+    over: "Treating the carry list as an accurate to-do list and starting work directly from it."
+    because: "The skill states carry is a claim, not truth; a carry item that conflicts with git log or doctor output is stale and would misdirect the new session."
+  - when: "`open_plans` in `CURRENT.json` lists a PLAN as open."
+    choose: "Verify it against `ut-tdd doctor` output before treating it as active."
+    over: "Assuming the handover file's open_plans list is current."
+    because: "A PLAN listed as open but absent from governance output is a stale handover entry, not a real open obligation."
+  - when: "A PLAN completes or a drive-model cycle boundary is crossed."
+    choose: "Run `ut-tdd handover` to flush the session log and rewrite `CURRENT.json`."
+    over: "Continuing directly into the next task without flushing handover state."
+    because: "Skipping handover at a drive-cycle boundary means the next session starts blind, per the skill's explicit anti-pattern."
+  - when: "`CURRENT.json` is older than ~24 hours or several sessions have elapsed without a handover flush."
+    choose: "Treat it as potentially stale and verify open items from scratch, running `ut-tdd db rebuild` if needed."
+    over: "Propagating the existing carry state as current."
+    because: "The skill flags >24h age as a staleness threshold; state drifts across unflushed sessions faster than the handover narrative reflects."
+  - when: "A session decision needs to be recorded for future continuity."
+    choose: "Record it in committed docs or ADRs."
+    over: "Storing the decision only in the handover file (`CURRENT.json`)."
+    because: "The skill states handover is continuity glue, not the authoritative record; handover-only decisions vanish or go stale without a committed trace."
+  - when: "Reporting session-close state to the PO or next session."
+    choose: "Capture `ut-tdd status` and `ut-tdd doctor` output into `.ut-tdd/audit/<session-id>-close.txt` as evidence."
+    over: "Relying on the handover narrative text alone as the close record."
+    because: "The skill explicitly instructs not to rely on the handover narrative alone; machine command output is the verifiable evidence, not prose."
 ---
 
 # context memory
@@ -89,7 +114,7 @@ session-close evidence. Do not rely on the handover narrative alone.
 
 The `SessionStart` and `Stop` hooks write to `src/runtime/session-log.ts`. Each
 session compresses into a PLAN digest in `harness.db`. Digests are queryable via
-`ut-tdd metrics` and `ut-tdd find`. Session log entries store metadata only —
+`ut-tdd metrics skill` and `ut-tdd find <query>`. Session log entries store metadata only —
 never prompt text, credentials, or PII.
 
 ## Staleness and multi-session gaps

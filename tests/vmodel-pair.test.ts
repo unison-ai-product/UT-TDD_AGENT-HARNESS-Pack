@@ -15,32 +15,40 @@ import {
   parsePairDoc,
   stripInlineComment,
   verificationGroupMessages,
-} from "../src/vmodel/lint";
+} from "../src/vmodel/lint.ts";
 
 const doc = (
   path: string,
   layer: string | null,
   pa: string | null,
   status: string | null = null,
+  nextPairFreeze: string | null = null,
+  content = "",
 ): PairDoc => ({
   path,
   layer,
   pairArtifact: pa,
   status,
+  nextPairFreeze,
+  content,
 });
 
 describe("vmodel pair-freeze lint (U-VPAIR)", () => {
   it("U-VPAIR-001: parsePairDoc / stripInlineComment — frontmatter 抽出 + inline コメント除去", () => {
-    expect(stripInlineComment("self  # wireframe mock 自体が③ペア")).toBe("self");
+    expect(
+      stripInlineComment(
+        "docs/test-design/harness/L10-ux-validation-test-design.md  # L2↔L10 pair",
+      ),
+    ).toBe("docs/test-design/harness/L10-ux-validation-test-design.md");
     expect(stripInlineComment("docs/test-design/harness/L9-system-test-design.md")).toBe(
       "docs/test-design/harness/L9-system-test-design.md",
     );
     const d = parsePairDoc(
       "docs/design/harness/L2-screen/wireframe.md",
-      "---\nlayer: L2\npair_artifact: self  # mock\n---\n",
+      "---\nlayer: L2\npair_artifact: docs/test-design/harness/L10-ux-validation-test-design.md  # mock\n---\n",
     );
     expect(d.layer).toBe("L2");
-    expect(d.pairArtifact).toBe("self");
+    expect(d.pairArtifact).toBe("docs/test-design/harness/L10-ux-validation-test-design.md");
   });
 
   it("U-VPAIR-002: pair-missing / ref-unresolved を検出", () => {
@@ -87,10 +95,67 @@ describe("vmodel pair-freeze lint (U-VPAIR)", () => {
     ]);
     expect(orphan.ok).toBe(false);
     expect(orphan.orphans[0]?.reason).toBe("trace-orphan");
+
+    const exact = analyzePairFreeze([
+      doc(
+        "docs/design/harness/L1-requirements/delta.md",
+        "L1",
+        "docs/test-design/harness/L14-delta.md",
+      ),
+      doc(
+        "docs/test-design/harness/L14-delta.md",
+        "L1",
+        "docs/design/harness/L1-requirements/delta.md",
+      ),
+    ]);
+    expect(exact.ok).toBe(true);
+    expect(exact.pairs).toBe(1);
+
+    const baseDesign = doc(
+      "docs/design/harness/L1-requirements/base.md",
+      "L1",
+      "docs/test-design/harness/L14-base.md",
+      "confirmed",
+    );
+    const baseTest = doc(
+      "docs/test-design/harness/L14-base.md",
+      "L1",
+      "docs/design/harness/L1-requirements/",
+      "confirmed",
+    );
+    const deltaDesign = {
+      ...doc(
+        "docs/design/harness/L1-requirements/delta.md",
+        "L1",
+        "docs/test-design/harness/L14-delta.md",
+        "draft",
+      ),
+      revisionTrack: "additive",
+      revisionBaseArtifact: baseDesign.path,
+    };
+    const invalidDeltaTest = {
+      ...doc("docs/test-design/harness/L14-delta.md", "L1", deltaDesign.path, "draft"),
+      revisionTrack: "additive",
+      revisionBaseArtifact: "docs/test-design/harness/MISSING.md",
+    };
+    const invalidRevisionPair = analyzePairFreeze([
+      baseDesign,
+      baseTest,
+      deltaDesign,
+      invalidDeltaTest,
+    ]);
+    expect(invalidRevisionPair.ok).toBe(false);
+    expect(invalidRevisionPair.orphans.map((orphan) => orphan.reason)).toContain(
+      "revision-base-invalid",
+    );
+    expect(invalidRevisionPair.orphans.some((orphan) => orphan.path === deltaDesign.path)).toBe(
+      true,
+    );
   });
 
-  it("U-VPAIR-004: self-pair / L2 group — wireframe=self は孤児にしない、group hub 経由で成立", () => {
-    const r = analyzePairFreeze([
+  it("U-VPAIR-004: self / design→design 参照は非対応 — L2 は test-design 直接参照でのみ成立 (RECOVERY-09)", () => {
+    // 旧 self-pair / group hub は撤去済み: どちらも孤児 (fail-close)
+    const legacy = analyzePairFreeze([
       doc("docs/design/harness/L2-screen/wireframe.md", "L2", "self"),
       doc(
         "docs/design/harness/L2-screen/screen-list.md",
@@ -98,8 +163,29 @@ describe("vmodel pair-freeze lint (U-VPAIR)", () => {
         "docs/design/harness/L2-screen/wireframe.md",
       ),
     ]);
+    expect(legacy.ok).toBe(false);
+    expect(legacy.orphans).toHaveLength(2);
+
+    // 正規形: L2 sub-doc → L10 test-design doc の直接参照 (rule 3 双方向)
+    const r = analyzePairFreeze([
+      doc(
+        "docs/design/harness/L2-screen/wireframe.md",
+        "L2",
+        "docs/test-design/harness/L10-ux-validation-test-design.md",
+      ),
+      doc(
+        "docs/design/harness/L2-screen/screen-list.md",
+        "L2",
+        "docs/test-design/harness/L10-ux-validation-test-design.md",
+      ),
+      doc(
+        "docs/test-design/harness/L10-ux-validation-test-design.md",
+        "L2",
+        "docs/design/harness/L2-screen/",
+      ),
+    ]);
     expect(r.ok).toBe(true);
-    expect(r.pairs).toBe(2); // wireframe(self) + screen-list(group)
+    expect(r.pairs).toBe(2);
   });
 
   it("U-VPAIR-004b: README / roadmap は対象外 (pair 欠落でも孤児にしない)", () => {
@@ -175,6 +261,30 @@ describe("verification trigger (U-VTRIG、層群 freeze の機械発火、IMP-06
     expect(withDraft?.frozen).toBe(false); // draft あり → Forward 進行中
   });
 
+  it("U-VTRIG-002A: additive draft revision is surfaced without unfreezing the confirmed base", () => {
+    const base = doc("docs/design/harness/L1-requirements/base.md", "L1", "x", "confirmed");
+    const delta = {
+      ...doc("docs/design/harness/L1-requirements/delta.md", "L1", "x", "draft"),
+      revisionTrack: "additive",
+      revisionBaseArtifact: base.path,
+    };
+    const group = analyzeVerificationGroups([base, delta], []).find((g) => g.id === "L0-L3");
+    expect(group?.frozen).toBe(true);
+    expect(group?.total).toBe(1);
+    expect(group?.activeRevisionTotal).toBe(1);
+    expect(group?.activeRevisionDraft).toBe(1);
+    expect(group).toBeDefined();
+    if (!group) throw new Error("L0-L3 verification group is missing");
+    expect(verificationGroupMessages([group])[0]).toContain("active revisions IN-PROGRESS");
+
+    const invalid = analyzeVerificationGroups(
+      [{ ...delta, revisionBaseArtifact: "docs/design/harness/L1-requirements/missing.md" }],
+      [],
+    ).find((g) => g.id === "L0-L3");
+    expect(invalid?.frozen).toBe(false);
+    expect(invalid?.activeRevisionTotal).toBe(0);
+  });
+
   it("U-VTRIG-003: 層群に pair 孤児があれば freeze 未完了", () => {
     const g = analyzeVerificationGroups(
       [doc("docs/design/harness/L1-requirements/a.md", "L1", "x", "confirmed")],
@@ -238,6 +348,10 @@ describe("verification trigger (U-VTRIG、層群 freeze の機械発火、IMP-06
         draft: 0,
         placeholder: 1,
         hasOrphan: false,
+        activeRevisionTotal: 0,
+        activeRevisionConfirmed: 0,
+        activeRevisionDraft: 0,
+        activeRevisionHasOrphan: false,
         requiredPlanIds: [],
         confirmedPlanIds: [],
         missingPlanIds: [],
@@ -261,6 +375,10 @@ describe("verification trigger (U-VTRIG、層群 freeze の機械発火、IMP-06
         draft: 18,
         placeholder: 0,
         hasOrphan: false,
+        activeRevisionTotal: 0,
+        activeRevisionConfirmed: 0,
+        activeRevisionDraft: 0,
+        activeRevisionHasOrphan: false,
         requiredPlanIds: [],
         confirmedPlanIds: [],
         missingPlanIds: [],

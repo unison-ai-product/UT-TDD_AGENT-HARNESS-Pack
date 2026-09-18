@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildDoctorCheckDefinitionGroups } from "../src/doctor/check-definition-groups";
+import { buildDoctorCheckDefinitionGroups } from "../src/doctor/check-definition-groups.ts";
 import {
   buildFullDoctorCheckDefinitions,
   collectDoctorCheckRun,
@@ -15,12 +15,13 @@ import {
   isConsumerSafeDoctorRunProfile,
   resolveDoctorRunProfile,
   selectDoctorCheckDefinitions,
-} from "../src/doctor/check-registry";
+} from "../src/doctor/check-registry.ts";
 import {
   checkDependencyDrift as checkDependencyDriftAdapter,
   checkRegressionExpansion as checkRegressionExpansionAdapter,
-} from "../src/doctor/dependency-regression";
+} from "../src/doctor/dependency-regression.ts";
 import {
+  checkAgentContractDetection,
   checkAgentSlots,
   checkAssetDrift,
   checkBackfillResult,
@@ -34,14 +35,17 @@ import {
   checkDbProjectionCoverage,
   checkDbProjectionIngestion,
   checkDddTddRules,
+  checkDeliverablePlanTrace,
   checkDependencyDrift,
   checkDescentObligation,
+  checkDesignDocCrossIntegrity,
   checkDriveDbRegistration,
   checkDriveModelPassage,
   checkForwardConvergence,
   checkForwardConvergenceAudit,
   checkFrRoadmapCoverage,
   checkGateConfirm,
+  checkGateIdFormat,
   checkGuardrailInvariants,
   checkHandover,
   checkHandoverDisciplineMessages,
@@ -73,14 +77,27 @@ import {
   checkSkillAssignment,
   checkTelemetryClosure,
   checkTrackedCanonical,
+  checkTypedSpecLedgerBodySync,
+  checkTypedSpecOwnedArtifactDispersal,
+  checkTypedSpecPhaseLayerAlignment,
+  checkTypedSpecTraceClosure,
   checkVerificationGroupsResult,
   checkVerificationProfile,
   type DoctorDeps,
   nodeDoctorDeps,
   runDoctor,
-} from "../src/doctor/index";
-import { buildDoctorResult } from "../src/doctor/result";
-import type { AgentSlotsDeps, Slot } from "../src/runtime/agent-slots";
+} from "../src/doctor/index.ts";
+import { buildDoctorResult } from "../src/doctor/result.ts";
+import { analyzeGateRunCoverage, gateRunCoverageMessages } from "../src/lint/gate-run-coverage.ts";
+import type { AgentSlotsDeps, Slot } from "../src/runtime/agent-slots.ts";
+import {
+  analyzeDesignDetectionStats,
+  DESIGN_QUALITY_CHECK_IDS,
+  type DesignDetectionStats,
+  designDetectionMessages,
+} from "../src/state-db/design-detection.ts";
+import { consumeDoctorResultEnvelope } from "./support/doctor-envelope.ts";
+import { headSnapshotRoot } from "./support/workspace-roots.ts";
 
 const NOW = "2026-06-04T00:00:00.000Z";
 const pointerPath = join("/repo", ".ut-tdd", "handover", "CURRENT.json");
@@ -121,19 +138,186 @@ describe("buildDoctorResult", () => {
   });
 });
 
+describe("design-detection doctor aggregate", () => {
+  const cleanStats = (): DesignDetectionStats => ({
+    coverageRows: DESIGN_QUALITY_CHECK_IDS.map((subject_id) => ({
+      subject_id,
+      metric: "violation_count",
+      value: 0,
+      threshold: 0,
+      status: "passed",
+    })),
+    missingCoverage: [],
+    blockedCoverage: [],
+    pairOrphanFindings: [],
+  });
+
+  it("fails on missing coverage rows without replaying file-driven lint details", () => {
+    const stats = cleanStats();
+    stats.coverageRows = stats.coverageRows.filter((row) => row.subject_id !== "module-drift");
+    stats.missingCoverage = ["module-drift"];
+
+    const result = analyzeDesignDetectionStats(stats);
+
+    expect(result.ok).toBe(false);
+    expect(designDetectionMessages(result).join("\n")).toContain("missing_coverage=1");
+    expect(designDetectionMessages(result).join("\n")).not.toContain("module-drift —");
+  });
+
+  it("fails on blocked coverage and open pair orphan findings", () => {
+    const stats = cleanStats();
+    stats.blockedCoverage = [
+      {
+        subject_id: "l6-fr-coverage",
+        metric: "violation_count",
+        value: 2,
+        threshold: 0,
+        status: "blocked",
+      },
+    ];
+    stats.pairOrphanFindings = [
+      {
+        finding_id: "finding:design-pair-orphan:pair-missing:doc",
+        kind: "design-pair-orphan:pair-missing",
+        severity: "error",
+        subject_id: "docs/design/harness/L1-requirements/functional.md",
+        source: "vmodel-pair-freeze",
+        status: "open",
+        evidence_path: "docs/design/harness/L1-requirements/functional.md",
+      },
+    ];
+
+    const result = analyzeDesignDetectionStats(stats);
+    const messages = designDetectionMessages(result).join("\n");
+
+    expect(result.ok).toBe(false);
+    expect(messages).toContain("blocked_coverage=1");
+    expect(messages).toContain("pair_orphans=1");
+    expect(messages).toContain("design-pair-orphan:pair-missing");
+  });
+});
+
+describe("gate-run-coverage doctor aggregate", () => {
+  it("U-DOCTOR-GATE-01 fails closed on workflow rows without gate evidence and orphan gate runs", () => {
+    const result = analyzeGateRunCoverage({
+      gateRuns: 1,
+      workflowRuns: 2,
+      workflowPlansWithoutGateRun: 1,
+      orphanGateRuns: 1,
+      blankPlanGateRuns: 0,
+      invalidEvidenceFindings: 0,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.violations.map((v) => v.reason)).toEqual([
+      "workflow_without_gate_run",
+      "orphan_gate_run",
+    ]);
+    expect(gateRunCoverageMessages(result).join("\n")).toContain("gate-run-coverage - violation");
+  });
+
+  it("passes when gate and workflow projections are joined", () => {
+    const result = analyzeGateRunCoverage({
+      gateRuns: 2,
+      workflowRuns: 2,
+      workflowPlansWithoutGateRun: 0,
+      orphanGateRuns: 0,
+      blankPlanGateRuns: 0,
+      invalidEvidenceFindings: 0,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(gateRunCoverageMessages(result).join("\n")).toContain("gate-run-coverage - OK");
+  });
+});
+
 function codexWrapperParityFiles(root: string, overrides: Record<string, string> = {}) {
   const file = (relativePath: string) => join(root, ...relativePath.split("/"));
   return new Map<string, string>(
     Object.entries({
-      ".claude/settings.json": [
-        "{",
-        '  "hooks": {',
-        '    "SessionStart": [{ "hooks": [{ "command": "bun \\"$CLAUDE_PROJECT_DIR/src/cli.ts\\" session start" }] }],',
-        '    "PostToolUse": [{ "hooks": [{ "command": "bun \\"$CLAUDE_PROJECT_DIR/src/cli.ts\\" hook post-tool-use" }] }],',
-        '    "Stop": [{ "hooks": [{ "command": "bun \\"$CLAUDE_PROJECT_DIR/src/cli.ts\\" session summary" }] }]',
-        "  }",
-        "}",
-      ].join("\n"),
+      ".claude/settings.json": JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Agent|Task",
+              hooks: [
+                {
+                  type: "command",
+                  command: "node",
+                  args: [`\${CLAUDE_PROJECT_DIR}/.claude/hooks/agent-guard.ts`],
+                  blockOnFailure: true,
+                },
+              ],
+            },
+            {
+              matcher: "Edit|Write|MultiEdit",
+              hooks: [
+                {
+                  type: "command",
+                  command: "node",
+                  args: [`\${CLAUDE_PROJECT_DIR}/.claude/hooks/work-guard.ts`],
+                  blockOnFailure: true,
+                },
+              ],
+            },
+          ],
+          SessionStart: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: "node",
+                  args: [`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "session", "start"],
+                },
+              ],
+            },
+          ],
+          PostToolUse: [
+            {
+              matcher: "Edit|Write|MultiEdit|Bash|PowerShell",
+              hooks: [
+                {
+                  type: "command",
+                  command: "node",
+                  args: [`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "hook", "post-tool-use"],
+                },
+              ],
+            },
+          ],
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: "node",
+                  args: [`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "session", "summary"],
+                },
+              ],
+            },
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: "node",
+                  args: [`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "hook", "claude-memory-wake"],
+                  asyncRewake: true,
+                },
+              ],
+            },
+          ],
+          SubagentStop: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: "node",
+                  args: [`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "hook", "subagent-stop"],
+                },
+              ],
+            },
+          ],
+        },
+      }),
       "src/runtime/adapter.ts": [
         'const args = isCodex ? ["exec", "-"] : ["--print", "--input-format", "text"];',
         "return { stdin: intent.task, plan_id: intent.planId };",
@@ -305,10 +489,28 @@ describe("checkAgentSlots (doctor agent-slots surface, IMP-050)", () => {
 
 describe("runDoctor", () => {
   let cachedRealRepoDoctor: ReturnType<typeof runDoctor> | null = null;
+  /**
+   * PLAN-L7-461: real-repo fence の生産者。CI では同一 job の doctor step が書いた envelope を
+   * 消費して doctor の二重実行を避ける。採用は **観測面 (HEAD / root / ref map / options /
+   * check ID 集合) が完全一致したときだけ**で、ローカル実行を含むそれ以外は従来どおり自走する
+   * (fence の assertion 対象は「real repo に対する doctor 実行の messages」のまま不変)。
+   */
   const realRepoDoctor = () => {
-    cachedRealRepoDoctor ??= runDoctor();
+    if (cachedRealRepoDoctor) return cachedRealRepoDoctor;
+    cachedRealRepoDoctor =
+      consumeDoctorResultEnvelope() ?? runDoctor(nodeDoctorDeps(headSnapshotRoot()));
     return cachedRealRepoDoctor;
   };
+
+  it("U-TESTHYGIENE-028: accepts the resolved aggregate doctor baseline", () => {
+    const r = realRepoDoctor();
+    const blockers = r.messages.filter(
+      (message) => message.includes(" - violation") || message.includes(" — violation"),
+    );
+
+    expect(r.ok, `non-OK doctor checks:\n${blockers.join("\n")}`).toBe(true);
+    expect(blockers).toHaveLength(0);
+  });
 
   it("ok=true includes handover and agent-slots surfaces as warnings", () => {
     const r = runDoctor(deps());
@@ -323,35 +525,70 @@ describe("runDoctor", () => {
   });
 
   it("U-SETUP-014: supports a fresh-consumer setup smoke without requiring dogfood PLAN/design docs", () => {
-    const hookJson = JSON.stringify({
+    const codexHook = (...args: string[]) => ({
+      type: "command",
+      command: "node",
+      args: [".ut-tdd/bin/ut-tdd.mjs", ...args],
+    });
+    const codexHookJson = JSON.stringify({
       hooks: {
         PreToolUse: [
-          { hooks: [{ command: "bun .ut-tdd/bin/ut-tdd.mjs hook agent-guard" }] },
-          { hooks: [{ command: "bun .ut-tdd/bin/ut-tdd.mjs hook work-guard" }] },
+          {
+            hooks: [codexHook("hook", "agent-guard")],
+          },
+          {
+            hooks: [codexHook("hook", "work-guard")],
+          },
         ],
-        SessionStart: [{ hooks: [{ command: "bun .ut-tdd/bin/ut-tdd.mjs session start" }] }],
-        PostToolUse: [{ hooks: [{ command: "bun .ut-tdd/bin/ut-tdd.mjs hook post-tool-use" }] }],
+        SessionStart: [{ hooks: [codexHook("session", "start")] }],
+        PostToolUse: [
+          {
+            hooks: [codexHook("hook", "post-tool-use")],
+          },
+        ],
         Stop: [
-          { hooks: [{ command: "bun .ut-tdd/bin/ut-tdd.mjs session summary" }] },
-          { hooks: [{ command: "bun .ut-tdd/bin/ut-tdd.mjs hook subagent-stop" }] },
+          {
+            hooks: [codexHook("session", "summary")],
+          },
         ],
+      },
+    });
+    const claudeHook = (...args: string[]) => ({
+      type: "command",
+      command: "node",
+      args: [".ut-tdd/bin/ut-tdd.mjs", ...args],
+    });
+    const claudeHookJson = JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          { hooks: [claudeHook("hook", "agent-guard")] },
+          { hooks: [claudeHook("hook", "work-guard")] },
+        ],
+        SessionStart: [{ hooks: [claudeHook("session", "start")] }],
+        PostToolUse: [{ hooks: [claudeHook("hook", "post-tool-use")] }],
+        Stop: [{ hooks: [claudeHook("session", "summary")] }],
+        SubagentStop: [{ hooks: [claudeHook("hook", "subagent-stop")] }],
       },
     });
     const file = (path: string) => join("/repo", ...path.split("/"));
     const files = new Map<string, string>([
-      [file(".ut-tdd/bin/ut-tdd.mjs"), "const localBin = '.ut-tdd/bin/ut-tdd.mjs';"],
+      [
+        file(".ut-tdd/bin/ut-tdd.mjs"),
+        "const localBin = '.ut-tdd/bin/ut-tdd.mjs';\nspawnSync(process.execPath, args);\n",
+      ],
       [file("AGENTS.md"), "UT-TDD adapter"],
       [file("CLAUDE.md"), "UT-TDD adapter"],
       [file(".claude/CLAUDE.md"), "UT-TDD adapter"],
-      [file(".claude/settings.json"), hookJson],
+      [file(".claude/settings.json"), claudeHookJson],
       [file(".codex/config.toml"), "hooks = true"],
-      [file(".codex/hooks.json"), hookJson],
+      [file(".codex/hooks.json"), codexHookJson],
     ]);
 
     const r = runDoctor(deps({ files }), { setupSmoke: true });
 
     expect(DOCTOR_RUN_PROFILE_IDS).toEqual([
       "source-full",
+      "source-doc-lane",
       "source-toolchain",
       "consumer-toolchain",
       "consumer-setup-smoke",
@@ -404,25 +641,27 @@ describe("runDoctor", () => {
     expect(resolveDoctorRunProfile({ profile: "consumer-toolchain" })).toEqual(
       DOCTOR_RUN_PROFILES["consumer-toolchain"],
     );
-    expect(r.ok).toBe(true);
-    expect(r.messages).toEqual(["doctor: setup-smoke - OK (checked=22, failed=0)"]);
+    expect(r.messages).toEqual(["doctor: setup-smoke - OK (checked=23, failed=0)"]);
   });
 
   it("runs only the toolchain gate when doctor scope is toolchain", () => {
-    const definitions = buildFullDoctorCheckDefinitions(nodeDoctorDeps(process.cwd()));
+    const definitions = buildFullDoctorCheckDefinitions(nodeDoctorDeps(headSnapshotRoot()));
     const selected = selectDoctorCheckDefinitions(definitions, "toolchain");
-    const run = collectDoctorCheckRun(nodeDoctorDeps(process.cwd()), {
+    const run = collectDoctorCheckRun(nodeDoctorDeps(headSnapshotRoot()), {
       scope: "toolchain",
       timing: true,
     });
+    expect(run.checkIds).toEqual(selected.map((definition) => definition.id));
 
     expect(resolveDoctorRunProfile()).toEqual(DOCTOR_RUN_PROFILES["source-full"]);
     expect(doctorRunProfilesForAudience("source").map((profile) => profile.id)).toEqual([
       "source-full",
+      "source-doc-lane",
       "source-toolchain",
     ]);
     expect(doctorRunProfilesForAudience("source").filter((profile) => profile.sourceOnly)).toEqual([
       DOCTOR_RUN_PROFILES["source-full"],
+      DOCTOR_RUN_PROFILES["source-doc-lane"],
     ]);
     expect(isConsumerSafeDoctorRunProfile(DOCTOR_RUN_PROFILES["source-full"])).toBe(false);
     expect(isConsumerSafeDoctorRunProfile(DOCTOR_RUN_PROFILES["source-toolchain"])).toBe(true);
@@ -474,13 +713,40 @@ describe("runDoctor", () => {
     expect(run.checks).toHaveLength(1);
     expect(run.checks[0]?.messages[0]).toContain("toolchain-pin");
     expect(run.timings).toEqual([
-      expect.objectContaining({ id: "toolchain-pin", ok: run.checks[0]?.ok, message_count: 1 }),
+      expect.objectContaining({
+        id: "toolchain-pin",
+        ok: run.checks[0]?.ok,
+        message_count: 1,
+      }),
     ]);
+  });
+
+  it("U-CIPOL-027: runs exactly the checks declared by the source doc lane profile", () => {
+    const profile = DOCTOR_RUN_PROFILES["source-doc-lane"];
+    const profileOutputIds = new Set<string>(profile.outputIds);
+    const definitions = buildFullDoctorCheckDefinitions(nodeDoctorDeps(headSnapshotRoot()));
+    const selected = selectDoctorCheckDefinitions(definitions, profile.scope, profile.outputIds);
+    const run = collectDoctorCheckRun(nodeDoctorDeps(headSnapshotRoot()), {
+      profile: "source-doc-lane",
+      timing: true,
+    });
+
+    expect(selected.map((definition) => definition.id)).toEqual([...profile.outputIds]);
+    expect(run.checkIds).toEqual([...profile.outputIds]);
+    expect(run.checks).toHaveLength(profile.outputIds.length);
+    expect(run.timings.map((timing) => timing.id)).toEqual(
+      definitions
+        .filter(
+          (definition) =>
+            definition.profiles.includes(profile.scope) && profileOutputIds.has(definition.id),
+        )
+        .map((definition) => definition.id),
+    );
   });
 
   it("includes asset-drift hard gate in doctor output", () => {
     const r = realRepoDoctor();
-    expect(r.ok).toBe(true);
+    // This test verifies gate wiring; unrelated active repo gates may legitimately be non-terminal.
     expect(r.messages.some((m) => m.includes("doctor: asset-drift") && m.includes("OK"))).toBe(
       true,
     );
@@ -488,7 +754,6 @@ describe("runDoctor", () => {
 
   it("includes skill-assignment hard gate in doctor output", () => {
     const r = realRepoDoctor();
-    expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: skill-assignment - OK"))).toBe(true);
   });
 
@@ -497,7 +762,6 @@ describe("runDoctor", () => {
   // where a lint module is reachable/tested but its audit never runs in a runtime path).
   it("invokes the 4 newly-wired lint audits + lint-wiring meta-gate in doctor output", () => {
     const r = realRepoDoctor();
-    expect(r.ok).toBe(true);
     for (const gate of [
       "doctor: doc-consistency — OK",
       "doctor: entity-coverage — OK",
@@ -511,34 +775,354 @@ describe("runDoctor", () => {
 
   it("includes branch-kind-check in doctor output", () => {
     const r = realRepoDoctor();
-    expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: branch-kind-check - OK"))).toBe(true);
   });
 
   it("includes GitHub CI policy hard gate in doctor output", () => {
     const r = realRepoDoctor();
-    expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: github-ci-policy - OK"))).toBe(true);
   });
 
   it("includes G1/G3 trace gates in doctor output", () => {
     const r = realRepoDoctor();
-    expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: g1-trace - OK"))).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: g3-trace - OK"))).toBe(true);
   });
 
-  it("hard-gates PLAN governance once repo frontmatter debt is closed", () => {
-    const governance = checkPlanGovernance(process.cwd());
+  it("surfaces typed spec trace closure as a doctor hard gate", () => {
+    const result = checkTypedSpecTraceClosure(headSnapshotRoot());
+    const r = realRepoDoctor();
+
+    expect(result.ok).toBe(true);
+    expect(result.messages[0]).toContain("typed-spec-trace-closure - OK");
+    expect(r.messages.some((m) => m.includes("doctor: typed-spec-trace-closure - OK"))).toBe(true);
+  });
+
+  it("surfaces design doc cross integrity as a doctor hard gate", () => {
+    const result = checkDesignDocCrossIntegrity(headSnapshotRoot());
+    const r = realRepoDoctor();
+
+    expect(result.ok).toBe(true);
+    expect(result.messages[0]).toContain("design-doc-cross-integrity - OK");
+    expect(r.messages.some((m) => m.includes("doctor: design-doc-cross-integrity - OK"))).toBe(
+      true,
+    );
+  });
+
+  it("fails design doc cross integrity when a typed spec is defined by multiple docs", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-design-cross-"));
+    try {
+      mkdirSync(join(root, "docs", "governance"), { recursive: true });
+      mkdirSync(join(root, "docs", "design", "harness", "L4-basic-design"), {
+        recursive: true,
+      });
+      writeFileSync(
+        join(root, "docs", "governance", "vmodel-document-catalog.md"),
+        [
+          "# V-model document catalog",
+          "",
+          "| doc_type_id | layer | sub_doc | category | requirement_class | applicability | default_status | source_doc_family | authoring_source_path | projection_table | profile_controlled | skip_reason_required |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|",
+          "| DOC-A | L4 | data | basic-design | core | in_scope | required | fixture | docs/design/harness/L4-basic-design/data.md | spec_defs | false | false |",
+          "| DOC-B | L4 | function | basic-design | core | in_scope | required | fixture | docs/design/harness/L4-basic-design/function.md | spec_defs | false | false |",
+        ].join("\n"),
+        "utf8",
+      );
+      writeFileSync(
+        join(root, "docs", "design", "harness", "L4-basic-design", "data.md"),
+        [
+          "# A",
+          "",
+          "```yaml",
+          "spec:",
+          "  defines:",
+          "    - id: VMS-DUP",
+          "      kind: contract",
+          "```",
+        ].join("\n"),
+        "utf8",
+      );
+      writeFileSync(
+        join(root, "docs", "design", "harness", "L4-basic-design", "function.md"),
+        [
+          "# B",
+          "",
+          "```yaml",
+          "spec:",
+          "  defines:",
+          "    - id: VMS-DUP",
+          "      kind: contract",
+          "```",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = checkDesignDocCrossIntegrity(root);
+
+      expect(result.ok).toBe(false);
+      expect(result.messages.join("\n")).toContain("design-doc-duplicate-definition");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails typed spec trace closure when bidirectional trace or test backlink is missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-typed-spec-closure-"));
+    try {
+      mkdirSync(join(root, "docs", "governance"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "governance", "vmodel-typed-spec-definitions.md"),
+        [
+          "# Typed spec bad closure",
+          "",
+          "```yaml",
+          "spec:",
+          "  defines:",
+          "    - id: VMS-301",
+          "      kind: typed-source",
+          "      traces_to: [VMS-302]",
+          "      tests: [TVMS-301]",
+          "    - id: VMS-302",
+          "      kind: typed-projection",
+          "    - id: TVMS-301",
+          "      kind: unit-oracle",
+          "```",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = checkTypedSpecTraceClosure(root);
+
+      expect(result.ok).toBe(false);
+      expect(result.messages.join("\n")).toContain("typed-spec-trace-reverse-missing");
+      expect(result.messages.join("\n")).toContain("typed-spec-test-backlink-missing");
+      expect(result.messages.join("\n")).toContain("typed-spec-test-missing");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces typed spec ledger/body sync as a doctor hard gate", () => {
+    const result = checkTypedSpecLedgerBodySync(headSnapshotRoot());
+    const r = realRepoDoctor();
+
+    expect(result.ok).toBe(true);
+    expect(result.messages[0]).toContain("typed-spec-ledger-body-sync - OK");
+    expect(r.messages.some((m) => m.includes("doctor: typed-spec-ledger-body-sync - OK"))).toBe(
+      true,
+    );
+  });
+
+  it("fails typed spec ledger/body sync when body, ledger, or phase direction is invalid", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-typed-spec-ledger-"));
+    try {
+      mkdirSync(join(root, "docs", "governance"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "governance", "vmodel-typed-spec-definitions.md"),
+        [
+          "# Typed spec bad ledger",
+          "",
+          "```yaml",
+          "spec:",
+          "  defines:",
+          "    - id: VMS-401",
+          "      kind: typed-source",
+          "      traces_from: [VMS-402]",
+          "      tests: [TVMS-401]",
+          "    - id: VMS-402",
+          "      kind: typed-projection",
+          "      tests: [TVMS-402]",
+          "    - id: TVMS-401",
+          "      kind: unit-oracle",
+          "      traces_from: [VMS-401]",
+          "    - id: TVMS-402",
+          "      kind: unit-oracle",
+          "      traces_from: [VMS-402]",
+          "```",
+          "",
+          "| spec_id | ledger_sources | v_phase |",
+          "| --- | --- | --- |",
+          "| VMS-401 | docs/plans/PLAN-L6-401.md | L6 |",
+          "| VMS-402 | docs/plans/PLAN-L7-402.md | L7 |",
+          "| TVMS-401 | docs/test-design/harness/L7-unit-test-design.md | L7 |",
+          "| TVMS-999 | docs/test-design/harness/L7-unit-test-design.md | L7 |",
+          "",
+          "VMS-401 has body substance.",
+          "VMS-402 has body substance.",
+          "TVMS-401 has body substance.",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = checkTypedSpecLedgerBodySync(root);
+
+      expect(result.ok).toBe(false);
+      expect(result.messages.join("\n")).toContain("typed-spec-ledger-row-missing");
+      expect(result.messages.join("\n")).toContain("typed-spec-body-missing");
+      expect(result.messages.join("\n")).toContain("typed-spec-ledger-unknown-id");
+      expect(result.messages.join("\n")).toContain("typed-spec-phase-direction-invalid");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces typed spec owned artifact dispersal as a doctor hard gate", () => {
+    const result = checkTypedSpecOwnedArtifactDispersal(headSnapshotRoot());
+    const r = realRepoDoctor();
+
+    expect(result.ok).toBe(true);
+    expect(result.messages[0]).toContain("typed-spec-owned-artifact-dispersal - OK");
+    expect(
+      r.messages.some((m) => m.includes("doctor: typed-spec-owned-artifact-dispersal - OK")),
+    ).toBe(true);
+  });
+
+  it("fails typed spec owned artifact dispersal when declarations remain outside ledger sources", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-typed-spec-owned-"));
+    try {
+      mkdirSync(join(root, "docs", "governance"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "governance", "vmodel-typed-spec-definitions.md"),
+        [
+          "# Typed spec ownership bad fixture",
+          "",
+          "```yaml",
+          "spec:",
+          "  defines:",
+          "    - id: VMS-601",
+          "      kind: typed-source",
+          "```",
+          "",
+          "| spec_id | ledger_sources | v_phase |",
+          "| --- | --- | --- |",
+          "| VMS-601 | docs/plans/PLAN-L6-601.md | L6 |",
+          "",
+          "VMS-601 has body substance.",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = checkTypedSpecOwnedArtifactDispersal(root);
+
+      expect(result.ok).toBe(false);
+      expect(result.messages.join("\n")).toContain("typed-spec-owned-source-mismatch");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces typed spec phase/layer alignment as a doctor hard gate", () => {
+    const result = checkTypedSpecPhaseLayerAlignment(headSnapshotRoot());
+    const r = realRepoDoctor();
+
+    expect(result.ok).toBe(true);
+    expect(result.messages[0]).toContain("typed-spec-phase-layer-alignment - OK");
+    expect(
+      r.messages.some((m) => m.includes("doctor: typed-spec-phase-layer-alignment - OK")),
+    ).toBe(true);
+  });
+
+  it("fails typed spec phase/layer alignment when owner frontmatter does not match v_phase", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-typed-spec-phase-layer-"));
+    try {
+      mkdirSync(join(root, "docs", "governance"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "governance", "vmodel-typed-spec-definitions.md"),
+        [
+          "---",
+          "title: Typed spec phase layer bad fixture",
+          "status: confirmed",
+          "typed_spec_phase_owner: L5",
+          "---",
+          "",
+          "# Typed spec phase/layer bad fixture",
+          "",
+          "```yaml",
+          "spec:",
+          "  defines:",
+          "    - id: VMS-701",
+          "      kind: typed-source",
+          "```",
+          "",
+          "| spec_id | ledger_sources | v_phase |",
+          "| --- | --- | --- |",
+          "| VMS-701 | docs/governance/vmodel-typed-spec-definitions.md | L6 |",
+          "",
+          "VMS-701 has body substance.",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = checkTypedSpecPhaseLayerAlignment(root);
+
+      expect(result.ok).toBe(false);
+      expect(result.messages.join("\n")).toContain("typed-spec-phase-layer-mismatch");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces V-model agent contract detection as a doctor hard gate", () => {
+    const result = checkAgentContractDetection(headSnapshotRoot());
+    const r = realRepoDoctor();
+
+    expect(result.ok).toBe(true);
+    expect(result.messages[0]).toContain("agent-contract-detection - OK");
+    expect(r.messages.some((m) => m.includes("doctor: agent-contract-detection - OK"))).toBe(true);
+  });
+
+  it("fails V-model agent contract detection when done_when references an unknown doctor gate", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-agent-contract-"));
+    try {
+      const governanceDir = join(root, "docs", "governance");
+      mkdirSync(governanceDir, { recursive: true });
+      writeFileSync(join(governanceDir, "vmodel-upgrade-schedule.md"), "# Schedule\n", "utf8");
+      writeFileSync(
+        join(governanceDir, "vmodel-typed-spec-definitions.md"),
+        "# Typed spec\n",
+        "utf8",
+      );
+      writeFileSync(
+        join(governanceDir, "vmodel-agent-contracts.md"),
+        [
+          "# Agent contracts",
+          "",
+          "```yaml",
+          "agent_contracts:",
+          "  - contract_id: VAGENT-301",
+          "    target_path: docs/governance/vmodel-typed-spec-definitions.md",
+          "    defines: [VMS-301]",
+          "    read_first:",
+          "      - docs/governance/vmodel-upgrade-schedule.md",
+          "    done_when:",
+          "      - doctor:no-such-gate",
+          "```",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = checkAgentContractDetection(root);
+
+      expect(result.ok).toBe(false);
+      expect(result.messages.join("\n")).toContain("agent-contract-doctor-gate-unknown");
+      expect(result.messages.join("\n")).toContain("VAGENT-301:no-such-gate");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("passes PLAN governance after merged-plan debt is resolved", () => {
+    const governance = checkPlanGovernance(headSnapshotRoot());
     const r = realRepoDoctor();
 
     expect(governance.ok).toBe(true);
-    expect(governance.messages[0]).toContain("plan-governance - OK");
-    expect(r.ok).toBe(true);
+    expect(governance.messages).toEqual(expect.arrayContaining([expect.stringContaining("OK")]));
     expect(r.messages.some((m) => m.includes("doctor: plan-schedule") && m.includes("OK"))).toBe(
       true,
     );
-    expect(r.messages.some((m) => m.includes("doctor: plan-governance - OK"))).toBe(true);
+    expect(r.messages.some((m) => m.includes("doctor: plan-governance") && m.includes("OK"))).toBe(
+      true,
+    );
   });
 
   it("keeps doctor plan gate re-exports stable after extraction", () => {
@@ -613,7 +1197,6 @@ describe("runDoctor", () => {
 
   it("surfaces dependency-drift and regression expansion instead of scaffold stub", () => {
     const r = realRepoDoctor();
-    expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: dependency-drift"))).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: regression-expansion"))).toBe(true);
     expect(r.messages.some((m) => m.includes("scaffold stub"))).toBe(false);
@@ -623,7 +1206,6 @@ describe("runDoctor", () => {
     const r = realRepoDoctor();
     const rollupLines = r.messages.filter((m) => m.startsWith("doctor: roadmap-rollup"));
 
-    expect(r.ok).toBe(true);
     expect(rollupLines).toHaveLength(1);
     expect(rollupLines[0]).toContain("bands ");
     expect(rollupLines[0]).toContain("gates ");
@@ -634,7 +1216,6 @@ describe("runDoctor", () => {
   it("surfaces Cycle P4 closure audit as a hard gate", () => {
     const r = realRepoDoctor();
 
-    expect(r.ok).toBe(true);
     expect(r.messages.some((m) => m.includes("doctor: cycle-p4-verification - OK"))).toBe(true);
   });
 
@@ -941,8 +1522,14 @@ describe("runDoctor", () => {
       ["runtime-portability", checkRuntimePortability(missingRoot)],
       ["db-projection-coverage", checkDbProjectionCoverage(missingRoot)],
       ["db-projection-ingestion", checkDbProjectionIngestion(missingRoot)],
+      ["typed-spec-trace-closure", checkTypedSpecTraceClosure(missingRoot)],
+      ["typed-spec-ledger-body-sync", checkTypedSpecLedgerBodySync(missingRoot)],
+      ["typed-spec-owned-artifact-dispersal", checkTypedSpecOwnedArtifactDispersal(missingRoot)],
+      ["typed-spec-phase-layer-alignment", checkTypedSpecPhaseLayerAlignment(missingRoot)],
+      ["agent-contract-detection", checkAgentContractDetection(missingRoot)],
       ["rule-drift", checkRuleDrift(missingRoot)],
       ["gate-confirm", checkGateConfirm(missingRoot)],
+      ["gate-id-format", checkGateIdFormat(missingRoot)],
       ["plan-dod", checkPlanDod(missingRoot)],
       ["placeholder-deps", checkPlaceholderDeps(missingRoot)],
       ["g1-trace", checkPlanTraceGate(missingRoot, "G1-trace")],
@@ -963,6 +1550,7 @@ describe("runDoctor", () => {
       ["l7-completion", checkL7Completion(missingRoot)],
       ["verification-groups", checkVerificationGroupsResult(missingRoot)],
       ["roadmap", checkRoadmap(missingRoot)],
+      ["deliverable-plan-trace", checkDeliverablePlanTrace(missingRoot)],
       ["impl-plan-trace", checkImplPlanTrace(missingRoot)],
       ["oracle-test-trace", checkOracleTestTrace(missingRoot)],
       ["tracked-canonical", checkTrackedCanonical(missingRoot)],
@@ -1006,23 +1594,29 @@ describe("runDoctor", () => {
   });
 
   it("keeps all hard gates wired into runDoctor hard-gate aggregation", () => {
-    const indexSource = readFileSync(join(process.cwd(), "src", "doctor", "index.ts"), "utf8");
+    const indexSource = readFileSync(join(headSnapshotRoot(), "src", "doctor", "index.ts"), "utf8");
     const registrySource = readFileSync(
-      join(process.cwd(), "src", "doctor", "check-registry.ts"),
+      join(headSnapshotRoot(), "src", "doctor", "check-registry.ts"),
       "utf8",
     );
     const definitionsSource = readFileSync(
-      join(process.cwd(), "src", "doctor", "check-definitions.ts"),
+      join(headSnapshotRoot(), "src", "doctor", "check-definitions.ts"),
       "utf8",
     );
     const groupSource = readFileSync(
-      join(process.cwd(), "src", "doctor", "check-definition-groups.ts"),
+      join(headSnapshotRoot(), "src", "doctor", "check-definition-groups.ts"),
       "utf8",
     );
-    const profileSource = readFileSync(join(process.cwd(), "src", "doctor", "profiles.ts"), "utf8");
-    const runnerSource = readFileSync(join(process.cwd(), "src", "doctor", "runner.ts"), "utf8");
-    const definitions = buildFullDoctorCheckDefinitions(nodeDoctorDeps(process.cwd()));
-    const definitionGroups = buildDoctorCheckDefinitionGroups(nodeDoctorDeps(process.cwd()));
+    const profileSource = readFileSync(
+      join(headSnapshotRoot(), "src", "doctor", "profiles.ts"),
+      "utf8",
+    );
+    const runnerSource = readFileSync(
+      join(headSnapshotRoot(), "src", "doctor", "runner.ts"),
+      "utf8",
+    );
+    const definitions = buildFullDoctorCheckDefinitions(nodeDoctorDeps(headSnapshotRoot()));
+    const definitionGroups = buildDoctorCheckDefinitionGroups(nodeDoctorDeps(headSnapshotRoot()));
     const flattenedGroupDefinitions = definitionGroups.flatMap((group) => group.definitions);
     const checkIds = definitions.map((definition) => definition.id);
     const groupCheckIds = flattenedGroupDefinitions.map((definition) => definition.id);
@@ -1031,10 +1625,10 @@ describe("runDoctor", () => {
     expect(indexSource).toContain("const profile = resolveDoctorRunProfile(options)");
     expect(indexSource).toContain('if (profile.invocation === "setup-smoke")');
     expect(indexSource).toContain(
-      "const { checks, timings } = collectDoctorCheckRun(deps, options)",
+      "const { checks, checkIds, timings } = collectDoctorCheckRun(deps, options)",
     );
-    expect(registrySource).toContain('} from "./runner"');
-    expect(registrySource).toContain('} from "./check-definitions"');
+    expect(registrySource).toContain('} from "./runner.ts"');
+    expect(registrySource).toContain('} from "./check-definitions.ts"');
     expect(runnerSource).toContain("export function collectDoctorCheckRun");
     expect(runnerSource).toContain("export function collectDoctorChecks");
     expect(definitionsSource).toContain("export function buildFullDoctorCheckDefinitions");
@@ -1042,7 +1636,7 @@ describe("runDoctor", () => {
     expect(groupSource).toContain("export function buildDoctorCheckDefinitionGroups");
     expect(runnerSource).toContain("buildFullDoctorCheckDefinitions(deps, options)");
     expect(definitionsSource).not.toContain("checkPlanReferenceFreshnessAdvisory");
-    expect(registrySource).toContain('} from "./profiles"');
+    expect(registrySource).toContain('} from "./profiles.ts"');
     expect(profileSource).toContain("export const DOCTOR_RUN_PROFILES");
     expect(profileSource).toContain("export const DOCTOR_RUN_PROFILE_IDS");
     expect(profileSource).toContain("export function resolveDoctorRunProfile");
@@ -1069,6 +1663,7 @@ describe("runDoctor", () => {
       "pair-freeze",
       "module-drift",
       "merged-plan-status",
+      "memory-sync",
       "review-evidence",
       "guardrail-invariants",
       "asset-drift",
@@ -1084,8 +1679,11 @@ describe("runDoctor", () => {
       "runtime-portability",
       "db-projection-coverage",
       "db-projection-ingestion",
+      "design-detection",
       "rule-drift",
+      "model-id-doc-drift",
       "gate-confirm",
+      "gate-id-format",
       "plan-schedule",
       "plan-governance",
       "plan-dod",
@@ -1102,6 +1700,8 @@ describe("runDoctor", () => {
       "l6-fr-coverage",
       "readability",
       "runtime-readability",
+      "runtime-state-location",
+      "test-repository-isolation",
       "project-hook",
       "codex-wrapper-parity",
       "toolchain-pin",
@@ -1109,11 +1709,13 @@ describe("runDoctor", () => {
       "l7-completion",
       "verification-groups",
       "roadmap",
+      "deliverable-plan-trace",
       "impl-plan-trace",
       "oracle-test-trace",
       "tracked-canonical",
       "dependency-drift",
       "regression-expansion",
+      "agent-contract-detection",
       "green-command-digest",
     ];
 

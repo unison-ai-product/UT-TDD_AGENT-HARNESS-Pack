@@ -6,7 +6,7 @@ import {
   parseLinks,
   parseSrPlan,
   scrumReverseMessages,
-} from "../src/lint/scrum-reverse";
+} from "../src/lint/scrum-reverse.ts";
 
 function plan(over: Partial<ParsedSrPlan>): ParsedSrPlan {
   return {

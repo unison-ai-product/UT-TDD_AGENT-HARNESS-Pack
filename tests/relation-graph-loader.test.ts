@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadRelationGraphSourceSet } from "../src/graph/loader";
+import { loadRelationGraphSourceSet } from "../src/graph/loader.ts";
 import {
   analyzeRelationImpact,
   collectRelationGraphProjection,
   exportRelationDiagram,
-} from "../src/lint/relation-graph";
+} from "../src/lint/relation-graph.ts";
 
 // PLAN-L7-32 §9 discharge: repo→RelationGraphSourceSet loader の結合テスト。
 // tmp repo に PLAN(generates)+src+test(import)+design(pair_artifact)+test-design を置き、
@@ -28,6 +28,7 @@ function buildRepo(root: string): void {
   mkdirSync(join(root, ".ut-tdd", "evidence", "g10-ux"), { recursive: true });
   mkdirSync(join(root, ".ut-tdd", "audit"), { recursive: true });
   mkdirSync(join(root, ".ut-tdd", "review"), { recursive: true });
+  mkdirSync(join(root, ".ut-tdd", "memory"), { recursive: true });
   mkdirSync(join(root, "src", "widget"), { recursive: true });
   mkdirSync(join(root, "tests"), { recursive: true });
 
@@ -134,6 +135,11 @@ function buildRepo(root: string): void {
     "utf8",
   );
   writeFileSync(
+    join(root, ".ut-tdd", "memory", "feedback-fixture.md"),
+    ["# Fixture memory", "", "Durable project knowledge.", ""].join("\n"),
+    "utf8",
+  );
+  writeFileSync(
     join(root, ".ut-tdd", "evidence", "g8-integration", "test-manifest.json"),
     JSON.stringify(
       {
@@ -186,6 +192,46 @@ function buildRepo(root: string): void {
 }
 
 describe("loadRelationGraphSourceSet", () => {
+  it("keeps draft outputs that are not materialized as pending graph artifacts", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-graph-loader-pending-"));
+    try {
+      buildRepo(root);
+      writeFileSync(
+        join(root, "docs", "plans", "PLAN-TEST-02-future.md"),
+        [
+          "---",
+          "plan_id: PLAN-TEST-02-future",
+          "status: draft",
+          "kind: add-impl",
+          "generates:",
+          "  - artifact_path: src/future/recovery.ts",
+          "    artifact_type: source_module",
+          "---",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const sourceSet = loadRelationGraphSourceSet(root);
+      const plan = sourceSet.plans?.find((item) => item.id === "PLAN-TEST-02-future");
+      expect(plan?.generates).toEqual(["src/future/recovery.ts"]);
+      expect(plan?.status).toBe("draft");
+      expect(plan?.availability).toEqual({ "src/future/recovery.ts": "planned" });
+
+      const projection = collectRelationGraphProjection(sourceSet);
+      expect(projection.edges).toContainEqual({
+        from: "plan:PLAN-TEST-02-future",
+        to: "source:src/future/recovery.ts",
+        kind: "generates",
+        lifecycle: "planned",
+      });
+      const result = analyzeRelationImpact({ changedPaths: [], projection });
+      expect(result.findings.filter((finding) => finding.code === "stale-edge")).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("builds a source set with plan→source, source→test, design→test-design edges", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-graph-loader-"));
     try {
@@ -245,6 +291,13 @@ describe("loadRelationGraphSourceSet", () => {
       expect(auditDoc).toMatchObject({
         id: ".ut-tdd/audit/A-143-l14-close-system-foundation-audit.md",
         path: ".ut-tdd/audit/A-143-l14-close-system-foundation-audit.md",
+      });
+      const memoryDoc = sourceSet.designDocs?.find(
+        (d) => d.path === ".ut-tdd/memory/feedback-fixture.md",
+      );
+      expect(memoryDoc).toMatchObject({
+        id: ".ut-tdd/memory/feedback-fixture.md",
+        path: ".ut-tdd/memory/feedback-fixture.md",
       });
       const g8EvidenceDoc = sourceSet.designDocs?.find(
         (d) => d.path === ".ut-tdd/evidence/g8-integration/test-manifest.json",
@@ -367,6 +420,16 @@ describe("loadRelationGraphSourceSet", () => {
         "design:.ut-tdd/audit/A-143-l14-close-system-foundation-audit.md",
       );
       expect(auditImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
+
+      const memoryImpact = analyzeRelationImpact({
+        changedPaths: [".ut-tdd/memory/feedback-fixture.md"],
+        projection,
+      });
+      expect(memoryImpact.ok).toBe(true);
+      expect(memoryImpact.changedNodes.map((n) => n.id)).toContain(
+        "design:.ut-tdd/memory/feedback-fixture.md",
+      );
+      expect(memoryImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
 
       const g8EvidenceImpact = analyzeRelationImpact({
         changedPaths: [".ut-tdd/evidence/g8-integration/test-manifest.json"],
@@ -616,6 +679,15 @@ describe("relation graph real-repo loader (PLAN-L7-142 stale-edge fence)", () =>
       "design:.ut-tdd/audit/A-143-l14-close-system-foundation-audit.md",
     );
     expect(auditImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
+    const memoryImpact = analyzeRelationImpact({
+      changedPaths: [".ut-tdd/memory/feedback-plan--81abf9753343.md"],
+      projection,
+    });
+    expect(memoryImpact.ok).toBe(true);
+    expect(memoryImpact.changedNodes.map((n) => n.id)).toContain(
+      "design:.ut-tdd/memory/feedback-plan--81abf9753343.md",
+    );
+    expect(memoryImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
     const g8EvidenceImpact = analyzeRelationImpact({
       changedPaths: [".ut-tdd/evidence/g8-integration/20260626-it-module-state-minimum.json"],
       projection,
@@ -708,5 +780,12 @@ describe("relation graph real-repo loader (PLAN-L7-142 stale-edge fence)", () =>
     expect(codexHooksImpact.ok).toBe(true);
     expect(codexHooksImpact.changedNodes.map((n) => n.id)).toContain("design:.codex/hooks.json");
     expect(codexHooksImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
+    // PLAN-L7-397: docs/ 直下 ledger (どのサブディレクトリ walk にも入らない) の coverage 回帰止め。
+    for (const path of ["docs/feedback-log.md", "docs/improvement-backlog.md"]) {
+      const impact = analyzeRelationImpact({ changedPaths: [path], projection });
+      expect(impact.ok).toBe(true);
+      expect(impact.changedNodes.map((n) => n.id)).toContain(`design:${path}`);
+      expect(impact.findings.map((f) => f.code)).not.toContain("missing-projection");
+    }
   });
 });

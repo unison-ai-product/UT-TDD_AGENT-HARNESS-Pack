@@ -12,20 +12,23 @@
 import {
   appendFileSync,
   existsSync,
-  mkdirSync,
   readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { classifyVerificationVerb } from "./verb-classify";
+import { ensureDir } from "../shared/fs.ts";
+import { evaluateMemoryPromotion } from "./memory-promotion.ts";
+import { classifyVerificationVerb } from "./verb-classify.ts";
 
 export type SessionEventType =
   | "session_start"
   | "tool_use"
   | "commit"
   | "plan_switch"
+  | "memory_write"
+  | "memory_promotion_missed"
   | "session_end"
   | "forced_stop" // 強制停止 (推定、PLAN-L6-04/L7-02 forced-stop-feedback)
   | "user_prompt" // ユーザー入力 (dangling-turn 推定の活動 marker)
@@ -80,6 +83,8 @@ export interface SessionLogDeps {
   removeFile?: (path: string) => void;
   /** 直近 commit hash (`git rev-parse HEAD`)。IMP-078 gap③: commit 捕捉を hook で供給。未提供→hash 無し。 */
   headCommit?: () => string | null;
+  /** Optional user-facing warning sink. Omitted in tests and non-interactive consumers. */
+  warn?: (message: string) => void;
 }
 
 const BRANCH_PLAN_RE = /^(?:add|design|feature|reverse|hotfix|poc|refactor)\/(.+)$/;
@@ -88,14 +93,29 @@ const SECRET_RE =
   /\b([A-Za-z0-9_-]*(?:token|key|secret|password|passwd|pwd|bearer)[A-Za-z0-9_-]*\s*[=:]\s*)\S+/gi;
 const MAX_SUMMARY = 120;
 
+/** token/key/secret 様の値をマスクする (truncate はしない、path 系の再利用向け純関数)。 */
+function maskSecrets(raw: string): string {
+  return raw.replace(SECRET_RE, "$1***");
+}
+
 /** 禁則 (token/key/secret 様) をマスクし 120 文字へ truncate。durable digest への漏洩防止。 */
 export function sanitize(raw: string | undefined): string {
   if (!raw) return "";
-  const masked = raw.replace(SECRET_RE, "$1***");
+  const masked = maskSecrets(raw);
   return masked.length > MAX_SUMMARY ? `${masked.slice(0, MAX_SUMMARY - 1)}…` : masked;
 }
 
-/** ツール名 + 対象 path のみ。引数値・ファイル内容は載せない。 */
+/**
+ * ツール名 + 対象 path のみ。引数値・ファイル内容は載せない。
+ *
+ * path を伴うツールは 120 文字 truncate を **適用しない** (mask のみ)。この target は
+ * work-guard の sessionTouchedFiles (このセッションが触ったファイル一覧) の突合キーに
+ * そのまま再利用されており、途中で "…" 省略されると実 path と文字列一致せず、深い
+ * repo path + 説明的なファイル名 (本 repo の PLAN 命名規約) で長さ 120 超が普通に起き、
+ * 自分自身の正当な編集が「他ランタイムの foreign uncommitted file」と誤検知され block
+ * される (システム全体監査で実発見、2026-07-08)。path が secret を含むことは通常無いが
+ * mask 自体は安全側で維持する。
+ */
 export function summarize(input: SessionHookInput): string {
   const tool = input.tool_name ?? "";
   const ti = input.tool_input ?? {};
@@ -103,11 +123,14 @@ export function summarize(input: SessionHookInput): string {
   // Bash は引数を残さず固定の検証 verb token だけを hint にする (PLAN-RECOVERY-05 item 2)。
   // attempt-escalation が「同じ検証コマンドの連続失敗」を grouping できるよう、command を
   // whitelist verb (vitest/tsc/doctor/lint/...) に分類して埋める。未分類/非 Bash は従来どおり。
-  if (tool === "Bash" && !path) {
+  if ((tool === "Bash" || tool === "PowerShell") && !path) {
     const verb = classifyVerificationVerb(String(ti.command ?? ""));
-    return sanitize(`${tool} (${verb ?? "bash"})`);
+    return sanitize(`${tool} (${verb ?? tool.toLowerCase()})`);
   }
-  const hint = path ? String(path) : tool === "Bash" ? "(bash)" : "";
+  if (path) {
+    return maskSecrets(`${tool} ${path}`.trim());
+  }
+  const hint = tool === "Bash" ? "(bash)" : tool === "PowerShell" ? "(powershell)" : "";
   return sanitize(`${tool} ${hint}`.trim());
 }
 
@@ -125,6 +148,31 @@ function outcomeOf(input: SessionHookInput): "ok" | "error" | undefined {
   if (r?.outcome === "error") return "error";
   if (r?.outcome === "ok") return "ok";
   return undefined;
+}
+
+function isMemoryWriteInput(input: SessionHookInput): boolean {
+  const tool = input.tool_name ?? "";
+  const values = input.tool_input ?? {};
+  const path = String(values.file_path ?? values.path ?? values.notebook_path ?? "")
+    .replaceAll("\\", "/")
+    .toLowerCase();
+  if (
+    path.includes(".ut-tdd/memory/") &&
+    /^(?:Edit|Write|MultiEdit|apply_patch|write_file)$/i.test(tool)
+  ) {
+    return true;
+  }
+  const patch = String(values.patch ?? values.input ?? "")
+    .replaceAll("\\", "/")
+    .toLowerCase();
+  if (
+    /^(?:apply_patch|write_file)$/i.test(tool) &&
+    /\*\*\* (?:update|add|delete) file: .*\.ut-tdd\/memory\//i.test(patch)
+  ) {
+    return true;
+  }
+  const command = String(values.command ?? values.cmd ?? "");
+  return /(?:ut-tdd|src[\\/]cli\.ts)\s+memory\s+add\b/i.test(command);
 }
 
 function emptyDigest(planId: string): PlanDigest {
@@ -381,8 +429,15 @@ export function onSessionStart(input: SessionHookInput, deps: SessionLogDeps): n
 /** tool_use (git commit は commit) を append。常に 0 (fail-open)。 */
 export function onPostToolUse(input: SessionHookInput, deps: SessionLogDeps): number {
   try {
-    const cmd = String((input.tool_input as { command?: unknown })?.command ?? "");
-    const isCommit = input.tool_name === "Bash" && /git\s+commit/.test(cmd);
+    const shellInput = input.tool_input as { command?: unknown; cmd?: unknown };
+    const cmd = String(shellInput?.command ?? shellInput?.cmd ?? "");
+    // PowerShell は Windows ネイティブ Claude Code の主シェルツール (PLAN-RECOVERY-13 / issue #86)。
+    const isShellTool = /^(?:Bash|PowerShell|exec_command|local_shell)$/i.test(
+      input.tool_name ?? "",
+    );
+    const isCommit = isShellTool && /\bgit\s+commit\b/i.test(cmd);
+    const isMemoryWrite = isMemoryWriteInput(input);
+    const observedOutcome = outcomeOf(input);
     // PLAN-L7-04 Gap B 配線: commit message に PLAN ID があれば current-plan を活性化 (best-effort)。
     // `-F -` heredoc は cmd に本文が乗らず inferred=null → no-op。fail-open (throw しない)。
     if (isCommit) {
@@ -394,12 +449,12 @@ export function onPostToolUse(input: SessionHookInput, deps: SessionLogDeps): nu
         ts: deps.now(),
         session_id: input.session_id ?? "unknown",
         plan_id: input.plan_id ?? resolveActivePlan(deps),
-        event_type: isCommit ? "commit" : "tool_use",
+        event_type: isCommit ? "commit" : isMemoryWrite ? "memory_write" : "tool_use",
         tool: input.tool_name,
         // IMP-078 gap③: commit は HEAD hash を捕捉 (deps.headCommit、PostToolUse は commit 完了後 = 新 HEAD)。
         // hash 取得不能 (headCommit 未提供/null) なら undefined = 旧挙動 ("Bash (bash)" 汚染は避ける、I-2)。
         target: isCommit ? (deps.headCommit?.() ?? undefined) : summarize(input),
-        outcome: outcomeOf(input),
+        outcome: isCommit || isMemoryWrite ? (observedOutcome ?? "ok") : observedOutcome,
       },
       deps,
     );
@@ -429,6 +484,23 @@ export function onStop(input: SessionHookInput, deps: SessionLogDeps): number {
     const raw = deps.readText(file);
     if (!raw) return 0;
     const events = parseSessionEvents(raw);
+    const promotion = evaluateMemoryPromotion(events);
+    if (promotion.should_nudge) {
+      const nudge: SessionEvent = {
+        ts: deps.now(),
+        session_id: sid,
+        plan_id: input.plan_id ?? resolveActivePlan(deps),
+        event_type: "memory_promotion_missed",
+        tool: "session-summary",
+        target: promotion.reason,
+        outcome: "ok",
+      };
+      recordEvent(nudge, deps);
+      events.push(nudge);
+      deps.warn?.(
+        "memory nudge: commit/PLAN transition occurred without a durable HARNESS memory write",
+      );
+    }
     const plans = new Set(
       events.map((e) => e.plan_id).filter((p): p is string => p !== null && p !== undefined),
     );
@@ -482,12 +554,12 @@ export function nodeDeps(
     repoRoot,
     now: () => new Date().toISOString(),
     appendLine: (path, line) => {
-      mkdirSync(dirname(path), { recursive: true });
+      ensureDir(dirname(path), { recursive: true });
       appendFileSync(path, `${line}\n`, "utf8");
     },
     readText: (path) => (existsSync(path) ? readFileSync(path, "utf8") : null),
     writeText: (path, content) => {
-      mkdirSync(dirname(path), { recursive: true });
+      ensureDir(dirname(path), { recursive: true });
       writeFileSync(path, content, "utf8");
     },
     currentBranch: gitBranch,
@@ -496,5 +568,6 @@ export function nodeDeps(
       if (existsSync(path)) rmSync(path);
     },
     headCommit: gitHead,
+    warn: (message) => process.stdout.write(`${message}\n`),
   };
 }

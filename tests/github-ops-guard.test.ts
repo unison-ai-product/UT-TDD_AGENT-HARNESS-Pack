@@ -3,7 +3,8 @@ import {
   buildReleasePublicationPlan,
   evaluateGithubOpsGuard,
   normalizeBranchRef,
-} from "../src/github/ops-guard";
+} from "../src/github/ops-guard.ts";
+import { releaseArtifactFileNames } from "../src/setup/distribution.ts";
 
 describe("github ops guard", () => {
   it("blocks poc branches from merging directly to main", () => {
@@ -90,11 +91,37 @@ describe("github ops guard", () => {
 
     expect(plan.ok).toBe(true);
     expect(plan.externalPublishRequiresApproval).toBe(true);
+    expect(plan.packageAssets).toEqual([
+      ".ut-tdd/release/v0.1.0.tar.gz",
+      ".ut-tdd/release/v0.1.0.tar.gz.sha256",
+      ".ut-tdd/release/v0.1.0.manifest.json",
+    ]);
+    expect(plan.commands).toContain("node src/cli.ts distribution package --tag v0.1.0");
+    expect(plan.commands.join("\n")).not.toContain("bun ");
+    expect(plan.commands.join("\n")).not.toContain(".sig");
     expect(plan.commands).toEqual(
       expect.arrayContaining([
         expect.stringContaining("git tag -a v0.1.0"),
         expect.stringContaining("gh release create v0.1.0"),
       ]),
     );
+    const publish = plan.commands.find((command) => command.startsWith("gh release create"));
+    expect(publish).toBe(
+      "gh release create v0.1.0 .ut-tdd/release/v0.1.0.tar.gz .ut-tdd/release/v0.1.0.tar.gz.sha256 .ut-tdd/release/v0.1.0.manifest.json --repo unison-ai-product/UT-TDD_AGENT-HARNESS-Pack --verify-tag --notes-file .ut-tdd/release/v0.1.0.manifest.json",
+    );
+  });
+
+  it("uses the same sanitized asset stem as distribution package", () => {
+    const names = releaseArtifactFileNames("v0.1.0+build.1");
+    const plan = buildReleasePublicationPlan({
+      tag: "v0.1.0+build.1",
+      repo: "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack",
+    });
+
+    expect(plan.packageAssets).toEqual(
+      [names.tarball, names.checksum, names.manifest].map((name) => `.ut-tdd/release/${name}`),
+    );
+    expect(plan.commands).toContain("node src/cli.ts distribution package --tag v0.1.0+build.1");
+    expect(plan.commands.join("\n")).not.toContain(".sig");
   });
 });

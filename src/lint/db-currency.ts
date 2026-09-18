@@ -1,4 +1,4 @@
-import type { DriveDbRegistrationStats } from "./drive-db-registration";
+import type { DriveDbRegistrationStats } from "./drive-db-registration.ts";
 
 export type DbCurrencyViolationReason =
   | "missing_db"

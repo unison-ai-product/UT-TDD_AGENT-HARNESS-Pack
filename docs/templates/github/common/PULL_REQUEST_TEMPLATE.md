@@ -1,7 +1,9 @@
 ## 概要
 
 ## 関連 PLAN / Issue
-Closes #
+PLAN:
+
+`Closes #<issue-number>`（通常Forwardを含む全PRで必須。空の`Closes #`を残さない）
 
 ## V-model artifact (該当に ✓)
 - [ ] ① 設計 (docs/design/)

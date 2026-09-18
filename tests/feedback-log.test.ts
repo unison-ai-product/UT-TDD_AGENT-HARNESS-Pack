@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeFeedbackLog, parseFeedbackEntries } from "../src/lint/feedback-log";
+import { analyzeFeedbackLog, parseFeedbackEntries } from "../src/lint/feedback-log.ts";
 
 /**
  * U-FBLOG: feedback-log discipline lint (IMP-085、A-138 ITEM-3)。

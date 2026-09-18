@@ -1,4 +1,4 @@
-import type { AdapterProvider } from "./adapter";
+import type { AdapterProvider } from "./adapter.ts";
 
 export const CODEX_STDIN_ARGS = ["exec", "-"] as const;
 export const CODEX_MODEL_FLAG = "-m";

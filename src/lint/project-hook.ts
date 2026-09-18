@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PERSONAL_ABSOLUTE_PATH_PATTERN } from "./personal-path";
+import { invocationEquals, parseHookInvocation } from "./hook-invocation.ts";
+import { PERSONAL_ABSOLUTE_PATH_PATTERN } from "./personal-path.ts";
 
 export interface ProjectHookDoc {
   file: string;
@@ -15,7 +16,9 @@ export interface ProjectHookViolation {
     | "malformed_json"
     | "missing_hook"
     | "missing_project_dir"
+    | "shell_form"
     | "missing_block_on_failure"
+    | "missing_async_rewake"
     | "tracked_permissions"
     | "forbidden_path";
 }
@@ -28,8 +31,10 @@ export interface ProjectHookResult {
 
 interface HookCommand {
   type?: string;
-  command?: string;
+  command?: unknown;
+  args?: unknown;
   blockOnFailure?: boolean;
+  asyncRewake?: boolean;
 }
 
 interface HookEntry {
@@ -48,7 +53,10 @@ interface RequiredProjectHook {
   matcher?: string;
   commandParts: readonly string[];
   wrapperCommand: string;
+  sourceArgs: readonly string[];
+  wrapperArgs: readonly string[];
   blockOnFailure?: boolean;
+  asyncRewake?: boolean;
 }
 
 /**
@@ -59,7 +67,9 @@ interface RequiredProjectHook {
  */
 export const WRAPPER_CLI = ".ut-tdd/bin/ut-tdd.mjs";
 
-const wrapperCommand = (subcommand: string): string => `bun ${WRAPPER_CLI} ${subcommand}`;
+const wrapperCommand = (subcommand: string): string => `node ${WRAPPER_CLI} ${subcommand}`;
+
+const args = (...values: string[]): readonly string[] => values;
 
 export const REQUIRED = [
   {
@@ -68,6 +78,8 @@ export const REQUIRED = [
     matcher: "Agent|Task",
     commandParts: [".claude/hooks/agent-guard.ts"],
     wrapperCommand: wrapperCommand("hook agent-guard"),
+    sourceArgs: args(`\${CLAUDE_PROJECT_DIR}/.claude/hooks/agent-guard.ts`),
+    wrapperArgs: args(WRAPPER_CLI, "hook", "agent-guard"),
     blockOnFailure: true,
   },
   {
@@ -76,6 +88,8 @@ export const REQUIRED = [
     matcher: "Edit|Write|MultiEdit",
     commandParts: [".claude/hooks/work-guard.ts"],
     wrapperCommand: wrapperCommand("hook work-guard"),
+    sourceArgs: args(`\${CLAUDE_PROJECT_DIR}/.claude/hooks/work-guard.ts`),
+    wrapperArgs: args(WRAPPER_CLI, "hook", "work-guard"),
     blockOnFailure: true,
   },
   {
@@ -83,25 +97,42 @@ export const REQUIRED = [
     event: "SessionStart",
     commandParts: ["src/cli.ts", "session start"],
     wrapperCommand: wrapperCommand("session start"),
+    sourceArgs: args(`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "session", "start"),
+    wrapperArgs: args(WRAPPER_CLI, "session", "start"),
   },
   {
     id: "post-tool-use",
     event: "PostToolUse",
-    matcher: "Edit|Write|MultiEdit|Bash",
+    matcher: "Edit|Write|MultiEdit|Bash|PowerShell",
     commandParts: ["src/cli.ts", "hook post-tool-use"],
     wrapperCommand: wrapperCommand("hook post-tool-use"),
+    sourceArgs: args(`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "hook", "post-tool-use"),
+    wrapperArgs: args(WRAPPER_CLI, "hook", "post-tool-use"),
   },
   {
     id: "session-summary",
     event: "Stop",
     commandParts: ["src/cli.ts", "session summary"],
     wrapperCommand: wrapperCommand("session summary"),
+    sourceArgs: args(`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "session", "summary"),
+    wrapperArgs: args(WRAPPER_CLI, "session", "summary"),
+  },
+  {
+    id: "claude-memory-wake",
+    event: "Stop",
+    commandParts: ["src/cli.ts", "hook claude-memory-wake"],
+    wrapperCommand: wrapperCommand("hook claude-memory-wake"),
+    sourceArgs: args(`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "hook", "claude-memory-wake"),
+    wrapperArgs: args(WRAPPER_CLI, "hook", "claude-memory-wake"),
+    asyncRewake: true,
   },
   {
     id: "subagent-stop",
     event: "SubagentStop",
     commandParts: ["src/cli.ts", "hook subagent-stop"],
     wrapperCommand: wrapperCommand("hook subagent-stop"),
+    sourceArgs: args(`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "hook", "subagent-stop"),
+    wrapperArgs: args(WRAPPER_CLI, "hook", "subagent-stop"),
   },
 ] satisfies readonly RequiredProjectHook[];
 
@@ -113,6 +144,12 @@ export function wrapperHookCommand(id: RequiredProjectHookId): string {
   const entry = REQUIRED.find((required) => required.id === id);
   if (!entry) throw new Error(`unknown required project hook id: ${id}`);
   return entry.wrapperCommand;
+}
+
+export function wrapperHookArgs(id: RequiredProjectHookId): readonly string[] {
+  const entry = REQUIRED.find((required) => required.id === id);
+  if (!entry) throw new Error(`unknown required project hook id: ${id}`);
+  return entry.wrapperArgs;
 }
 
 const LEGACY_RUNTIME_NAME = ["he", "lix"].join("");
@@ -143,12 +180,27 @@ function matcherOk(actual: string | undefined, expected: string | undefined): bo
   return actual === expected;
 }
 
-function commandOk(command: string, parts: readonly string[]): boolean {
-  return parts.every((part) => command.includes(part));
+function isSourceForm(hook: HookCommand, required: RequiredProjectHook): boolean {
+  // PLAN-L7-462 PR-C: source 配線は node 直起動 (launcher shim 撤去、Bun 撤退 step 1)。
+  const invocation = parseHookInvocation(hook);
+  return (
+    invocation !== null &&
+    invocationEquals(invocation, {
+      executable: "node",
+      args: [...required.sourceArgs],
+    })
+  );
 }
 
-function isWrapperForm(command: string, required: RequiredProjectHook): boolean {
-  return command.includes(required.wrapperCommand);
+function isWrapperForm(hook: HookCommand, required: RequiredProjectHook): boolean {
+  const invocation = parseHookInvocation(hook);
+  return (
+    invocation !== null &&
+    invocationEquals(invocation, {
+      executable: "node",
+      args: [...required.wrapperArgs],
+    })
+  );
 }
 
 export function analyzeProjectHooks(docs: ProjectHookDoc[]): ProjectHookResult {
@@ -166,7 +218,8 @@ export function analyzeProjectHooks(docs: ProjectHookDoc[]): ProjectHookResult {
     for (const [event, entries] of Object.entries(hooks)) {
       for (const entry of entries ?? []) {
         for (const hook of entry.hooks ?? []) {
-          if (FORBIDDEN_PATH_RE.test(hook.command ?? "")) {
+          const invocation = parseHookInvocation(hook);
+          if (invocation && FORBIDDEN_PATH_RE.test(invocation.display)) {
             violations.push({ file: doc.file, hook: event, reason: "forbidden_path" });
           }
         }
@@ -178,8 +231,10 @@ export function analyzeProjectHooks(docs: ProjectHookDoc[]): ProjectHookResult {
         (entry) =>
           matcherOk(entry.matcher, required.matcher) &&
           (entry.hooks ?? []).some((hook) => {
-            const command = hook.command ?? "";
-            return commandOk(command, required.commandParts) || isWrapperForm(command, required);
+            return (
+              hook.type === "command" &&
+              (isSourceForm(hook, required) || isWrapperForm(hook, required))
+            );
           }),
       );
       if (!found) {
@@ -189,20 +244,30 @@ export function analyzeProjectHooks(docs: ProjectHookDoc[]): ProjectHookResult {
 
       for (const entry of entries.filter((entry) => matcherOk(entry.matcher, required.matcher))) {
         for (const hook of entry.hooks ?? []) {
-          const command = hook.command ?? "";
-          const sourceForm = commandOk(command, required.commandParts);
-          const wrapperForm = isWrapperForm(command, required);
+          const invocation = parseHookInvocation(hook);
+          if (!invocation) continue;
+          const sourceForm = isSourceForm(hook, required);
+          const wrapperForm = isWrapperForm(hook, required);
           if (!sourceForm && !wrapperForm) continue;
           // wrapper 形式は repo-relative パスで完結するため $CLAUDE_PROJECT_DIR を要求しない
           // (setup 生成 settings.json の正規形、PLAN-RECOVERY-06)。
-          if (sourceForm && !command.includes("$CLAUDE_PROJECT_DIR")) {
+          if (invocation.serialization !== "exec_args") {
+            violations.push({ file: doc.file, hook: required.event, reason: "shell_form" });
+          }
+          if (
+            sourceForm &&
+            !invocation.args.some(
+              (arg) =>
+                arg.includes(`\${CLAUDE_PROJECT_DIR}/`) || arg.includes("$CLAUDE_PROJECT_DIR/"),
+            )
+          ) {
             violations.push({
               file: doc.file,
               hook: required.event,
               reason: "missing_project_dir",
             });
           }
-          if (FORBIDDEN_PATH_RE.test(command)) {
+          if (FORBIDDEN_PATH_RE.test(invocation.display)) {
             violations.push({ file: doc.file, hook: required.event, reason: "forbidden_path" });
           }
           if (required.blockOnFailure && hook.blockOnFailure !== true) {
@@ -210,6 +275,13 @@ export function analyzeProjectHooks(docs: ProjectHookDoc[]): ProjectHookResult {
               file: doc.file,
               hook: required.event,
               reason: "missing_block_on_failure",
+            });
+          }
+          if (required.asyncRewake && hook.asyncRewake !== true) {
+            violations.push({
+              file: doc.file,
+              hook: required.event,
+              reason: "missing_async_rewake",
             });
           }
         }

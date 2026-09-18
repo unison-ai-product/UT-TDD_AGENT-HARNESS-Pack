@@ -1,0 +1,24 @@
+# team 定義例 (IMP-050/049) — `.ut-tdd/teams/*.yaml`。
+# schema: src/schema/team.ts (teamDefinitionSchema)。`ut-tdd team run` の入力 (hybrid mode)。
+#
+# 直列化 3 条件 (serialization): いずれか true なら strategy を sequential にする。
+#   file_conflict / downstream_dependency / shared_state
+name: example-review-team
+strategy: sequential          # 後段が前段成果に依存するため直列 (downstream_dependency=true)
+max_parallel: 8
+serialization:
+  file_conflict: false
+  downstream_dependency: true # review は実装成果物に依存 → 直列必須
+  shared_state: false
+members:
+  - role: se
+    engine: codex-se
+    task: "契約実装 (src/foo を実装)"
+  - role: tl
+    engine: pmo-sonnet
+    task: "実装レビュー + 契約凍結"
+    serialize_after: se        # se の成果物に依存するため se 完了後に実行
+  - role: qa
+    engine: qa-test
+    task: "テスト追加 + 回帰確認"
+    serialize_after: tl

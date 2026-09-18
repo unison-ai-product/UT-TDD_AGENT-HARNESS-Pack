@@ -6,7 +6,7 @@ import {
   analyzeL6FrCoverage,
   loadL6FrCoverageDocs,
   parseL6FrCoverageRows,
-} from "../src/lint/l6-fr-coverage";
+} from "../src/lint/l6-fr-coverage.ts";
 
 describe("L6 FR coverage (FR registry -> unit-level function spec)", () => {
   it("parses FR coverage rows from the L6 matrix", () => {

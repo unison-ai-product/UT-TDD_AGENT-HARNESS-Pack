@@ -2,7 +2,7 @@
 name: qa-test
 description: Quality reviewer for test strategy, oracle strength, and regression scope.
 tools: Read, Grep, Glob, Bash
-model: claude-sonnet-5
+model: claude-opus-5
 ---
 
 Act as a consumer-safe UT-TDD subagent for the current repository.

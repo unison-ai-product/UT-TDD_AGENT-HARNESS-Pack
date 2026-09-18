@@ -6,14 +6,16 @@ import {
   checkDddTddRules,
   checkDesignLanguage,
   checkGateConfirm,
+  checkGateIdFormat,
   checkReadability,
   checkRuleDrift,
   checkRuntimePortability,
   checkRuntimeReadability,
-} from "../src/doctor/rule-quality";
+  checkSecretScan,
+} from "../src/doctor/rule-quality.ts";
 
 describe("doctor rule quality checks", () => {
-  it("fails closed when rule and readability inputs cannot read the repo root", () => {
+  it("U-DOCSECRET-005: fails closed when rule and readability inputs cannot read the repo root", () => {
     const missingRoot = join(tmpdir(), `ut-tdd-doctor-rule-quality-${Date.now()}-missing`);
 
     const checks = [
@@ -23,8 +25,10 @@ describe("doctor rule quality checks", () => {
       ["runtime-portability", checkRuntimePortability(missingRoot)],
       ["rule-drift", checkRuleDrift(missingRoot)],
       ["gate-confirm", checkGateConfirm(missingRoot)],
+      ["gate-id-format", checkGateIdFormat(missingRoot)],
       ["readability", checkReadability(missingRoot)],
       ["runtime-readability", checkRuntimeReadability(missingRoot)],
+      ["secret-scan", checkSecretScan(missingRoot)],
     ] as const;
 
     for (const [name, result] of checks) {

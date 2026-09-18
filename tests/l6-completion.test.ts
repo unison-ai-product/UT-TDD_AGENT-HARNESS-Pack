@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { analyzeL6Completion, l6CompletionMessages } from "../src/lint/l6-completion";
+import { analyzeL6Completion, l6CompletionMessages } from "../src/lint/l6-completion.ts";
 
 const gatePass = `
 | Gate | Status | Evidence |

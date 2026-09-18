@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { sanitize } from "./session-log";
+import { ensureDir } from "../shared/fs.ts";
+import { sanitize } from "./session-log.ts";
 
 export type ProviderRuntime = "claude" | "codex";
 
@@ -127,7 +128,7 @@ export function nodeProviderHandoverDeps(repoRoot: string): ProviderHandoverDeps
     now: () => new Date().toISOString(),
     readText: (p) => (existsSync(p) ? readFileSync(p, "utf8") : null),
     writeText: (p, c) => {
-      mkdirSync(dirname(p), { recursive: true });
+      ensureDir(dirname(p), { recursive: true });
       writeFileSync(p, c, "utf8");
     },
   };

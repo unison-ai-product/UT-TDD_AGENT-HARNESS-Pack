@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { inspectGuardrailInvariants } from "../src/guardrail/ledger";
-import { openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate } from "../src/state-db/migration";
-import { projectGuardrailInvariantAdvisories } from "../src/state-db/projection-writer";
-import { evaluateAutomationReadiness } from "../src/workflow/readiness";
+import { inspectGuardrailInvariants } from "../src/guardrail/ledger.ts";
+import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate } from "../src/state-db/migration.ts";
+import { projectGuardrailInvariantAdvisories } from "../src/state-db/projection-writer.ts";
+import { evaluateAutomationReadiness } from "../src/workflow/readiness.ts";
 
 // PLAN-L7-52 C-1 (option C): the guardrail invariant SSoT is consulted against
 // committed review evidence at CLI-rebuild time (non-API), surfacing violations

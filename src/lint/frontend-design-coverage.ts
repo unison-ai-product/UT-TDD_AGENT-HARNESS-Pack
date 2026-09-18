@@ -16,7 +16,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { VALID_SUB_DOCS } from "../schema/index";
+import { VALID_SUB_DOCS } from "../schema/index.ts";
 
 export const DOCUMENT_SYSTEM_MAP_PATH = "docs/governance/document-system-map.md";
 

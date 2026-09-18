@@ -2,13 +2,15 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   checkForUpdate,
+  comparePackageSemver,
   compareSemver,
+  gitLsRemoteInvocation,
   latestReleaseTag,
   normalizeRepositoryUrl,
+  parsePackageSemver,
   parseSemver,
   renderUpdateLine,
   UPDATE_CHECK_CACHE_PATH,
@@ -17,19 +19,17 @@ import {
   UPDATE_CHECK_TTL_MS,
   type UpdateCheckDeps,
   updateCheckDisabled,
-} from "../src/setup/update-check";
+} from "../src/setup/update-check.ts";
 
 const ROOT = "/harness";
-const REPO_ROOT = join(fileURLToPath(import.meta.url), "..", "..");
-const CLI_PATH = join(REPO_ROOT, "src", "cli.ts");
+const EXECUTION_ROOT = process.env.UT_TDD_TEST_EXECUTION_ROOT;
+if (!EXECUTION_ROOT) throw new Error("update-check CLI tests require an execution snapshot");
+const CLI_PATH = join(EXECUTION_ROOT, "src", "cli.ts");
 
-function runCli(args: string[], env: NodeJS.ProcessEnv, cwd = REPO_ROOT) {
-  const base = { cwd, encoding: "utf8" as const, env, timeout: 120_000 };
-  if (process.platform === "win32") {
-    const cmdExe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
-    return spawnSync(cmdExe, ["/d", "/c", "bun", CLI_PATH, ...args], base);
-  }
-  return spawnSync("bun", [CLI_PATH, ...args], base);
+function runCli(args: string[], env: NodeJS.ProcessEnv, cwd = EXECUTION_ROOT) {
+  const base = { cwd, encoding: "utf8" as const, env, timeout: 120_000, windowsHide: true };
+  // PLAN-L7-462 step 2: CLI 実発火 oracle は node 直 spawn (cmd.exe/bun 経由なし)。
+  return spawnSync("node", [CLI_PATH, ...args], base);
 }
 
 function mockDeps(
@@ -121,6 +121,31 @@ describe("update-check semver primitives", () => {
     expect(latestReleaseTag(["nightly", "poc"])).toBeNull();
     expect(latestReleaseTag([])).toBeNull();
     expect(compareSemver([1, 0, 0], [0, 9, 9])).toBeGreaterThan(0);
+  });
+
+  it("U-RELVER-002 / U-RELVER-003: package parser keeps prerelease identity and strict input", () => {
+    const canary = parsePackageSemver("0.2.0-canary.1");
+    const stable = parsePackageSemver("0.2.0");
+    expect(canary).toMatchObject({ major: 0, minor: 2, patch: 0, prerelease: ["canary", "1"] });
+    expect(stable).not.toBeNull();
+    if (!canary || !stable) throw new Error("expected valid package versions");
+    expect(comparePackageSemver(canary, stable)).toBeLessThan(0);
+    const buildOne = parsePackageSemver("1.0.0+build.1");
+    const buildTwo = parsePackageSemver("1.0.0+build.2");
+    if (!buildOne || !buildTwo) throw new Error("expected valid build metadata");
+    expect(comparePackageSemver(buildOne, buildTwo)).toBe(0);
+    const largePrerelease = parsePackageSemver("1.0.0-9007199254740993");
+    const largerPrerelease = parsePackageSemver("1.0.0-9007199254740994");
+    if (!largePrerelease || !largerPrerelease) throw new Error("expected valid large prereleases");
+    expect(comparePackageSemver(largePrerelease, largerPrerelease)).toBeLessThan(0);
+    for (const invalid of [
+      "v0.2.0-canary.1",
+      " 0.2.0-canary.1",
+      "0.2.0-",
+      "0.2.0-01",
+      "9007199254740992.0.0",
+    ])
+      expect(parsePackageSemver(invalid)).toBeNull();
   });
 
   it("U-UPDCHK-017: normalizeRepositoryUrl accepts string / object forms and strips git+", () => {
@@ -235,6 +260,13 @@ describe("checkForUpdate", () => {
     expect(r).toMatchObject({ checked: true, latestVersion: null, updateAvailable: false });
   });
 
+  it("U-RELVER-009: canary tags do not become stable update advisories", () => {
+    const result = checkForUpdate(
+      mockDeps({ version: "0.2.0-canary.1", tags: ["v0.2.0-canary.2", "v0.1.9", "nightly"] }),
+    );
+    expect(result).toMatchObject({ latestVersion: "v0.1.9", updateAvailable: false });
+  });
+
   it("U-UPDCHK-012: package.json repository.url is preferred over the origin fallback", () => {
     const deps = mockDeps({
       version: "0.1.4",
@@ -310,6 +342,63 @@ describe("renderUpdateLine", () => {
     expect(renderUpdateLine(updateCheckDisabled("CI"))).toBe(
       "update: check skipped (disabled by CI)",
     );
+  });
+});
+
+describe("gitLsRemoteInvocation (PLAN-L7-462 step 2 .cmd shim 対応)", () => {
+  it("U-UPDCHK-021: passes through on posix without wrapping", () => {
+    expect(gitLsRemoteInvocation("https://x/y.git", {}, "linux")).toEqual({
+      command: "git",
+      args: ["ls-remote", "--tags", "https://x/y.git"],
+    });
+  });
+
+  it("U-UPDCHK-022: wraps a PATH-resolved git.cmd via ComSpec without over-quoting plain tokens", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "ut-tdd-gitcmd-"));
+    try {
+      writeFileSync(join(tmp, "git.cmd"), "@echo off\r\n");
+      const inv = gitLsRemoteInvocation(
+        "https://example.com/pack.git",
+        { PATH: tmp, ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+        "win32",
+      );
+      expect(inv.command).toBe("C:\\Windows\\System32\\cmd.exe");
+      expect(inv.windowsVerbatimArguments).toBe(true);
+      const inner = inv.args[inv.args.length - 1];
+      // shim 側の %1 比較を壊さないため、素の token は引用されない。
+      expect(inner).toContain(" ls-remote --tags https://example.com/pack.git");
+      expect(inner).not.toContain('"ls-remote"');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("U-UPDCHK-023: prefers git.exe over git.cmd and never wraps executables", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "ut-tdd-gitexe-"));
+    try {
+      writeFileSync(join(tmp, "git.exe"), "");
+      writeFileSync(join(tmp, "git.cmd"), "@echo off\r\n");
+      const inv = gitLsRemoteInvocation("https://x/y.git", { PATH: tmp }, "win32");
+      expect(inv.command).toBe(join(tmp, "git.exe"));
+      expect(inv.args).toEqual(["ls-remote", "--tags", "https://x/y.git"]);
+      expect(inv.windowsVerbatimArguments).toBeUndefined();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("U-UPDCHK-024: falls back to bare git when the remote contains % (cmd 展開破壊の回避)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "ut-tdd-gitpct-"));
+    try {
+      writeFileSync(join(tmp, "git.cmd"), "@echo off\r\n");
+      const inv = gitLsRemoteInvocation("https://x/%PATH%.git", { PATH: tmp }, "win32");
+      expect(inv).toEqual({
+        command: "git",
+        args: ["ls-remote", "--tags", "https://x/%PATH%.git"],
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 

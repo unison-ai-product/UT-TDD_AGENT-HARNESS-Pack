@@ -1,21 +1,21 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { classifyProposalDocumentCoverage, classifyTask } from "../src/task/classify";
+import { classifyProposalDocumentCoverage, classifyTask } from "../src/task/classify.ts";
 import {
   BASELINE_DOCUMENT_PACK,
   KIND_PATTERNS,
   PROPOSAL_COVERAGE_GUARDRAILS,
   RISK_TERMS,
-} from "../src/task/classify-policy";
-import { DOCUMENT_PACKS } from "../src/task/proposal-coverage-data";
-import { doc, LEVEL_RANK } from "../src/task/proposal-document-pack-types";
-import { DOCUMENT_PACKS_CORE } from "../src/task/proposal-document-packs-core";
-import { DOCUMENT_PACKS_OPERATIONS } from "../src/task/proposal-document-packs-operations";
+} from "../src/task/classify-policy.ts";
+import { DOCUMENT_PACKS } from "../src/task/proposal-coverage-data.ts";
+import { doc, LEVEL_RANK } from "../src/task/proposal-document-pack-types.ts";
+import { DOCUMENT_PACKS_CORE } from "../src/task/proposal-document-packs-core.ts";
+import { DOCUMENT_PACKS_OPERATIONS } from "../src/task/proposal-document-packs-operations.ts";
 import {
   RESEARCH_ADOPTION_BY_PATTERN,
   RESEARCH_REJECTION_KEYWORDS,
-} from "../src/task/proposal-research-data";
-import { MODEL_IDS, PROPOSAL_SUBAGENT_LANES } from "../src/team/model-policy";
+} from "../src/task/proposal-research-data.ts";
+import { MODEL_IDS, PROPOSAL_SUBAGENT_LANES } from "../src/team/model-policy.ts";
 
 describe("U-FR-L1-39: classifyTask public surface", () => {
   it("loads proposal coverage rules from the externalized data catalog", () => {

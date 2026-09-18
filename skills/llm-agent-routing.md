@@ -13,6 +13,27 @@ applies_to:
     - Forward
     - Add-feature
     - Discovery
+decision_points:
+  - when: "a PLAN's `agent_slots` declares an agent delegation that needs a provider call"
+    choose: "route the call through `ut-tdd claude --role` / `ut-tdd codex --role` / `ut-tdd team run`"
+    over: "add a raw provider API call directly in source"
+    because: "raw calls bypass session lifecycle tracking, handover warnings, and cost telemetry that the wrappers capture"
+  - when: "selecting a model for a mechanical subtask (e.g. formatting, simple lookups) vs. a judgement gate (e.g. design decision)"
+    choose: "use the lightest viable model for the mechanical subtask and reserve the frontier model for the judgement gate"
+    over: "use the same high-tier model for both to simplify routing"
+    because: "low-cost-first is the design principle backing `agent-cost-design`; uniform frontier usage inflates cost without improving mechanical-task outcomes"
+  - when: "retrieval finds no chunk above the relevance threshold"
+    choose: "throw / trigger the no-match fallback explicitly, and unit-test that path"
+    over: "silently pass empty context to the model call"
+    because: "silent empty context produces a plausible-looking but ungrounded response with no signal that retrieval failed"
+  - when: "context assembled for injection may include PII, credentials, or raw payload bodies"
+    choose: "redact before injection and assert their absence in a test"
+    over: "pass the context through unredacted and rely on the model to ignore it"
+    because: "the harness safety boundary prohibits PII/credentials/payload bodies in injected context outright, and models cannot be relied on to withhold received data"
+  - when: "an agent call's requested model does not match the family declared in the agent frontmatter"
+    choose: "let `agent-guard.ts` block the call at PreToolUse"
+    over: "hard-code a mismatched or cost-cutting model in source to work around the guard"
+    because: "hard-coding around the guard defeats the model-family floor the guard exists to enforce (FR-L1-09)"
 ---
 
 # llm agent routing
@@ -65,7 +86,7 @@ prose) so L6 unit tests can assert against the contract.
 
 ## L7 implementation gates
 
-- `bun run typecheck` clean — no `any` on model-call paths.
+- `npm run typecheck` clean — no `any` on model-call paths.
 - Unit tests cover: normal response, API error / timeout, and context-overflow
   truncation.
 - After implementation, `ut-tdd review --uncommitted`; capture the `model_runs`

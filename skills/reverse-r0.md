@@ -11,6 +11,27 @@ applies_to:
     - Reverse
     - Retrofit
     - Recovery
+decision_points:
+  - when: "ut-tdd doctor surfaces a pre-existing governance violation while R0 is running"
+    choose: "Record the violation in the evidence map and continue R0"
+    over: "Fixing the violation immediately during R0"
+    because: "Resolving violations is R4's job; R0 is an evidence-acquisition phase, not a remediation phase"
+  - when: "Setting the has_existing_tests flag in the evidence map"
+    choose: "Set it explicitly to true or false based on actual test files found for the subject scope"
+    over: "Leaving it omitted or inferring it later"
+    because: "The gate to R1/R2 requires has_existing_tests to be explicitly set, not omitted"
+  - when: "The subject scope involves inter-module contracts"
+    choose: "Run ut-tdd graph or ut-tdd find to identify dependency edges"
+    over: "Skipping dependency-edge analysis and relying on manual file inspection"
+    because: "Contract-bearing subjects need mapped dependency edges as input for R1's contract extraction"
+  - when: "The evidence map is incomplete at the R0-to-R1/R2 phase boundary"
+    choose: "Block the workflow_phase advance until the map is complete"
+    over: "Advancing to R1/R2 with an incomplete evidence map"
+    because: "An incomplete evidence map propagates unknown drift signals downstream where they are harder to recover"
+  - when: "Reading migration snapshots or vendor snapshots as R0 evidence"
+    choose: "Treat them as read-only reference material"
+    over: "Treating them as active runtime state to be updated"
+    because: "Migration snapshots are historical source material, not current UT-TDD runtime state"
 ---
 
 # reverse r0
@@ -44,7 +65,7 @@ evidence map that gates entry to R1 (or R2 when R1 is skipped).
 4. Inventory all test files relevant to the subject and list their paths.
 5. Note any drift signals observed: schema mismatch, orphaned design docs,
    broken import paths, untraced implementation files.
-6. Run `ut-tdd graph` or `ut-tdd find` to identify dependency edges if the
+6. Run `ut-tdd graph impact --changed <path...>` or `ut-tdd find <query>` to identify dependency edges if the
    subject scope involves inter-module contracts.
 
 ## Output artifact: evidence map

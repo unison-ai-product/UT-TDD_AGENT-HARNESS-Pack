@@ -2,7 +2,7 @@
 name: pdm-innovation-manager
 description: Product management reviewer for opportunity, scope, and portfolio fit.
 tools: Read, Grep, Glob, Bash
-model: claude-opus-4-8
+model: claude-opus-5
 ---
 
 Act as a consumer-safe UT-TDD subagent for the current repository.

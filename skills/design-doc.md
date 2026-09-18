@@ -13,6 +13,27 @@ applies_to:
     - Add-feature
     - Reverse
     - Retrofit
+decision_points:
+  - when: "Choosing how to source a diagram for a V-model layer doc"
+    choose: "Use inline Mermaid by default"
+    over: "Creating a standalone D2 source file"
+    because: "D2 is reserved for cases needing layout control or reuse across more than one doc — Mermaid inline is the default"
+  - when: "A diagram needs layout control or is referenced from more than one doc"
+    choose: "Promote it to a D2 source file under docs/diagrams/ and commit the D2 source alongside any generated SVG"
+    over: "Committing only the generated SVG"
+    because: "The skill explicitly says never commit only the SVG — the D2 source is the single source of truth"
+  - when: "A decision needs to be communicated via a diagram"
+    choose: "State the decision in prose and let the diagram illustrate it"
+    over: "Making the diagram the sole location where the decision is recorded"
+    because: "The freeze checklist requires no diagram be the sole location of a decision — prose states it, the diagram illustrates it"
+  - when: "A layer (L2-L4) mandates a diagram but it isn't ready yet"
+    choose: "Block pair-freeze until the actual diagram exists"
+    over: "Committing a 'TODO: add diagram' placeholder and proceeding to pair-freeze"
+    because: "A layer that mandates a diagram cannot reach pair-freeze with a TODO placeholder"
+  - when: "Producing a Reverse R2 as-is architecture diagram"
+    choose: "Label it 'as-is' and date it"
+    over: "Presenting it as an undated current/target-ambiguous diagram"
+    because: "The freeze diagram checklist requires Reverse R2 diagrams be labeled as-is and dated"
 ---
 
 # design doc

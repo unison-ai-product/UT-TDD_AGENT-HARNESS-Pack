@@ -16,6 +16,31 @@ applies_to:
     - Reverse
     - Scrum
     - Discovery
+decision_points:
+  - when: "Deciding whether a unit of work is complete"
+    choose: "require all seven DoD conditions (typecheck/lint/test green, doctor 0, plan lint 0, review --uncommitted clean, freeze readability, glossary updated, handover if session-crossing)"
+    over: "treating \"code written\" or \"looks right\" as sufficient to close"
+    because: "only machine evidence and recorded review findings clear a gate; subjective code-looks-right assessments are not falsifiable"
+  - when: "Running Vitest locally or in CI"
+    choose: "use `npm run test`"
+    over: "using an unspecified test command"
+    because: "the repository's canonical test script is the deterministic Vitest snapshot runner"
+  - when: "Checking Biome formatting before a gate"
+    choose: "run `npm run lint` (which invokes `biome check`)"
+    over: "running `biome lint` alone"
+    because: "`biome lint` does not check formatting; format violations accumulate silently and break the next push"
+  - when: "`ut-tdd doctor` exits 0 for a layer"
+    choose: "treat that as structural governance passing only, and still read the design docs for substance"
+    over: "treating doctor-green as confirmation the design itself is correct"
+    because: "doctor checks structural governance (schema, dependencies, projections), not design substance — green doctor with a wrong design is possible"
+  - when: "A judgement gate (pair-freeze, trace-freeze, accept) needs review evidence"
+    choose: "obtain cross-agent review evidence in hybrid mode, or `intra_runtime_subagent` evidence in single-runtime mode"
+    over: "self-review by the same agent/session that did the work"
+    because: "self-review alone is explicitly excluded — mode-aware review tier exists precisely to prevent one agent from being both author and sole reviewer"
+  - when: "A type error, lint violation, or skipped test blocks a gate"
+    choose: "fix the underlying issue or get a PLAN-linked rationale recorded"
+    over: "silencing with `// biome-ignore`, `// @ts-ignore`, or `.skip`"
+    because: "unrationalized silencing defeats the enforcement the gate exists to provide and hides the condition from future review"
 ---
 
 # gate planning
@@ -36,7 +61,7 @@ accumulate false-green state and hide V-model descent gaps.
 
 A unit of work is complete only when ALL hold:
 
-1. `bun run typecheck`, `bun run lint` (Biome check), and `bun run test`
+1. `npm run typecheck`, `npm run lint` (Biome check), and `npm run test`
    (Vitest) are green.
 2. `ut-tdd doctor` exits 0 (no governance violation).
 3. `ut-tdd plan lint` exits 0 (PLAN schema valid, dependencies exist,
@@ -54,7 +79,7 @@ review findings clear a gate.
 ## Gate design rules
 
 - **Falsifiable condition.** "Passes review" is not falsifiable; "`ut-tdd
-  doctor` exits 0 and `bun run test` passes with no skipped tests" is.
+  doctor` exits 0 and `npm run test` passes with no skipped tests" is.
 - **Name the checking command.** Every condition maps to a `ut-tdd`/CI command
   or an explicit human review action.
 - **Record the result, not the intent.** Evidence goes into `.ut-tdd/audit/` or
@@ -85,8 +110,7 @@ evidence in single-runtime mode — never self-review alone.
 
 ## Anti-patterns that defeat enforcement
 
-- `bun test` instead of `bun run test` (Vitest) — native runner has sync-timeout
-  flakiness; CI uses Vitest.
+- An unspecified test command instead of the repository's canonical `npm run test` script.
 - `biome lint` without `biome check` — format violations accumulate and break the
   next push.
 - Treating `ut-tdd doctor` green as "design is correct" — doctor checks

@@ -14,6 +14,27 @@ applies_to:
     - Forward
     - Add-feature
     - Reverse
+decision_points:
+  - when: "A defect is confirmed and about to be fixed"
+    choose: "write a failing regression test that reproduces the exact error on current HEAD before touching source"
+    over: "editing source first and adding a test afterward"
+    because: "a fix without a prior-failing test cannot be verified to address the actual defect, and the harness treats fix-without-test as an incomplete unit of work"
+  - when: "Source code contradicts its own L5 spec"
+    choose: "update the L5 doc first, then fix the source to match"
+    over: "fixing the source directly and leaving the spec as-is"
+    because: "fixing source against an unchanged spec creates a descent gap that `ut-tdd doctor` may not detect"
+  - when: "While fixing a defect, adjacent code looks like it could use cleanup"
+    choose: "leave adjacent code untouched and file cleanup as separate scope"
+    over: "refactoring the adjacent code in the same commit as the fix"
+    because: "scope creep in a fix commit makes regression bisection harder and makes the commit harder to revert if it introduces a secondary defect"
+  - when: "A type error surfaces while investigating the defect"
+    choose: "treat the type error as evidence and fix the underlying cause"
+    over: "adding `// @ts-ignore` to silence it and move on"
+    because: "the type error is the signal that exposed the defect; silencing it hides future regressions of the same class"
+  - when: "Closing a Recovery or Incident PLAN"
+    choose: "document the prevention measure (new doctor gate, lint rule, or design doc update) before closing"
+    over: "closing once the regression test and fix are both green"
+    because: "the forced-stop Recovery policy requires re-occurrence prevention as an exit contract, not just a resolved symptom"
 ---
 
 # error fix
@@ -40,7 +61,7 @@ is the Red step for a fix — it confirms the defect is real and gives the
 regression fence.
 
 ```
-bun run test tests/<affected>.test.ts
+npm run test tests/<affected>.test.ts
 ```
 
 The test must fail on the current HEAD with the exact error being fixed. Commit
@@ -69,7 +90,7 @@ harder to review and harder to revert if it introduces a secondary defect.
 Run the full gate sequence:
 
 ```
-bun run typecheck && bun run lint && bun run test && ut-tdd doctor
+npm run typecheck && npm run lint && npm run test && ut-tdd doctor
 ```
 
 All gates must be Green before committing the fix.
@@ -88,7 +109,7 @@ All gates must be Green before committing the fix.
 A fix PLAN under Recovery or Incident is closed only when:
 
 - [ ] Regression test is Green and committed before the fix commit.
-- [ ] `bun run typecheck && bun run lint && bun run test && ut-tdd doctor`
+- [ ] `npm run typecheck && npm run lint && npm run test && ut-tdd doctor`
   all green on the fix HEAD.
 - [ ] Root cause documented in the PLAN or `.ut-tdd/audit/` entry (what
   allowed the defect to exist, not just what the defect was).

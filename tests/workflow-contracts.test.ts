@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { recommendedCommandV1Schema } from "../src/schema/index";
-import { routeSignalCandidates } from "../src/schema/route-map";
-import { openHarnessDb } from "../src/state-db/index";
-import { migrate } from "../src/state-db/migration";
+import { recommendedCommandV1Schema } from "../src/schema/index.ts";
+import { routeSignalCandidates } from "../src/schema/route-map.ts";
+import { openHarnessDb } from "../src/state-db/index.ts";
+import { migrate } from "../src/state-db/migration.ts";
 import {
   assertRefactorInvariant,
   classifyDriveTddFits,
@@ -21,7 +21,7 @@ import {
   validateDContractDsl,
   validateFrontendDesignWorkflow,
   validateScreenDesignWorkflow,
-} from "../src/workflow/contracts";
+} from "../src/workflow/contracts.ts";
 import {
   buildCommandCatalog,
   catalogExistingAssets,
@@ -35,14 +35,15 @@ import {
   suggestSkillInjection,
   validateDriveStatePartitions,
   validateFolderRules,
-} from "../src/workflow/contracts-extras";
-import { DRIVE_TDD_FITS } from "../src/workflow/contracts-policy";
-import type { ContractResult as SidecarContractResult } from "../src/workflow/contracts-types";
+} from "../src/workflow/contracts-extras.ts";
+import { DRIVE_TDD_FITS } from "../src/workflow/contracts-policy.ts";
+import type { ContractResult as SidecarContractResult } from "../src/workflow/contracts-types.ts";
 import {
   evaluateRouteCommand,
+  routeFiling,
   routeSignalToMode,
   validateRouteConfigText,
-} from "../src/workflow/routing-contracts";
+} from "../src/workflow/routing-contracts.ts";
 
 // @ut-tdd-trace FR-L1-06
 // @ut-tdd-trace FR-L1-08
@@ -165,11 +166,28 @@ describe("L7 workflow contract implementations", () => {
   it("implements routing, workflow, FE/design, asset, model, drive, skill, and command contracts", () => {
     expect(routeSignalCandidates("feature_addition")).toEqual(["add-feature"]);
     expect(routeSignalCandidates("version_deferral")).toEqual(["version-up"]);
+    expect(routeSignalCandidates("verification_plan")).toEqual(["verify"]);
+    expect(routeSignalCandidates("forward_convergence_drift")).toEqual(["reverse"]);
+    expect(routeSignalCandidates("design_constraint_drift")).toEqual(["forward"]);
+    expect(routeSignalCandidates("interrupt_regression_prod")).toEqual(["incident"]);
     expect(routeSignalToMode({ signal: "reverse gap" }).candidates).toEqual(["reverse"]);
     expect(routeSignalToMode({ signal: "drift", drive: "agent" }).candidates[0]).toBe("reverse");
     expect(routeSignalToMode({ signal: "regression_prod" }).candidates[0]).toBe("incident");
     expect(routeSignalToMode({ signal: "new_requirement" }).candidates[0]).toBe("add-feature");
     expect(routeSignalToMode({ signal: "version_deferral" }).candidates[0]).toBe("version-up");
+    const filingTarget = routeFiling({ signal: "feature_addition" });
+    expect(filingTarget.target).toMatchObject({
+      mode: "add-feature",
+      allowed_kinds: ["add-design", "add-impl"],
+      layer_band: ["L3-L6", "L7"],
+      requires_human_approval: false,
+    });
+    expect(filingTarget.target.forward_insufficient_reason).toContain("feature_addition");
+    const unknownFilingTarget = routeFiling({ signal: "unmapped-special-case" });
+    expect(unknownFilingTarget.target.mode).toBe("forward");
+    expect(unknownFilingTarget.findings.map((finding) => finding.code)).toContain(
+      "route-filing-unknown-signal",
+    );
     const routeEval = evaluateRouteCommand({ signal: "reverse gap" });
     expect(routeEval.mode).toBe("reverse");
     expect(routeEval.exit_code).toBe(0);

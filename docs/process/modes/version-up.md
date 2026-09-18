@@ -12,6 +12,9 @@ version-up は、確立済/計画済の capability を **将来の製品バー�
 
 「deferred-but-committed-future」= **archived (破棄) でも plain draft (WIP) でも Add-feature (今追加) でも Retrofit (依存 upgrade) でもない第 4 の状態**。第一ケース = 中央UI (画面、PLAN-L7-141 / PLAN-L7-146) を「画面なし配布 (PLAN-L7-157 R2)」の下で将来版へ保全。
 
+名称に「upgrade」「version-up」を含むactive programでも、現在実行する設計・実装は本modeへ入れない。active workは
+ForwardまたはAdd-featureで起票し、本modeは将来保全中のparked PLANだけを表す。
+
 ## 2. 入口条件
 
 - signal = `version_deferral` (PO 決定: ある capability を将来版へ保全。今スコープ外だが破棄しない)。
@@ -19,7 +22,7 @@ version-up は、確立済/計画済の capability を **将来の製品バー�
 
 ## 3. 機械表現 (新 kind を作らない)
 
-- 保全中の PLAN は **既存 kind を維持** (例: impl) + `status=draft` + frontmatter **`version_target: <label>`**。
+- 保全中のPLANは現行運用では`kind=impl`、`layer=L7`、`status=draft`、frontmatter **`version_target: <label>`**を同時に持つ。
 - `version_target` は **status=draft でのみ有効** (landed=confirmed/completed には付与禁止 = schema fail-close)。label は version-up ledger (`src/lint/forward-convergence.ts` `VERSION_UP_ALLOWED_TARGETS`) に照合する。
 - `ut-tdd status` の outstanding は **active draft と version-up parked を分離**表示 (将来版保全を WIP と混同しない / green に埋めない)。
 - forward-convergence (要件定義書 §6.8.8.1) は `version_target` 付き draft を **正当な deferred 種別**として扱い、unconverged-landed (違反) にしない。
@@ -28,6 +31,7 @@ version-up は、確立済/計画済の capability を **将来の製品バー�
 
 - **将来版 activation 時に add-feature (L2/L3 → L7) で Forward へ合流**する。それまでは parked (保全)。
 - activation PLAN は parked PLAN への requires/reference を持つ (合流 trace)。activation 後は `version_target` を外す。
+- activation時はparked PLANのstatusを直接進めず、add-design (L3-L6) とadd-impl (L7) をAdd-featureとして起票し、parked PLANをlegacy alias/referenceとして接続する。
 
 ## 5. 他 mode との非重複
 

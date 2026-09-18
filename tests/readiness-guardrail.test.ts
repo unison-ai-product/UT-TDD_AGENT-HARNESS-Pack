@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { recordGuardrailDecision } from "../src/guardrail/ledger";
-import { openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate, rowCounts } from "../src/state-db/migration";
-import { evaluateAutomationReadiness } from "../src/workflow/readiness";
+import { recordGuardrailDecision } from "../src/guardrail/ledger.ts";
+import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate, rowCounts } from "../src/state-db/migration.ts";
+import { evaluateAutomationReadiness } from "../src/workflow/readiness.ts";
 
 describe("IT-AUTOMATION-01 / IT-GUARDRAIL-01", () => {
   it("evaluateAutomationReadiness never marks missing evidence as ready", () => {

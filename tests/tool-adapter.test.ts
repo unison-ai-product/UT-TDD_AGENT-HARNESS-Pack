@@ -5,7 +5,7 @@ import {
   planDiagramRefresh,
   probeToolAdapter,
   type ToolAdapterProbeDeps,
-} from "../src/lint/tool-adapter";
+} from "../src/lint/tool-adapter.ts";
 
 function deps(over: Partial<ToolAdapterProbeDeps> = {}): ToolAdapterProbeDeps {
   return {

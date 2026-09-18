@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { afterEach, describe, expect, it } from "vitest";
-import { adapterExecutionEnv, registerDelegationCommands } from "../src/cli/delegation";
+import { adapterExecutionEnv, registerDelegationCommands } from "../src/cli/delegation.ts";
 
 const legacyPrefix = ["HE", "LIX"].join("");
 const touchedKeys = [
@@ -12,6 +12,7 @@ const touchedKeys = [
   [legacyPrefix, "CODEX", "BIN"].join("_"),
   "UT_TDD_CODEX_BIN",
   "UT_TDD_CLAUDE_BIN",
+  "UT_TDD_DISABLE_CLAUDE_MEMORY_WAKE",
 ];
 
 const originalValues = new Map(touchedKeys.map((key) => [key, process.env[key]]));
@@ -43,6 +44,16 @@ describe("CLI delegation adapter execution env", () => {
     expect(env).not.toBe(process.env);
     expect(process.env[[legacyPrefix, "ALLOW", "RAW", "CODEX"].join("_")]).toBe("legacy");
   });
+
+  it("U-MEMWAKE-006: non-interactive Claude delegation disables the idle-session wake hook", () => {
+    const claudeEnv = adapterExecutionEnv("claude", {
+      UT_TDD_DISABLE_CLAUDE_MEMORY_WAKE: "0",
+    });
+    const codexEnv = adapterExecutionEnv("codex");
+
+    expect(claudeEnv.UT_TDD_DISABLE_CLAUDE_MEMORY_WAKE).toBe("1");
+    expect(codexEnv.UT_TDD_DISABLE_CLAUDE_MEMORY_WAKE).toBeUndefined();
+  });
 });
 
 describe("CLI delegation command registration", () => {
@@ -69,6 +80,11 @@ describe("CLI delegation command registration", () => {
         "--plan",
         "--model",
         "--effort",
+        "--review-pr",
+        "--review-head",
+        "--review-revision",
+        "--review-author-family",
+        "--review-memory-id",
         "--execute",
         "--json",
       ]);

@@ -4,17 +4,19 @@ import {
   analyzeCodexHookAdapter,
   codexHookAdapterMessages,
   loadCodexHookAdapterInput,
-} from "../lint/codex-hook-adapter";
+} from "../lint/codex-hook-adapter.ts";
 import {
   analyzeGithubCiPolicy,
   githubCiPolicyMessages,
   loadGithubCiPolicyDocs,
-} from "../lint/github-ci-policy";
+  resolveGithubCiRuntimeProfile,
+} from "../lint/github-ci-policy.ts";
 import {
   analyzeProjectHooks,
   loadProjectHookDocs,
   projectHookMessages,
-} from "../lint/project-hook";
+} from "../lint/project-hook.ts";
+import { BUILTIN_GITHUB_TEMPLATES } from "../setup/templates.ts";
 
 export interface RuntimeSurfaceDeps {
   repoRoot: string;
@@ -41,7 +43,13 @@ export function checkGithubCiPolicy(repoRoot: string): { messages: string[]; ok:
     return { messages: ["github-ci-policy - violation: repo root could not be read"], ok: false };
   }
   try {
-    const r = analyzeGithubCiPolicy(loadGithubCiPolicyDocs(repoRoot));
+    const r = analyzeGithubCiPolicy(
+      loadGithubCiPolicyDocs({
+        repoRoot,
+        runtimeProfile: resolveGithubCiRuntimeProfile(repoRoot),
+        setupBuiltinWorkflow: BUILTIN_GITHUB_TEMPLATES["common/harness-check.yml"],
+      }),
+    );
     return { messages: githubCiPolicyMessages(r), ok: r.ok };
   } catch {
     return {
@@ -105,34 +113,12 @@ export function checkCodexWrapperParity(deps: RuntimeSurfaceDeps): {
   const adapterTests = reads.get(requiredFiles[4]) ?? "";
   const testDesign = reads.get(requiredFiles[5]) ?? "";
   const violations: string[] = [];
-  const settingStrings: string[] = [];
-  try {
-    const walk = (value: unknown): void => {
-      if (typeof value === "string") {
-        settingStrings.push(value);
-        return;
-      }
-      if (Array.isArray(value)) {
-        for (const item of value) walk(item);
-        return;
-      }
-      if (value && typeof value === "object") {
-        for (const item of Object.values(value)) walk(item);
-      }
-    };
-    walk(JSON.parse(settings));
-  } catch {
-    violations.push(".claude/settings.json must be valid JSON");
-  }
-
-  const claudeHookCommands = [
-    'bun "$CLAUDE_PROJECT_DIR/src/cli.ts" session start',
-    'bun "$CLAUDE_PROJECT_DIR/src/cli.ts" hook post-tool-use',
-    'bun "$CLAUDE_PROJECT_DIR/src/cli.ts" session summary',
-  ];
-  for (const command of claudeHookCommands) {
-    if (!settingStrings.includes(command)) {
-      violations.push(`Claude project hook command missing: ${command}`);
+  const projectHooks = analyzeProjectHooks([{ file: requiredFiles[0], content: settings }]);
+  if (!projectHooks.ok) {
+    for (const violation of projectHooks.violations) {
+      violations.push(
+        `Claude project hook invocation invalid: ${violation.hook ?? "settings"}:${violation.reason}`,
+      );
     }
   }
 

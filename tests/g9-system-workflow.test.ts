@@ -3,7 +3,7 @@ import {
   analyzeG9SystemWorkflow,
   g9SystemWorkflowMessages,
   loadG9SystemWorkflowInput,
-} from "../src/lint/g9-system-workflow";
+} from "../src/lint/g9-system-workflow.ts";
 
 const workflowBlock = [
   "## G9-WORKFLOW",

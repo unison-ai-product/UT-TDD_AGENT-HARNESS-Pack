@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
-import { hasPersonalAbsolutePath } from "./personal-path";
+import { hasPersonalAbsolutePath } from "./personal-path.ts";
 
 export type AssetType = "agent" | "skill" | "prompt";
 

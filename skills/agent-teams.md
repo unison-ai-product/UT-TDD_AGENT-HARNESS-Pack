@@ -16,6 +16,31 @@ applies_to:
     - Discovery
     - Reverse
     - Recovery
+decision_points:
+  - when: "assigning worker and judgement-gate roles in a team YAML"
+    choose: "assign different model families to the artefact-producing role and the gate-clearing role"
+    over: "letting the same agent role both produce the artefact and clear the judgement gate"
+    because: "no-self-approval is a design rule the guard does not enforce automatically — the team author must enforce it"
+  - when: "running in single-runtime mode with no second model family available"
+    choose: "record intra_runtime_subagent evidence in .ut-tdd/audit/ and document the limitation"
+    over: "passing the judgement gate silently because a second family isn't available"
+    because: "a missing cross-family reviewer must be surfaced as a documented limitation, not silently accepted"
+  - when: "a later team step needs the verified output of an earlier step (e.g., research before ADR authoring)"
+    choose: "use serial mode"
+    over: "using parallel mode to save time"
+    because: "parallel mode when step 2 depends on step 1 output produces non-deterministic results — a named anti-pattern"
+  - when: "worker slots produce independent artefacts with no ordering dependency"
+    choose: "use parallel mode"
+    over: "running them serially by default"
+    because: "serial execution of independent artefacts wastes the cost/time benefit parallel mode exists for"
+  - when: "a team definition seems to need both parallel and serial steps"
+    choose: "split into two separate team runs"
+    over: "mixing modes within a single team definition"
+    because: "mixed modes in one team definition are not supported"
+  - when: "verifying a completed team run's output"
+    choose: "read the actual files and check git status"
+    over: "trusting the reviewer agent's narrated summary of what it did"
+    because: "post-run verification must be evidence-based, not narration-based, per the team design checklist"
 ---
 
 # agent teams

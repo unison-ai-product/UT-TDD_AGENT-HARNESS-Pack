@@ -5,7 +5,7 @@ import {
   mustSerialize,
   type SerializationReason,
   teamDefinitionSchema,
-} from "../src/schema/team";
+} from "../src/schema/team.ts";
 
 describe("U-TEAM-001 teamDefinitionSchema", () => {
   const valid = {

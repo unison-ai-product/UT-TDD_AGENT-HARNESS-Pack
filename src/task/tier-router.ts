@@ -6,18 +6,18 @@
  *
  * 不変条件 (PO 確定 2026-06-17):
  *   - archetype が tier 帯を決める: 相談 / 検証 = 上位 (T0)、ワーカー = 下位 (T1/T2)。
- *   - ワーカーは上位モデル (opus / gpt-5.5) に絶対に到達しない (原則安く、fail-close)。
- *   - T0 (opus / gpt-5.5) は明示許可ゲート: 指名 role (tl/qa/uiux) + 明示トリガでのみ発火。
+ *   - ワーカーは上位モデル (`MODEL_IDS.claude.opus` / `MODEL_IDS.codex.frontier`) に絶対に到達しない (原則安く、fail-close)。
+ *   - T0 (`MODEL_IDS.claude.opus` / `MODEL_IDS.codex.frontier`) は明示許可ゲート: 指名 role (tl/qa/uiux) + 明示トリガでのみ発火。
  *   - 主 provider (detectMode().currentRuntime) でクロス分岐し、Codex/GPT も Claude と対称。
  */
 import {
   type AdapterContextInjection,
   type AdapterPlan,
   buildAdapterPlan,
-} from "../runtime/adapter";
-import type { ExecutionMode, RuntimeDetection } from "../runtime/detect";
-import type { TaskDifficulty } from "../team/model-policy";
-import { type ClassifyTaskInput, classifyTask } from "./classify";
+} from "../runtime/adapter.ts";
+import type { ExecutionMode, RuntimeDetection } from "../runtime/detect.ts";
+import type { TaskDifficulty } from "../team/model-policy.ts";
+import { type ClassifyTaskInput, classifyTask } from "./classify.ts";
 import {
   FRONTIER_ROLES,
   other,
@@ -27,9 +27,9 @@ import {
   reviewPolicy,
   TIER_TABLE,
   tierFor,
-} from "./tier-router-policy";
+} from "./tier-router-policy.ts";
 
-export type { ReviewEntry } from "./tier-router-policy";
+export type { ReviewEntry } from "./tier-router-policy.ts";
 export {
   FRONTIER_MODELS,
   FRONTIER_ROLES,
@@ -38,7 +38,7 @@ export {
   resolveModel,
   TIER_TABLE,
   tierFor,
-} from "./tier-router-policy";
+} from "./tier-router-policy.ts";
 
 export type Provider = "claude" | "codex";
 export type Archetype = "consult" | "worker" | "verify";
@@ -61,6 +61,8 @@ export interface RoutingDecision {
   provider: Provider;
   /** blocked-needs-approval のときは null。 */
   model: string | null;
+  /** ワーカー帯の既定 effort (PO 指示 2026-07-08: ワーカーは middle 固定)。相談/検証は別 policy。 */
+  effort?: "middle";
   reviewEntry: ReviewEntry;
   gate: boolean;
   crossReview: boolean;
@@ -82,6 +84,12 @@ export interface RouteOptions {
   primary?: Provider;
   /** T0 明示許可。 */
   auth?: FrontierAuth;
+  /**
+   * チームに実装 (se) が含まれる場合 true (routeTeamMembers が自動設定)。
+   * hybrid では相談/検証役も「実行=相手 / 判断=主」の実装レーン配線へ揃え、
+   * 実行側と判断側が同 provider に落ちるのを防ぐ。
+   */
+  implementationLane?: boolean;
 }
 
 /**
@@ -98,9 +106,18 @@ export function route(
   const archetype = ROLE_ARCHETYPE[input.role];
   const tier = tierFor(input.role, c.difficulty, c.risk_flags);
   const policy = reviewPolicy(c.difficulty, c.risk_flags);
-  // 主 provider から「創出=主 / 判断=相手」のクロス切替を自動導出 (assignCross 配線)。
-  const cross = assignCross(detection, primary);
-  // 役割を実 provider へ配置 (クロス接続): ワーカー=創出側(主)、相談/検証=判断側(相手)。
+  // 実装レーン (se=創出 / qa=その検証) は hybrid でクロス実行 (PO 指示 2026-07-08):
+  // 実装は主の相手 provider が実行し、レビューは実行側と別 provider (=主) が担う。
+  // docs ワーカーと相談 (tl/uiux) は従来どおり「創出=主 / 判断=相手」。
+  const implementationLane =
+    detection.mode === "hybrid" &&
+    (input.role === "se" ||
+      input.role === "qa" ||
+      // 相談役 (tl/uiux) は実装レーンのチーム文脈でのみ判断=主へ揃える。
+      // docs ワーカーは flag があっても従来配置 (docs=主) を維持する。
+      (options.implementationLane === true && archetype !== "worker"));
+  const cross = assignCross(detection, implementationLane ? other(primary) : primary);
+  // 役割を実 provider へ配置 (クロス接続): ワーカー=創出側、相談/検証=判断側。
   const placed: Provider = archetype === "worker" ? cross.execution : cross.judgement;
   const base: Omit<RoutingDecision, "model" | "status" | "reason"> = {
     role: input.role,
@@ -109,8 +126,10 @@ export function route(
     provider: placed,
     reviewEntry: policy.reviewEntry,
     gate: policy.gate,
-    crossReview: detection.mode === "hybrid" && policy.crossReview,
+    // 実装 (se) は難易度に依らず常時クロスレビュー (PO 指示 2026-07-08)。
+    crossReview: detection.mode === "hybrid" && (policy.crossReview || input.role === "se"),
     cross,
+    ...(archetype === "worker" ? { effort: "middle" as const } : {}),
     difficulty: c.difficulty,
     riskFlags: c.risk_flags,
   };
@@ -124,7 +143,7 @@ export function route(
         model: null,
         status: "blocked-needs-approval",
         reason: designated
-          ? "T0 (opus/gpt-5.5) は明示許可が必要です (--allow-frontier)。"
+          ? `T0 (${TIER_TABLE.T0.claude}/${TIER_TABLE.T0.codex}) は明示許可が必要です (--allow-frontier)。`
           : `role ${input.role} は上位帯 (T0) の指名 role ではありません。`,
       };
     }
@@ -185,13 +204,17 @@ export function routeTeamMembers(
   detection: RuntimeDetection,
   options: RouteOptions = {},
 ): TeamMemberRouting[] {
+  // チームに実装 (se) が居るなら相談/検証も実装レーン配線へ揃える (クロス保証)。
+  const laneOptions: RouteOptions = members.some((m) => m.role === "se")
+    ? { ...options, implementationLane: true }
+    : options;
   return members.map((member, index) => {
     if (!isRouterRole(member.role)) return { index, role: member.role, routed: false };
     return {
       index,
       role: member.role,
       routed: true,
-      decision: route({ role: member.role, task: { text: member.task } }, detection, options),
+      decision: route({ role: member.role, task: { text: member.task } }, detection, laneOptions),
     };
   });
 }
@@ -236,6 +259,8 @@ export function routeToAdapterPlan(
       role: decision.role,
       task,
       model: decision.model,
+      // ワーカー帯の effort を adapter へ実注入する (A-183: codex effort 非注入の穴を塞ぐ)。
+      effort: decision.effort,
       contextInjection: options.contextInjection,
     },
     options.mode,

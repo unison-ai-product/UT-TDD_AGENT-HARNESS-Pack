@@ -1,4 +1,6 @@
-import type { HarnessDb } from "../state-db/index";
+import { isTelemetryFeedback } from "../shared/feedback-lifecycle.ts";
+import { stableId } from "../stable-id.ts";
+import type { HarnessDb } from "../state-db/index.ts";
 
 /**
  * Takeover feedback surface (PLAN-L7-110).
@@ -16,6 +18,8 @@ export interface SurfacedFeedback {
   plan_id: string;
   next_action: string;
   bucket: FeedbackSurfaceBucket;
+  surface_count?: number;
+  surface_plan_ids?: string[];
 }
 
 export interface TakeoverFeedbackResult {
@@ -47,17 +51,6 @@ export interface FeedbackEventRowLike {
 const BUCKET_RANK: Record<FeedbackSurfaceBucket, number> = { gate: 0, actionable: 1, telemetry: 2 };
 const SEVERITY_RANK: Record<string, number> = { error: 0, fail: 0, warn: 1, info: 2 };
 
-const TELEMETRY_SIGNAL_TYPES = new Set([
-  "artifact_progress_yellow",
-  "drive_firing_rate",
-  "large-document-split",
-  "missing-test-oracle-id",
-  "skill_acceptance_rate",
-  "skill_firing_rate",
-  "trouble_event_rate",
-  "workflow_human_required_rate",
-]);
-
 function severityRank(severity: string): number {
   return SEVERITY_RANK[severity] ?? SEVERITY_RANK.warn;
 }
@@ -68,12 +61,12 @@ export function classifyFeedbackBucket(input: {
 }): FeedbackSurfaceBucket {
   const severity = input.severity.toLowerCase();
   if (severity === "error" || severity === "fail") return "gate";
-  if (severity === "info" || TELEMETRY_SIGNAL_TYPES.has(input.signal_type)) return "telemetry";
+  if (isTelemetryFeedback(input)) return "telemetry";
   return "actionable";
 }
 
 function feedbackId(prefix: string, subject: string): string {
-  return `${prefix}:${subject}`.replace(/[^A-Za-z0-9._:-]+/g, "-");
+  return stableId(prefix, subject);
 }
 
 function planIdOf(subject: string): string {
@@ -123,7 +116,10 @@ function renderGroupedItems(items: SurfacedFeedback[], indent = "    "): string[
       planIds: new Set<string>(),
       nextAction: item.next_action,
     };
-    group.count += 1;
+    group.count += item.surface_count ?? 1;
+    for (const planId of item.surface_plan_ids ?? []) {
+      if (planId) group.planIds.add(planId);
+    }
     if (item.plan_id) group.planIds.add(item.plan_id);
     groups.set(key, group);
   }
@@ -145,6 +141,50 @@ function renderGroupedItems(items: SurfacedFeedback[], indent = "    "): string[
     });
 }
 
+function feedbackGroupKey(item: SurfacedFeedback): string {
+  return `${item.bucket}:${item.severity}:${item.signal_type}`;
+}
+
+function selectDisplayGroups(items: SurfacedFeedback[], limit: number): SurfacedFeedback[] {
+  const groups = new Map<string, SurfacedFeedback[]>();
+  for (const item of items) {
+    if (item.bucket === "telemetry") continue;
+    const key = feedbackGroupKey(item);
+    const group = groups.get(key) ?? [];
+    group.push(item);
+    groups.set(key, group);
+  }
+
+  const selectedGroups = [...groups.values()]
+    .sort((a, b) => {
+      const aHead = a[0];
+      const bHead = b[0];
+      if (!aHead || !bHead) return 0;
+      return (
+        BUCKET_RANK[aHead.bucket] - BUCKET_RANK[bHead.bucket] ||
+        severityRank(aHead.severity) - severityRank(bHead.severity) ||
+        b.length - a.length ||
+        aHead.feedback_event_id.localeCompare(bHead.feedback_event_id)
+      );
+    })
+    .slice(0, limit);
+
+  return selectedGroups.map((group) => {
+    const sorted = [...group].sort((a, b) =>
+      a.feedback_event_id.localeCompare(b.feedback_event_id),
+    );
+    const representative = sorted[0];
+    if (!representative) {
+      throw new Error("empty feedback surface group");
+    }
+    return {
+      ...representative,
+      surface_count: group.length,
+      surface_plan_ids: [...new Set(group.map((item) => item.plan_id).filter(Boolean))],
+    };
+  });
+}
+
 /**
  * Read takeover feedback directly from harness.db projection tables.
  *
@@ -161,14 +201,21 @@ export function selectTakeoverFeedback(
   const representedFeedbackIds = new Set<string>();
   const representedSources = new Set<string>();
 
-  const openFeedbackEvents = db
+  const feedbackEventRows = db
     .prepare(
-      `SELECT feedback_event_id, finding_id, plan_id, source_table, source_id, signal_type, severity, next_action
+      `SELECT feedback_events.feedback_event_id, finding_id, plan_id, source_table, source_id,
+              signal_type, severity, next_action, source_generation,
+              (SELECT lifecycle.state
+               FROM feedback_lifecycle lifecycle
+               WHERE lifecycle.feedback_event_id = feedback_events.feedback_event_id
+                 AND lifecycle.source_generation = feedback_events.source_generation
+               ORDER BY lifecycle.occurred_at DESC, lifecycle.lifecycle_id DESC
+               LIMIT 1) AS latest_lifecycle_state
        FROM feedback_events
        WHERE status = 'open'`,
     )
     .all() as Array<Record<string, unknown>>;
-  for (const event of openFeedbackEvents) {
+  for (const event of feedbackEventRows) {
     const signalType = String(event.signal_type ?? "feedback");
     const severity = String(event.severity ?? "warn").toLowerCase();
     const feedbackEventId = String(event.feedback_event_id ?? "");
@@ -177,6 +224,9 @@ export function selectTakeoverFeedback(
     if (key) representedSources.add(key);
     const findingId = String(event.finding_id ?? "");
     if (findingId) representedSources.add(sourceKey("findings", findingId));
+    if (["ack", "closed", "superseded"].includes(String(event.latest_lifecycle_state ?? ""))) {
+      continue;
+    }
     items.push({
       feedback_event_id: feedbackEventId,
       signal_type: signalType,
@@ -255,7 +305,7 @@ export function selectTakeoverFeedback(
     }
   }
 
-  const surfaced = items.filter((item) => item.bucket !== "telemetry").slice(0, limit);
+  const surfaced = selectDisplayGroups(items, limit);
   return { total: items.length, bySeverity, byBucket, telemetryBySignal, items: surfaced };
 }
 
@@ -274,7 +324,8 @@ export function renderTakeoverFeedback(result: TakeoverFeedbackResult): string {
   lines.push(...renderGroupedItems(gateItems));
   if (actionableItems.length > 0) lines.push("  actionable:");
   lines.push(...renderGroupedItems(actionableItems));
-  const hiddenActionable = result.byBucket.gate + result.byBucket.actionable - result.items.length;
+  const surfacedActionable = result.items.reduce((sum, item) => sum + (item.surface_count ?? 1), 0);
+  const hiddenActionable = result.byBucket.gate + result.byBucket.actionable - surfacedActionable;
   if (hiddenActionable > 0) {
     lines.push(`  - (+${hiddenActionable} more actionable - ut-tdd feedback list --json)`);
   }

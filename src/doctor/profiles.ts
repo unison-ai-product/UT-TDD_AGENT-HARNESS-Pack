@@ -2,12 +2,22 @@ export type DoctorScope = "full" | "toolchain";
 
 export type DoctorRunProfileId =
   | "source-full"
+  | "source-doc-lane"
   | "source-toolchain"
   | "consumer-toolchain"
   | "consumer-setup-smoke";
 export type DoctorRunProfileAudience = DoctorRunProfile["audience"];
 
 export type DoctorRunProfile =
+  | {
+      id: "source-doc-lane";
+      audience: "source";
+      invocation: "registry";
+      scope: "full";
+      setupSmoke: false;
+      outputIds: readonly string[];
+      sourceOnly: true;
+    }
   | {
       id: "source-full";
       audience: "source";
@@ -58,8 +68,10 @@ export const FULL_DOCTOR_OUTPUT_IDS = [
   "plan-completion-drift",
   "propagation",
   "pair-freeze",
+  "test-design-naming",
   "module-drift",
   "merged-plan-status",
+  "memory-sync",
   "plan-artifact-existence",
   "asset-drift",
   "skill-assignment",
@@ -72,8 +84,12 @@ export const FULL_DOCTOR_OUTPUT_IDS = [
   "design-language",
   "ddd-tdd-rules",
   "runtime-portability",
+  "import-specifier",
+  "erasable-syntax",
   "rule-drift",
+  "model-id-doc-drift",
   "gate-confirm",
+  "gate-id-format",
   "plan-schedule",
   "plan-governance",
   "plan-dod",
@@ -84,10 +100,13 @@ export const FULL_DOCTOR_OUTPUT_IDS = [
   "drive-model-passage",
   "drive-db-registration",
   "db-currency",
+  "gate-run-coverage",
   "fr-roadmap-coverage",
   "telemetry-closure",
   "cycle-p4-verification",
   "l14-close-audit",
+  "runtime-state-location",
+  "test-repository-isolation",
   "project-hook",
   "github-ci-policy",
   "codex-hook-adapter",
@@ -96,28 +115,43 @@ export const FULL_DOCTOR_OUTPUT_IDS = [
   "l6-fr-coverage",
   "readability",
   "runtime-readability",
+  "secret-scan",
   "feedback-log",
   "l6-completion",
   "l7-completion",
   "review-evidence",
   "guardrail-invariants",
   "verification-groups",
+  "forward-freeze-contracts",
+  "refactor-qa-release-contracts",
   "roadmap",
+  "deliverable-plan-trace",
   "impl-plan-trace",
   "oracle-test-trace",
   "tracked-canonical",
   "sub-doc-catalog-drift",
+  "sub-doc-schema-integrity",
   "sub-doc-section-structure",
   "screen-impl-pair-freeze",
   "dependency-drift",
   "regression-expansion",
   "db-projection-coverage",
   "db-projection-ingestion",
+  "design-detection",
+  "design-doc-cross-integrity",
+  "typed-spec-trace-closure",
+  "typed-spec-ledger-body-sync",
+  "typed-spec-owned-artifact-dispersal",
+  "typed-spec-phase-layer-alignment",
+  "agent-contract-detection",
   "doc-consistency",
   "entity-coverage",
   "fr-registry-audit",
+  "resource-kernel-fixture-manifest",
+  "resource-kernel-pair-mapping",
   "improvement-backlog",
   "right-arm-gate-planning",
+  "right-lung-doc-governance",
   "g8-integration-workflow",
   "g9-system-workflow",
   "g10-ux-workflow",
@@ -126,11 +160,18 @@ export const FULL_DOCTOR_OUTPUT_IDS = [
   "frontend-design-coverage",
   "handover-outstanding",
   "green-command-digest",
+  "advisory-strict-gate-aging",
   "forward-convergence",
   "forward-convergence-audit",
 ] as const;
 
 export const TOOLCHAIN_DOCTOR_OUTPUT_IDS = ["toolchain-pin"] as const;
+export const SOURCE_DOC_LANE_OUTPUT_IDS = [
+  "readability",
+  "runtime-readability",
+  "rule-drift",
+  "secret-scan",
+] as const;
 
 export const DOCTOR_RUN_PROFILES = {
   "source-full": {
@@ -140,6 +181,15 @@ export const DOCTOR_RUN_PROFILES = {
     scope: "full",
     setupSmoke: false,
     outputIds: FULL_DOCTOR_OUTPUT_IDS,
+    sourceOnly: true,
+  },
+  "source-doc-lane": {
+    id: "source-doc-lane",
+    audience: "source",
+    invocation: "registry",
+    scope: "full",
+    setupSmoke: false,
+    outputIds: SOURCE_DOC_LANE_OUTPUT_IDS,
     sourceOnly: true,
   },
   "source-toolchain": {
@@ -172,6 +222,7 @@ export const DOCTOR_RUN_PROFILES = {
 
 export const DOCTOR_RUN_PROFILE_IDS = [
   "source-full",
+  "source-doc-lane",
   "source-toolchain",
   "consumer-toolchain",
   "consumer-setup-smoke",

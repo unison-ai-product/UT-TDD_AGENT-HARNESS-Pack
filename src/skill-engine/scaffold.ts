@@ -10,7 +10,7 @@ import {
   VALID_SKILL_CATEGORIES,
   VALID_SKILL_DRIVE_MODELS,
   VALID_SKILL_LAYERS,
-} from "../lint/skill-assignment";
+} from "../lint/skill-assignment.ts";
 
 export type SkillCategory = (typeof VALID_SKILL_CATEGORIES)[number];
 

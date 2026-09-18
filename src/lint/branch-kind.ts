@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { loadChangedFiles } from "./change-impact";
-import { normalizePath } from "./shared";
+import { loadChangedFiles } from "./change-impact.ts";
+import { normalizePath } from "./shared.ts";
 
 export type BranchKind =
   | "feature"
@@ -14,6 +14,7 @@ export type BranchKind =
   | "add"
   | "hotfix"
   | "refactor"
+  | "verify"
   | "docs"
   | "chore"
   | "none";
@@ -57,6 +58,7 @@ const REQUIRED_KIND_BY_BRANCH: Record<
   add: ["add-design", "add-impl"],
   hotfix: ["recovery", "troubleshoot"],
   refactor: ["refactor", "retrofit"],
+  verify: ["verify"],
 };
 
 export function classifyBranchKind(branch: string | null): BranchKind {
@@ -71,6 +73,7 @@ export function classifyBranchKind(branch: string | null): BranchKind {
     prefix === "add" ||
     prefix === "hotfix" ||
     prefix === "refactor" ||
+    prefix === "verify" ||
     prefix === "docs" ||
     prefix === "chore"
   ) {

@@ -14,8 +14,22 @@
  *
  * 純関数 (parse / cost) と I/O loader (loadRuntimeSessionUsage) を分離。ingest/projection は
  * projection-writer.ts 側 (projectTokenUsage) が本モジュールの純関数を消費する。
+ *
+ * repo スコープ ingest (issue #82、PLAN-L7-454): `loadRuntimeSessionUsage` は全 project 全量走査
+ * (`ut-tdd telemetry scan` の明示実行専用、温存)。一方 `rebuildHarnessDb` の正規経路には **この repo に
+ * 帰属する session usage のみ**を投入したい (他 repo の usage 混入は帰属外、かつ全量は rebuild を遅くする)。
+ * そのため `loadRepoScopedRuntimeSessionUsage` を別途用意し、判定は純関数 (`claudeProjectSlug` /
+ * `codexSessionBelongsToRepo`) + I/O (`resolveClaudeProjectDir` / `readCodexSessionCwd`) に分離する。
+ *
+ * blind review 是正 (2026-07-21、PLAN-L7-454): `claudeProjectSlug` はパス区切り文字を一律 `-` に潰すため
+ * 非単射 (例: `C:\a-b\c` と `C:\a\b-c` が同一 slug に衝突しうる) で、slug 一致だけでは他 repo の session が
+ * 同一 project-slug ディレクトリへ混入しうる (Finding 1)。是正として Claude 側も Codex と対称に **各
+ * session ファイルの実 cwd で per-file 帰属検証**を追加した (`parseClaudeSessionCwd` /
+ * `readClaudeSessionCwd`)。また `normalizePathForCompare` が無条件 lowercase しており POSIX の
+ * case-sensitive path (`/work/Repo` ≠ `/work/repo`) を誤同一視していた (Finding 2)。case-fold は
+ * win32 のみに限定し、`codexSessionBelongsToRepo` へ `options.platform` 注入を追加した。
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export type RuntimeKind = "claude" | "codex";
@@ -43,6 +57,7 @@ export interface RunUsage {
  */
 export const CLAUDE_PRICING: Record<string, { input: number; output: number }> = {
   "claude-fable-5": { input: 10, output: 50 },
+  "claude-opus-5": { input: 5, output: 25 },
   "claude-opus-4-8": { input: 5, output: 25 },
   "claude-opus-4-7": { input: 5, output: 25 },
   "claude-opus-4-6": { input: 5, output: 25 },
@@ -56,7 +71,7 @@ const CACHE_WRITE_MULTIPLIER = 1.25;
 
 /**
  * OpenAI (Codex runtime) モデル単価 ($/1M tokens)。正本 = OpenAI 公式 API pricing
- * (https://developers.openai.com/api/docs/pricing、standard tier、2026-06-15 取得)。`cached` は公式
+ * (https://developers.openai.com/api/docs/pricing、standard tier、2026-07-10 確認)。`cached` は公式
  * "cached input" 割引単価で、caching 非対応モデル (pro) は null → computeCodexCostUsd が input 単価で課金する。
  * 根拠: ハードコードだが公式 published 単価であり、model→price の散在を避けここへ集約 (CLAUDE_PRICING と対称)。
  * **未掲載モデルは表に入れない = cost null** (捏造禁止の不変条件)。例: gpt-5.4-codex は公式 pricing に未掲載の
@@ -66,6 +81,9 @@ export const OPENAI_PRICING: Record<
   string,
   { input: number; cached: number | null; output: number }
 > = {
+  "gpt-5.6-sol": { input: 5, cached: 0.5, output: 30 },
+  "gpt-5.6-terra": { input: 2.5, cached: 0.25, output: 15 },
+  "gpt-5.6-luna": { input: 1, cached: 0.1, output: 6 },
   "gpt-5.5": { input: 5, cached: 0.5, output: 30 },
   "gpt-5.5-pro": { input: 30, cached: null, output: 180 },
   "gpt-5.4": { input: 2.5, cached: 0.25, output: 15 },
@@ -334,6 +352,285 @@ export function loadRuntimeSessionUsage(dirs: SessionScanDirs): RunUsage[] {
     }
   }
   return out;
+}
+
+/**
+ * repoRoot から Claude Code project-slug ディレクトリ名を導出する (純関数)。
+ * Claude Code は `~/.claude/projects/` 配下に、絶対パスの区切り文字 (`\` `/`) とドライブ区切り `:` を
+ * すべて `-` へ置換したディレクトリ名でセッションを保存する (実ディレクトリで確認済、例:
+ * `<drive>:\workspace\repo` → `<drive>--workspace-repo`)。
+ * 元パス中のハイフンはそのまま残る (二重 `--` は `:` `\` の連続置換由来であり衝突ではない)。
+ */
+export function claudeProjectSlug(repoRoot: string): string {
+  return repoRoot.replace(/[\\/:]/g, "-");
+}
+
+/**
+ * `claudeProjectsRoot` 直下から repoRoot に対応する project-slug ディレクトリを解決する (I/O)。
+ * ドライブ文字の大文字小文字が Claude Code の起動経路 (bash 由来 `c--...` / GUI 由来 `C--...`) で
+ * 揺れうるため、実在ディレクトリ一覧との比較は **大文字小文字を無視**する。不在ディレクトリ / 未一致は
+ * null (cold-start 安全、fail-open)。
+ */
+export function resolveClaudeProjectDir(
+  claudeProjectsRoot: string,
+  repoRoot: string,
+): string | null {
+  const slug = claudeProjectSlug(repoRoot).toLowerCase();
+  let entries: string[];
+  try {
+    entries = readdirSync(claudeProjectsRoot);
+  } catch {
+    return null;
+  }
+  const match = entries.find((entry) => entry.toLowerCase() === slug);
+  return match ? join(claudeProjectsRoot, match) : null;
+}
+
+/**
+ * パス比較の platform 注入用オプション (blind review Finding 2、PLAN-L7-454)。
+ * 省略時は `process.platform`。テスト決定性のため明示注入できる。
+ */
+export interface PathCompareOptions {
+  platform?: NodeJS.Platform;
+}
+
+/**
+ * 比較用にパス区切りを `/` へ統一する。大文字小文字の畳み込みは **win32 のみ**
+ * (blind review Finding 2、PLAN-L7-454): POSIX (linux/darwin) は case-sensitive
+ * ファイルシステムのため `/work/Repo` と `/work/repo` を同一視してはならない。
+ * 無条件 lowercase は Windows 前提の誤同一視バグだった。
+ */
+function normalizePathForCompare(p: string, options: PathCompareOptions = {}): string {
+  const platform = options.platform ?? process.platform;
+  const unified = p.replace(/\\/g, "/").replace(/\/+$/, "");
+  return platform === "win32" ? unified.toLowerCase() : unified;
+}
+
+/**
+ * Codex rollout の先頭 `session_meta` 行 (文字列) から `payload.cwd` を抽出する (純関数)。
+ * 先頭行が `session_meta` でない、または `cwd` が無い/文字列でない形式は null (不採用 skip の判定材料)。
+ */
+export function parseCodexSessionMetaCwd(firstLine: string): string | null {
+  const obj = safeParse(firstLine);
+  if (!obj || obj.type !== "session_meta") return null;
+  const payload = obj.payload as Record<string, unknown> | undefined;
+  const cwd = payload?.cwd;
+  return typeof cwd === "string" && cwd.length > 0 ? cwd : null;
+}
+
+/**
+ * session (Claude/Codex 共通) の `cwd` が repoRoot 配下かどうかを判定する (純関数、Codex 専用ではなく
+ * 両 runtime の per-file 帰属検証で共用する)。cwd 不明 (null) は不採用。パス区切り (`\`/`/`) の揺れを
+ * 常に吸収し、大文字小文字の畳み込みは win32 のときのみ行う (`options.platform` 省略時は
+ * `process.platform`、POSIX では case-sensitive 比較、Finding 2 是正)。
+ */
+export function codexSessionBelongsToRepo(
+  cwd: string | null,
+  repoRoot: string,
+  options: PathCompareOptions = {},
+): boolean {
+  if (!cwd) return false;
+  const c = normalizePathForCompare(cwd, options);
+  const r = normalizePathForCompare(repoRoot, options);
+  return c === r || c.startsWith(`${r}/`);
+}
+
+/** 先頭 meta 行だけを読むための上限バイト数。観測値 (~7KB) に十分な余裕を持たせた固定サイズ。 */
+const CODEX_META_LINE_MAX_BYTES = 65536;
+
+/**
+ * Codex rollout JSONL の **先頭行のみ**を読む (I/O)。全量 (`readFileSync`) と違い大半のファイルは
+ * 走査対象外 (他 repo 帰属) になるため、cwd 判定のためだけに全ファイルを読むのは無駄が大きい
+ * (観測: 先頭行 ~7KB vs ファイル全体 ~850KB)。上限内に改行が無ければ読めた分をそのまま返す
+ * (JSON.parse が失敗すれば呼び出し側で null 扱いになる)。
+ */
+function readFirstLine(file: string, maxBytes = CODEX_META_LINE_MAX_BYTES): string | null {
+  let fd: number;
+  try {
+    fd = openSync(file, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const buf = Buffer.alloc(maxBytes);
+    const bytesRead = readSync(fd, buf, 0, maxBytes, 0);
+    const chunk = buf.toString("utf8", 0, bytesRead);
+    const nl = chunk.indexOf("\n");
+    return nl >= 0 ? chunk.slice(0, nl) : chunk;
+  } catch {
+    return null;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      // close 失敗は無視 (fd リークより読み取り結果を優先、プロセスは短命)
+    }
+  }
+}
+
+/** Codex rollout ファイルの `cwd` を先頭行のみ読んで判定する (I/O)。読取失敗は null (fail-open)。 */
+function readCodexSessionCwd(file: string): string | null {
+  const firstLine = readFirstLine(file);
+  if (firstLine === null) return null;
+  return parseCodexSessionMetaCwd(firstLine);
+}
+
+/** 先頭付近の Claude session `cwd` 検出のために読む上限バイト数/行数 (Codex の先頭行のみ読み取りと対称)。 */
+const CLAUDE_META_SCAN_MAX_BYTES = 262144;
+const CLAUDE_META_SCAN_MAX_LINES = 20;
+
+/**
+ * ファイル先頭の複数行 (改行区切り) を上限バイト数まで読む (I/O)。上限バイトぴったりで打ち切った場合、
+ * 末尾行は途中切断されている可能性があるため破棄する。読取失敗は空配列 (fail-open)。
+ */
+function readLeadingLines(file: string, maxBytes: number): string[] {
+  let fd: number;
+  try {
+    fd = openSync(file, "r");
+  } catch {
+    return [];
+  }
+  try {
+    const buf = Buffer.alloc(maxBytes);
+    const bytesRead = readSync(fd, buf, 0, maxBytes, 0);
+    const chunk = buf.toString("utf8", 0, bytesRead);
+    const lines = chunk.split("\n");
+    if (bytesRead === maxBytes) lines.pop(); // 末尾行が切断されている可能性 → 破棄
+    return lines;
+  } catch {
+    return [];
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      // close 失敗は無視 (readCodexSessionCwd と同方針)
+    }
+  }
+}
+
+/**
+ * Claude Code transcript の各行に載る `cwd` フィールドから帰属 repo を判定する (純関数、Codex の
+ * `parseCodexSessionMetaCwd` と対称)。先頭付近の複数行を渡し、最初に見つかった文字列 `cwd` を採用する
+ * (行 1-2 は `queue-operation` 等 `cwd` を持たない場合が実観測されており、先頭行のみでは不十分)。
+ * 見つからなければ null (不採用 skip の判定材料)。
+ */
+export function parseClaudeSessionCwd(lines: string[]): string | null {
+  for (const line of lines) {
+    const obj = safeParse(line);
+    if (!obj) continue;
+    const cwd = obj.cwd;
+    if (typeof cwd === "string" && cwd.length > 0) return cwd;
+  }
+  return null;
+}
+
+/** Claude transcript ファイルの `cwd` を先頭付近の数行のみ読んで判定する (I/O)。読取失敗は null (fail-open)。 */
+function readClaudeSessionCwd(file: string): string | null {
+  const lines = readLeadingLines(file, CLAUDE_META_SCAN_MAX_BYTES).slice(
+    0,
+    CLAUDE_META_SCAN_MAX_LINES,
+  );
+  return parseClaudeSessionCwd(lines);
+}
+
+/** repo スコープ ingest の走査統計 (issue #82、PLAN-L7-454: 件数の可視化)。 */
+export interface RepoScopeIngestStats {
+  /** repoRoot に対応する Claude project-slug ディレクトリが見つかったか。 */
+  claudeProjectDirResolved: boolean;
+  /** cwd 判定のため先頭付近の行を確認した Claude transcript ファイル数 (走査候補の総数)。 */
+  claudeFilesChecked: number;
+  /** cwd が repoRoot 配下と判定され走査した Claude transcript ファイル数。 */
+  claudeFilesScanned: number;
+  /**
+   * cwd は読めたが repoRoot 配下ではない (他 repo 帰属) ため不採用の Claude transcript ファイル数
+   * (blind review Finding 1、PLAN-L7-454: `claudeProjectSlug` の非単射性による他 repo 混入を per-file
+   * cwd 検証で遮断した件数)。
+   */
+  claudeFilesForeignRepo: number;
+  /** 先頭付近の行に cwd が無い/読めない形式のため不採用の Claude transcript ファイル数 (可視化対象)。 */
+  claudeFilesSkippedUnknownCwd: number;
+  /** cwd 判定のため先頭行を確認した Codex rollout ファイル数 (走査候補の総数)。 */
+  codexFilesChecked: number;
+  /** cwd が repoRoot 配下と判定され走査した Codex rollout ファイル数。 */
+  codexFilesMatched: number;
+  /** cwd は読めたが repoRoot 配下ではない (他 repo 帰属) ため不採用の Codex rollout ファイル数。 */
+  codexFilesForeignRepo: number;
+  /** 先頭 meta 行に cwd が無い/読めない形式のため不採用の Codex rollout ファイル数 (可視化対象)。 */
+  codexFilesSkippedUnknownCwd: number;
+}
+
+export interface RepoScopedSessionUsageResult {
+  usages: RunUsage[];
+  stats: RepoScopeIngestStats;
+}
+
+/**
+ * repoRoot に帰属する session usage のみを走査して RunUsage[] を返す (I/O loader、issue #82)。
+ * - Claude: `claudeDirs` 直下から repoRoot の project-slug ディレクトリを解決した上で、**その配下の
+ *   各ファイルについても先頭付近の行から `cwd` を読み per-file 帰属検証を行う** (blind review Finding 1、
+ *   PLAN-L7-454)。`claudeProjectSlug` はパス区切り文字を一律 `-` に潰すため非単射
+ *   (例: `C:\a-b\c` と `C:\a\b-c` が同一 slug に衝突しうる) で、slug 一致だけでは他 repo の session が
+ *   同一ディレクトリへ混入する余地がある。cwd 不一致 (`claudeFilesForeignRepo`) と cwd 不明形式
+ *   (`claudeFilesSkippedUnknownCwd`) を分けて件数を可視化する (Codex と対称)。
+ * - Codex: `codexDirs` 配下の全 rollout ファイルの **先頭行のみ**読み、`cwd` が repoRoot 配下のものだけ
+ *   全文を読んで走査する。他 repo 帰属 (`codexFilesForeignRepo`) と cwd 不明形式
+ *   (`codexFilesSkippedUnknownCwd`) を分けて件数を可視化する。
+ * 個別ファイルの読取失敗は fail-open (該当ファイルを飛ばして継続、全体を落とさない)。
+ */
+export function loadRepoScopedRuntimeSessionUsage(
+  repoRoot: string,
+  dirs: SessionScanDirs,
+): RepoScopedSessionUsageResult {
+  const usages: RunUsage[] = [];
+  const stats: RepoScopeIngestStats = {
+    claudeProjectDirResolved: false,
+    claudeFilesChecked: 0,
+    claudeFilesScanned: 0,
+    claudeFilesForeignRepo: 0,
+    claudeFilesSkippedUnknownCwd: 0,
+    codexFilesChecked: 0,
+    codexFilesMatched: 0,
+    codexFilesForeignRepo: 0,
+    codexFilesSkippedUnknownCwd: 0,
+  };
+  for (const claudeRoot of dirs.claudeDirs ?? []) {
+    const projectDir = resolveClaudeProjectDir(claudeRoot, repoRoot);
+    if (!projectDir) continue;
+    stats.claudeProjectDirResolved = true;
+    for (const file of listJsonl(projectDir)) {
+      stats.claudeFilesChecked++;
+      const cwd = readClaudeSessionCwd(file);
+      if (!codexSessionBelongsToRepo(cwd, repoRoot)) {
+        if (cwd === null) stats.claudeFilesSkippedUnknownCwd++;
+        else stats.claudeFilesForeignRepo++;
+        continue;
+      }
+      stats.claudeFilesScanned++;
+      try {
+        usages.push(...parseClaudeSessionUsage(readFileSync(file, "utf8"), file));
+      } catch {
+        // 1 ファイル失敗で全体を落とさない
+      }
+    }
+  }
+  for (const codexRoot of dirs.codexDirs ?? []) {
+    for (const file of listJsonl(codexRoot)) {
+      stats.codexFilesChecked++;
+      const cwd = readCodexSessionCwd(file);
+      if (!codexSessionBelongsToRepo(cwd, repoRoot)) {
+        if (cwd === null) stats.codexFilesSkippedUnknownCwd++;
+        else stats.codexFilesForeignRepo++;
+        continue;
+      }
+      stats.codexFilesMatched++;
+      try {
+        usages.push(...parseCodexSessionUsage(readFileSync(file, "utf8"), file));
+      } catch {
+        // 同上
+      }
+    }
+  }
+  return { usages, stats };
 }
 
 /** scan サマリ (CLI `ut-tdd telemetry scan` の表示用)。$ は cost を出せた run の合計のみ。 */

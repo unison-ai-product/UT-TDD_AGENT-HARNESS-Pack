@@ -4,9 +4,9 @@ import {
   renderFeedbackEventRows,
   renderTakeoverFeedback,
   selectTakeoverFeedback,
-} from "../src/feedback/surface";
-import { openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate } from "../src/state-db/migration";
+} from "../src/feedback/surface.ts";
+import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate } from "../src/state-db/migration.ts";
 
 function insertFinding(
   db: ReturnType<typeof openHarnessDb>,
@@ -40,6 +40,7 @@ function insertFeedbackEvent(
     nextAction?: string;
     sourceTable?: string;
     sourceId?: string;
+    sourceGeneration?: string;
     findingId?: string;
   },
 ): void {
@@ -52,6 +53,7 @@ function insertFeedbackEvent(
       plan_id: input.planId ?? "",
       source_table: input.sourceTable ?? "",
       source_id: input.sourceId ?? "",
+      source_generation: input.sourceGeneration ?? "generation:test",
       source_color: "",
       signal_type: input.signalType,
       severity: input.severity,
@@ -155,17 +157,112 @@ describe("takeover feedback surface (PLAN-L7-110)", () => {
     }
   });
 
-  it("caps surfaced items and leaves a breadcrumb for the remainder", () => {
+  it("caps surfaced signal groups and leaves a breadcrumb for the remainder", () => {
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
       for (let i = 0; i < 5; i += 1) {
-        insertFinding(db, `finding:takeover-drift:bulk-${i}`, "warn", `PLAN-BULK-${i}`);
+        insertFeedbackEvent(db, {
+          id: `feedback:bulk-${i}`,
+          signalType: `bulk-signal-${i}`,
+          severity: "warn",
+          planId: `PLAN-BULK-${i}`,
+        });
       }
       const result = selectTakeoverFeedback(db, { limit: 2 });
       expect(result.total).toBe(5);
       expect(result.items.length).toBe(2);
       expect(renderTakeoverFeedback(result)).toContain("+3 more");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("selects diverse signal groups before applying the takeover surface limit", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      for (let i = 0; i < 12; i += 1) {
+        insertFeedbackEvent(db, {
+          id: `feedback:detector-${i.toString().padStart(2, "0")}`,
+          signalType: "detector_route_candidate:spec-ir-invalid-subdoc",
+          severity: "warn",
+          nextAction: "review detector route candidates",
+        });
+      }
+      insertFeedbackEvent(db, {
+        id: "feedback:unresolved-join",
+        signalType: "unresolved-join",
+        severity: "warn",
+        nextAction: "review unresolved join cluster",
+      });
+
+      const result = selectTakeoverFeedback(db, { limit: 2 });
+      const rendered = renderTakeoverFeedback(result);
+
+      expect(result.items).toHaveLength(2);
+      expect(rendered).toContain("detector_route_candidate:spec-ir-invalid-subdoc");
+      expect(rendered).toContain("count=12");
+      expect(rendered).toContain("unresolved-join");
+      expect(rendered).toContain("count=1");
+      expect(result.items.some((item) => item.signal_type === "unresolved-join")).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps the takeover limit as a group limit and breadcrumbs hidden raw rows", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      for (let i = 0; i < 12; i += 1) {
+        insertFeedbackEvent(db, {
+          id: `feedback:detector-${i.toString().padStart(2, "0")}`,
+          signalType: "detector_route_candidate:spec-ir-invalid-subdoc",
+          severity: "warn",
+        });
+      }
+      insertFeedbackEvent(db, {
+        id: "feedback:unresolved-join",
+        signalType: "unresolved-join",
+        severity: "warn",
+      });
+
+      const result = selectTakeoverFeedback(db, { limit: 1 });
+      const rendered = renderTakeoverFeedback(result);
+
+      expect(result.items).toHaveLength(1);
+      expect(rendered).toContain("detector_route_candidate:spec-ir-invalid-subdoc");
+      expect(rendered).toContain("count=12");
+      expect(rendered).not.toContain("unresolved-join");
+      expect(rendered).toContain("+1 more actionable");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps gate feedback ahead of larger actionable groups", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      insertFeedbackEvent(db, {
+        id: "feedback:gate",
+        signalType: "release-blocker",
+        severity: "fail",
+      });
+      for (let i = 0; i < 12; i += 1) {
+        insertFeedbackEvent(db, {
+          id: `feedback:warn-${i.toString().padStart(2, "0")}`,
+          signalType: "large-warn-group",
+          severity: "warn",
+        });
+      }
+
+      const result = selectTakeoverFeedback(db, { limit: 1 });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]?.signal_type).toBe("release-blocker");
+      expect(result.items[0]?.bucket).toBe("gate");
     } finally {
       db.close();
     }
@@ -193,6 +290,36 @@ describe("takeover feedback surface (PLAN-L7-110)", () => {
         bucket: "actionable",
       });
       expect(renderTakeoverFeedback(result)).toContain("review queued feedback");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("surfaces detector route candidate feedback as actionable routeFiling review work", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      insertFeedbackEvent(db, {
+        id: "feedback:detector-route-candidate:spec-ir-1",
+        signalType: "detector_route_candidate:spec-ir-orphan-relation",
+        severity: "warn",
+        nextAction:
+          "review detector route candidate; candidate_status=non_ready; routeFiling SSoT evaluated signal=feature_addition; route_eval_mode=add-feature; allowed_kinds=add-design,add-impl; layer_band=L3-L6,L7; review_status=ssot_evaluated",
+        sourceTable: "detector_route_candidates",
+        sourceId: "candidate:spec-ir-1",
+      });
+
+      const result = selectTakeoverFeedback(db);
+      expect(result.total).toBe(1);
+      expect(result.items[0]).toMatchObject({
+        signal_type: "detector_route_candidate:spec-ir-orphan-relation",
+        severity: "warn",
+        bucket: "actionable",
+      });
+      expect(renderTakeoverFeedback(result)).toContain("routeFiling SSoT");
+      expect(renderTakeoverFeedback(result)).toContain("route_eval_mode=add-feature");
+      expect(renderTakeoverFeedback(result)).toContain("allowed_kinds=add-design,add-impl");
+      expect(renderTakeoverFeedback(result)).toContain("candidate_status=non_ready");
     } finally {
       db.close();
     }

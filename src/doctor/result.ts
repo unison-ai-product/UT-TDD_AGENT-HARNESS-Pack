@@ -1,4 +1,4 @@
-import type { LintResult } from "../plan/lint";
+import type { LintResult } from "../plan/lint.ts";
 
 export interface DoctorTiming {
   id: string;

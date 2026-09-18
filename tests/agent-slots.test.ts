@@ -17,8 +17,8 @@ import {
   releaseSlot,
   type Slot,
   sweepStaleGuardSlots,
-} from "../src/runtime/agent-slots";
-import { resolveRosterCapability } from "../src/runtime/agent-slots-roster";
+} from "../src/runtime/agent-slots.ts";
+import { resolveRosterCapability } from "../src/runtime/agent-slots-roster.ts";
 
 const statePath = join("/repo", ".ut-tdd", "state", "agent-slots.json");
 

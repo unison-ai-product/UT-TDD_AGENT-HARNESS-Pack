@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { fmValue, normalizePath } from "./shared";
+import { fmValue, normalizePath } from "./shared.ts";
 
 export interface L7CompletionDoc {
   path: string;

@@ -3,8 +3,8 @@ import {
   evaluateGateReview,
   REQUIRED_CHECKLIST_IDS,
   type ReviewChecklist,
-} from "../src/gate/review-tier";
-import { isNaiveSelfReviewKind, JUDGMENT_GATES } from "../src/gate/review-tier-policy";
+} from "../src/gate/review-tier.ts";
+import { isNaiveSelfReviewKind, JUDGMENT_GATES } from "../src/gate/review-tier-policy.ts";
 
 const passingChecklist = (): ReviewChecklist => ({
   items: REQUIRED_CHECKLIST_IDS.map((id) => ({ id, status: "pass", evidence: `${id} checked` })),

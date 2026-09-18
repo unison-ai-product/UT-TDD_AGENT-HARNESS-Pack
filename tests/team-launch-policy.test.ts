@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { recommendTeamLaunch } from "../src/team/launch-policy";
-import { buildTeamRunPlan } from "../src/team/run";
+import { recommendTeamLaunch } from "../src/team/launch-policy.ts";
+import { buildTeamRunPlan } from "../src/team/run.ts";
 
 describe("U-TEAM-003 team launch policy", () => {
   it("U-TEAM-003: does not launch a team for trivial work in hybrid mode", () => {
@@ -41,9 +41,13 @@ describe("U-TEAM-003 team launch policy", () => {
     expect(plan.ok).toBe(true);
     expect(plan.strategy).toBe("sequential");
     expect(plan.members.map((member) => member.provider)).toEqual(["codex", "claude", "claude"]);
-    expect(plan.members.every((member) => member.model_selection.reasoning_effort === "high")).toBe(
-      true,
-    );
+    // effort はモデル別ラダー基準 (PO rule 2026-07-14): critical se は frontier(Sol)=low、
+    // review / verify は task-kind が engine family より優先され Opus=middle。
+    expect(plan.members.map((member) => member.model_selection.reasoning_effort)).toEqual([
+      "low",
+      "middle",
+      "middle",
+    ]);
   });
 
   it("U-TEAM-003: launches for standard non-risk work by difficulty", () => {

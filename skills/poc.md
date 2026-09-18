@@ -10,6 +10,27 @@ applies_to:
     - Discovery
     - Scrum
     - Forward
+decision_points:
+  - when: "an S4 decision on a PoC comes back `adopt`"
+    choose: "create a new Forward `add-impl` PLAN and link the PoC PLAN in its `dependencies`, then productionise from scratch there"
+    over: "promote the spike code in `tests/poc/` directly into `src/`"
+    because: "spike code has no Reverse back-fill pairing or V-model descent, so merging it as-is bypasses the design/test-design trail required for `src/`"
+  - when: "PoC evidence (timing, logs, error rates) is being recorded"
+    choose: "write it into `review_evidence` or `.ut-tdd/audit/`"
+    over: "leave the results only in chat or in commit messages"
+    because: "evidence outside review_evidence/.ut-tdd/audit does not survive session boundaries and cannot substantiate the S4 decision later"
+  - when: "a PoC's hypothesis is inconclusive at S3 verify"
+    choose: "set `decision_outcome: defer`, record the blocker in `review_evidence`, and set a TTL in the handover"
+    over: "leave `decision_outcome` empty and status `active` indefinitely"
+    because: "an empty decision_outcome after status reaches done is a false-green that `ut-tdd doctor` will flag, and an undated defer accumulates as indefinite active state"
+  - when: "setting the time-box for a PoC"
+    choose: "time-box both the spike (S2) and the decision phase (S4) explicitly"
+    over: "time-box only the spike code and leave the decide step open-ended"
+    because: "a PoC without an S4 decide date accumulates as indefinite active state even if the spike itself finished on time"
+  - when: "a hypothesis is falsified during S2/S3"
+    choose: "set `decision_outcome: reject`, `status: cancelled`, and document why in `review_evidence`"
+    over: "quietly drop the PLAN without recording the outcome"
+    because: "an undocumented rejection means the same spike is likely to be repeated later by someone who doesn't know it already failed"
 ---
 
 # poc
@@ -50,7 +71,7 @@ drive: Discovery
 status: active
 hypothesis: "Can Vitest handle 500 harness-db projections in under 2 s?"
 poc_criteria:
-  - "bun run test completes under 2000 ms on CI hardware"
+  - "npm run test completes under 2000 ms on CI hardware"
   - "No memory leak observed in 3 consecutive runs"
 decision_outcome: ""   # filled at S4
 generates:

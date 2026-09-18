@@ -11,7 +11,7 @@ import {
   providerAvailable,
   resolveClaudeNativeCommand,
   resolveCodexNativeCommand,
-} from "../src/runtime/adapter";
+} from "../src/runtime/adapter.ts";
 import {
   ADAPTER_CONTEXT_HEADER,
   CLAUDE_EFFORT_ENV,
@@ -20,7 +20,7 @@ import {
   CODEX_STDIN_ARGS,
   mapAdapterErrorPolicy,
   REQUIRED_SKILL_LABEL,
-} from "../src/runtime/adapter-policy";
+} from "../src/runtime/adapter-policy.ts";
 
 /** 指定パスの親ディレクトリまで作成し、空の実行ファイルを置く。 */
 function touchBinary(path: string): void {

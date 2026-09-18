@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { VALID_ORCHESTRATION_MODES } from "../src/schema";
-import { resolveVmodelInjection } from "../src/vmodel/injection";
+import { VALID_ORCHESTRATION_MODES } from "../src/schema/index.ts";
+import { resolveVmodelInjection } from "../src/vmodel/injection.ts";
 
 describe("vmodel layer-context injection", () => {
   it("returns the five required injection keys for drive x layer", () => {

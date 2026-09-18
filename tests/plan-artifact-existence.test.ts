@@ -2,11 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkPlanArtifactExistence } from "../src/doctor/index";
+import { checkPlanArtifactExistence } from "../src/doctor/index.ts";
 import {
   analyzePlanArtifactExistence,
   loadPlanArtifactExistenceInput,
-} from "../src/lint/plan-artifact-existence";
+} from "../src/lint/plan-artifact-existence.ts";
 
 // PO /goal 2026-06-15: merged-plan-status (PLAN-L7-54) の鏡像。完了宣言 (confirmed/completed/accepted)
 // した PLAN なのに generates artifact が不在 (phantom / false-completion) を機械検出する gate の回帰。

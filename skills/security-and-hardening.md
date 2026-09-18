@@ -18,6 +18,27 @@ applies_to:
     - Reverse
     - Retrofit
     - Refactor
+decision_points:
+  - when: "An `npm audit` (or equivalent) finding reports a critical or high severity advisory on a new/updated dependency."
+    choose: "block accept and document the accepted risk in `docs/design/L5/<plan-id>-dependency-risk.md` before proceeding"
+    over: "suppressing or ignoring the advisory to keep the PLAN moving"
+    because: "the checklist requires zero critical/high advisories or an explicit documented risk-acceptance; an undocumented pass-through leaves an unreviewed supply-chain exposure in the codebase."
+  - when: "A version pin in `package.json` uses `*` or `latest`."
+    choose: "treat it as prohibited and require a pinned or `^x.y.z` range"
+    over: "accepting it as a temporary convenience for a development-only dependency"
+    because: "the anti-patterns section explicitly names floating ranges as a supply-chain risk even in development, not just production."
+  - when: "This skill's checklist overlaps with `security.md` (e.g. a PLAN touches both dependency hygiene and agent-guard escalation)."
+    choose: "run both skills' checklists independently and satisfy both before accept"
+    over: "treating either skill's pass as sufficient for the other"
+    because: "the file states this skill is the systematic hardening sweep while `security.md` covers design-time escalation/agent-guard architecture — they are non-overlapping obligations, not alternatives."
+  - when: "A Vitest fixture needs a credential-shaped string for a test case."
+    choose: "use a `\"FAKE_KEY_FOR_TESTING\"` sentinel string"
+    over: "using a realistic-looking key format that a scanner might miss or a human might mistake for real"
+    because: "the guardrail is expected to recognize sentinel strings and skip them; real-shaped fixture strings risk false secret leaks or false negatives depending on scanner behavior."
+  - when: "`ut-tdd guardrail` timing must be decided for a working session."
+    choose: "run it after every commit touching `docs/`, `.ut-tdd/`, or `src/`"
+    over: "running it only once at the end of a sprint"
+    because: "the anti-patterns section identifies end-of-sprint-only scanning as a named failure mode that lets secrets accumulate undetected across many commits."
 ---
 
 # security and hardening
@@ -42,8 +63,8 @@ Run in order before accept gate:
 
 ```
 ut-tdd guardrail          # secret pattern scan across all text files
-bun run lint              # Biome check: includes security-adjacent lint rules
-bun run test              # Vitest: confirm no fixture file leaks credentials
+npm run lint              # Biome check: includes security-adjacent lint rules
+npm run test              # Vitest: confirm no fixture file leaks credentials
 ut-tdd doctor             # structural governance: no orphaned hook or agent path
 ```
 
@@ -53,7 +74,7 @@ For every new or updated entry in `package.json`:
 
 - [ ] Confirm the package is from a known registry (npmjs.com). No `file:`,
       `git+ssh:`, or `http:` protocol references without PO approval.
-- [ ] Run `bun audit` (or equivalent) and confirm zero critical or high severity
+- [ ] Run `npm audit` (or equivalent) and confirm zero critical or high severity
       advisories. If an advisory exists, document the accepted risk in
       `docs/design/L5/<plan-id>-dependency-risk.md` before accept.
 - [ ] Confirm the version pin is not a floating range (`^x.y.z` is acceptable;
@@ -70,7 +91,7 @@ For every new or updated entry in `package.json`:
 
 ### 3. Biome security-lint surface
 
-- [ ] `bun run lint` exits 0 with no suppressions added beyond the pre-change
+- [ ] `npm run lint` exits 0 with no suppressions added beyond the pre-change
       count.
 - [ ] Any new `// biome-ignore` line has a PLAN-linked comment on the same line.
 - [ ] `// @ts-ignore` and `// @ts-expect-error` lines are zero or PLAN-justified.

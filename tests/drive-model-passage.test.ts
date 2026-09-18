@@ -5,7 +5,7 @@ import {
   analyzeDriveModelPassage,
   driveModelPassageMessages,
   loadDriveModelPassageDocs,
-} from "../src/lint/drive-model-passage";
+} from "../src/lint/drive-model-passage.ts";
 
 const compliant = `# PLAN-X
 

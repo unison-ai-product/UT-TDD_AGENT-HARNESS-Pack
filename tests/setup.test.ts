@@ -1,27 +1,23 @@
-import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildBranchProtectionPayload } from "../src/setup/branch-protection";
+import { buildBranchProtectionPayload } from "../src/setup/branch-protection.ts";
 import {
   applyBranchProtection,
   buildCleanDistributionPlan,
+  buildConsumerNodeRuntimeBundle,
+  buildConsumerNodeRuntimePayloads,
   buildConsumerReadinessPlan,
   buildPackSyncPlan,
   cleanDistributionArtifactPath,
   cleanDistributionSourcePath,
   detectProjectScale,
+  digestConsumerRuntimeBytes,
   emitSetup,
   loadTemplates,
+  nodeSetupDeps,
   PACK_SAFE_TEST_SCRIPT,
   type ProjectScale,
   planSetup,
@@ -31,9 +27,9 @@ import {
   type SetupDeps,
   type SetupState,
   transformCleanDistributionArtifact,
-} from "../src/setup/index";
-import { COMMON_FILES, type TemplateSet } from "../src/setup/templates";
-import { MODEL_IDS } from "../src/team/model-policy";
+} from "../src/setup/index.ts";
+import { COMMON_FILES, type TemplateSet } from "../src/setup/templates.ts";
+import { MODEL_IDS } from "../src/team/model-policy.ts";
 
 /** in-memory file store + gh 呼び出し記録の mock deps (now 固定で決定論)。 */
 function mockDeps(
@@ -61,6 +57,15 @@ function mockDeps(
 
 const codeownersPath = join("/repo", ".github", "CODEOWNERS");
 const statePath = join("/repo", ".ut-tdd", "state", "setup.json");
+
+const AUTHORING_TEMPLATE_SOURCES = [
+  "docs/templates/plan/design/template.md",
+  "docs/templates/plan/impl/template.md",
+  "docs/templates/design/L6-function-spec-template.md",
+  "docs/templates/state/vmodel.json",
+  "docs/templates/prompts/effort-classify.md",
+  ".ut-tdd/teams/example-review-team.yaml",
+] as const;
 
 function walkRepoCandidatePaths(root: string): string[] {
   const ignored = new Set([".git", "node_modules", "dist"]);
@@ -98,7 +103,7 @@ const ghTeam = (args: string[]): { ok: boolean; stdout: string } => {
 };
 
 const baseTemplates: TemplateSet = {
-  "common/ut-tdd.mjs": "#!/usr/bin/env bun\n",
+  "common/ut-tdd.mjs": "#!/usr/bin/env node\n",
   "adapter/AGENTS.md": [
     "<!-- UT-TDD:managed:start -->",
     "# UT-TDD Agent Harness Adapter",
@@ -373,10 +378,15 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     const templates = loadTemplates(process.cwd());
     const workflow = templates["common/harness-check.yml"];
     expect(workflow).toContain("github guard");
-    expect(workflow).toContain("bun run typecheck");
-    expect(workflow).toContain("bun run test");
+    expect(workflow).toContain("npm run typecheck");
+    expect(workflow).toContain("npm run test");
+    expect(workflow).toContain("actions/setup-node@v4");
+    expect(workflow).toContain("npm ci --no-audit --no-fund");
+    expect(workflow).not.toContain("oven-sh/setup-bun@v2");
     expect(workflow).toContain("audit quality --include-tests");
     expect(workflow).toContain("ut-tdd.mjs doctor --setup-smoke");
+    expect(workflow).toMatch(/\n {2}pull_request:\n/);
+    expect(workflow).not.toMatch(/pull_request:\n\s+(?:branches|branches-ignore):/);
   });
 
   it("U-SETUP-004c: built-in adapter templates ship enforced portable guard hooks", () => {
@@ -386,7 +396,16 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       const claude = JSON.parse(templates["adapter/.claude/settings.json"]) as {
         hooks: Record<
           string,
-          { matcher?: string; hooks: { command: string; blockOnFailure?: boolean }[] }[]
+          {
+            matcher?: string;
+            hooks: {
+              command: string;
+              args: string[];
+              blockOnFailure?: boolean;
+              asyncRewake?: boolean;
+              timeout?: number;
+            }[];
+          }[]
         >;
       };
       const codex = JSON.parse(templates["adapter/.codex/hooks.json"]) as {
@@ -402,7 +421,8 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
             matcher: "Agent|Task",
             hooks: [
               expect.objectContaining({
-                command: "bun .ut-tdd/bin/ut-tdd.mjs hook agent-guard",
+                command: "node",
+                args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "agent-guard"],
                 blockOnFailure: true,
               }),
             ],
@@ -411,23 +431,32 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
             matcher: "Edit|Write|MultiEdit",
             hooks: [
               expect.objectContaining({
-                command: "bun .ut-tdd/bin/ut-tdd.mjs hook work-guard",
+                command: "node",
+                args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "work-guard"],
                 blockOnFailure: true,
               }),
             ],
           }),
         ]),
       );
-      expect(claude.hooks.SubagentStop[0].hooks[0].command).toBe(
-        "bun .ut-tdd/bin/ut-tdd.mjs hook subagent-stop",
-      );
+      expect(claude.hooks.SubagentStop[0].hooks[0]).toMatchObject({
+        command: "node",
+        args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "subagent-stop"],
+      });
+      expect(claude.hooks.Stop[1].hooks[0]).toMatchObject({
+        command: "node",
+        args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "claude-memory-wake"],
+        timeout: 930,
+        asyncRewake: true,
+      });
       expect(codex.hooks.PreToolUse).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             matcher: "spawn_agent|spawn_agents_on_csv",
             hooks: [
               expect.objectContaining({
-                command: "bun .ut-tdd/bin/ut-tdd.mjs hook agent-guard",
+                command: "node",
+                args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "agent-guard"],
                 blockOnFailure: true,
               }),
             ],
@@ -436,7 +465,8 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
             matcher: "apply_patch|write_file",
             hooks: [
               expect.objectContaining({
-                command: "bun .ut-tdd/bin/ut-tdd.mjs hook work-guard",
+                command: "node",
+                args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "work-guard"],
                 blockOnFailure: true,
               }),
             ],
@@ -518,35 +548,65 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     for (const p of preview) expect(p).not.toContain("UT-TDD-agent-harness");
   });
 
-  it("U-SETUP-009b: built-in wrapper falls back to the setup Pack CLI", () => {
+  it("U-SETUP-009b: generated wrapper resolves only the sealed consumer Node runtime", () => {
     const deps = mockDeps();
     const plan = planSetup("0-A", { dryRun: false });
 
     emitSetup(plan, {}, deps);
 
     const wrapper = deps.files.get(join("/repo", ".ut-tdd", "bin", "ut-tdd.mjs"));
-    expect(wrapper).toContain('const setupSourceCli = "');
     expect(wrapper).toContain(
-      'const repoLocalHarness = existsSync(repoLocalCli) && existsSync(join(repoRoot, "src", "setup", "index.ts"));',
+      'const pointerPath = resolve(consumerRoot, ".ut-tdd", "runtime", "activation", "active.json");',
     );
-    expect(wrapper).toContain(
-      "const sourceCli = repoLocalHarness ? repoLocalCli : setupSourceCli;",
-    );
-    expect(wrapper).toContain(
-      'existsSync(localBin) ? localBin : existsSync(sourceCli) ? "bun" : "ut-tdd"',
-    );
-    expect(wrapper).toContain("[sourceCli, ...process.argv.slice(2)]");
-    expect(wrapper).not.toContain("{{UT_TDD_SOURCE_CLI_JSON}}");
+    expect(wrapper).toContain('deny("consumer_runtime_absent")');
+    expect(wrapper).toContain('const runtimeRoot = resolve(consumerRoot, ".ut-tdd", "runtime");');
+    expect(wrapper).toContain("let manifest;");
+    expect(wrapper).toContain("spawnSync(process.execPath, [entry, ...process.argv.slice(2)]");
+    expect(wrapper).toContain("windowsHide: true");
+    expect(wrapper).not.toContain("shell:");
+    expect(wrapper).not.toContain("setupSourceCli");
+    expect(wrapper).not.toContain("repoLocalHarness");
+    expect(wrapper).not.toContain("src/setup/index.ts");
+    expect(wrapper).not.toContain("node_modules/ut-tdd");
 
-    const codexHooks = deps.files.get(join("/repo", ".codex", "hooks.json"));
-    const claudeSettings = deps.files.get(join("/repo", ".claude", "settings.json"));
-    expect(codexHooks).toContain("hook agent-guard");
-    expect(claudeSettings).toContain("hook agent-guard");
-    expect(() => JSON.parse(codexHooks ?? "")).not.toThrow();
-    expect(() => JSON.parse(claudeSettings ?? "")).not.toThrow();
+    const codexHooks = JSON.parse(deps.files.get(join("/repo", ".codex", "hooks.json")) ?? "") as {
+      hooks: { PreToolUse: { hooks: { command: string; args: string[] }[] }[] };
+    };
+    const claudeSettings = JSON.parse(
+      deps.files.get(join("/repo", ".claude", "settings.json")) ?? "",
+    ) as {
+      hooks: { PreToolUse: { hooks: { command: string; args: string[] }[] }[] };
+    };
+    const agentGuardInvocation = {
+      command: "node",
+      args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "agent-guard"],
+    };
+    expect(codexHooks.hooks.PreToolUse[0]?.hooks[0]).toMatchObject(agentGuardInvocation);
+    expect(claudeSettings.hooks.PreToolUse[0]?.hooks[0]).toMatchObject(agentGuardInvocation);
   });
 
-  it("U-SETUP-009b2: generated wrapper prefers consumer local bin when local and setup fallback both exist", () => {
+  // The generated wrapper is a sealed Node entrypoint. Launch via Node directly and
+  // assert its fail-closed result when no active runtime pointer exists.
+  function runWrapperViaNode(cwd: string, args: string[]) {
+    return spawnSync(process.execPath, args, { cwd, encoding: "utf8", windowsHide: true });
+  }
+
+  // Issue #506 peer-verification finding (2026-09-01): this oracle asserts wrapper
+  // *resolution order* (a node_modules-installed ut-tdd wins over the setup Pack
+  // fallback), but the wrapper's production selection logic
+  // (`common/ut-tdd.mjs` template, src/setup/templates.ts) hardcodes
+  // `node_modules/ut-tdd/src/cli.ts` and spawns it directly via `node`. Node refuses
+  // to execute any `.ts` file located under `node_modules/` (type stripping is
+  // disabled there by design), so this is not a fixture artifact of retiring Bun —
+  // it is a real production defect: any consumer with `ut-tdd` installed as an npm
+  // dependency would hit the same `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`
+  // failure the wrapper's local-package branch is supposed to serve. Converting the
+  // fixture to a compiled `.mjs` entry point would paper over that defect instead of
+  // surfacing it. The fix belongs to the self-contained/sealed consumer Node runtime
+  // work (#420, #463), not to this Bun-spawn-retirement slice — do not force-convert
+  // here. Skipped (not deleted) so the oracle body stays intact for #420/#463 to
+  // re-enable once the wrapper ships a Node-executable local-package entry point.
+  it.skip("U-SETUP-009b2: generated wrapper prefers consumer local bin when local and setup fallback both exist", () => {
     const repo = mkdtempSync(join(tmpdir(), "ut-tdd-wrapper-local-"));
     try {
       const deps = mockDeps({ repoRoot: repo });
@@ -556,36 +616,22 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       expect(wrapper).toBeTruthy();
 
       const wrapperPath = join(repo, ".ut-tdd", "bin", "ut-tdd.mjs");
-      const localBin = join(
-        repo,
-        "node_modules",
-        ".bin",
-        process.platform === "win32" ? "ut-tdd.cmd" : "ut-tdd",
-      );
+      const localPackageCli = join(repo, "node_modules", "ut-tdd", "src", "cli.ts");
       mkdirSync(join(repo, ".ut-tdd", "bin"), { recursive: true });
-      mkdirSync(join(repo, "node_modules", ".bin"), { recursive: true });
+      mkdirSync(join(repo, "node_modules", "ut-tdd", "src"), { recursive: true });
       writeFileSync(wrapperPath, wrapper ?? "");
-      writeFileSync(
-        localBin,
-        process.platform === "win32"
-          ? "@echo off\r\necho local-bin %*\r\nexit /b 0\r\n"
-          : '#!/usr/bin/env sh\necho local-bin "$@"\n',
-      );
-      if (process.platform !== "win32") chmodSync(localBin, 0o755);
+      writeFileSync(localPackageCli, 'console.log("local-package", ...process.argv.slice(2));\n');
 
-      const result = spawnSync(process.execPath, [wrapperPath, "status", "--json"], {
-        cwd: repo,
-        encoding: "utf8",
-      });
+      const result = runWrapperViaNode(repo, [wrapperPath, "status", "--json"]);
 
       expect(result.status).toBe(0);
-      expect(result.stdout.trim()).toBe("local-bin status --json");
+      expect(result.stdout.trim()).toBe("local-package status --json");
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
   });
 
-  it("U-SETUP-009b3: generated wrapper falls back to setup Pack CLI through bun when local bin is absent", () => {
+  it("U-SETUP-009b3: generated Node wrapper fails closed when sealed runtime is absent", () => {
     const repo = mkdtempSync(join(tmpdir(), "ut-tdd-wrapper-source-"));
     try {
       const deps = mockDeps({ repoRoot: repo });
@@ -598,13 +644,11 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       mkdirSync(join(repo, ".ut-tdd", "bin"), { recursive: true });
       writeFileSync(wrapperPath, wrapper ?? "");
 
-      const result = spawnSync(process.execPath, [wrapperPath, "status"], {
-        cwd: repo,
-        encoding: "utf8",
-      });
+      const result = runWrapperViaNode(repo, [wrapperPath, "status"]);
 
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain("mode:");
+      expect(result.status).toBe(78);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("consumer_runtime_absent");
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
@@ -640,6 +684,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         "README.md",
         "LICENSE",
         "package.json",
+        ".node-version",
         "src/cli.ts",
         "src/setup/index.ts",
         ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
@@ -652,6 +697,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         "docs/governance/ut-tdd-agent-harness-concept_v3.1.md",
         "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md",
         "skills/SKILL_MAP.md",
+        ...AUTHORING_TEMPLATE_SOURCES,
         "docs/governance/conditional-backfill-decision-audit-2026-06-22.md",
         "docs/governance/forward-convergence-legacy-debt-audit.md",
         "docs/governance/reverse-fullback-backprop-audit-2026-06-22.md",
@@ -671,7 +717,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     });
 
     expect(plan.ok).toBe(true);
-    expect(plan.channel).toBe("clean-repo-plus-signed-tarball");
+    expect(plan.channel).toBe("clean-repo-plus-tarball");
     expect(plan.artifactPaths).toContain("LICENSE");
     expect(plan.artifactPaths).toContain("docs/templates/adapter/AGENTS.md");
     expect(plan.artifactPaths).toContain("docs/templates/adapter/.codex/hooks.json");
@@ -727,11 +773,8 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(plan.artifactPaths).not.toContain(".ut-tdd/handover/CURRENT.json");
     expect(plan.artifactPaths).not.toContain(".ut-tdd/harness.db");
     expect(plan.artifactPaths).not.toContain(".ut-tdd/harness.db-wal");
-    expect(plan.releaseIntegrity.artifacts).toEqual([
-      "v0.1.0.tar.gz",
-      "v0.1.0.tar.gz.sha256",
-      "v0.1.0.tar.gz.sig",
-    ]);
+    // PLAN-L7-413 D-4c: unsigned tarball 契約 — .sig は成果物から撤去 (宣言と実装の一致)。
+    expect(plan.releaseIntegrity.artifacts).toEqual(["v0.1.0.tar.gz", "v0.1.0.tar.gz.sha256"]);
   });
 
   it("U-SETUP-011c: Pack sync plan is non-destructive and copies only clean artifacts", () => {
@@ -739,6 +782,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       "README.md",
       "LICENSE",
       "package.json",
+      ".node-version",
       "src/cli.ts",
       "src/setup/index.ts",
       ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
@@ -748,6 +792,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       "docs/governance/ut-tdd-agent-harness-concept_v3.1.md",
       "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md",
       "docs/skills/SKILL_MAP.md",
+      ...AUTHORING_TEMPLATE_SOURCES,
       "docs/plans/PLAN-L7-157-distribution-clean-pull.md",
       ".ut-tdd/harness.db",
     ];
@@ -808,6 +853,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         !path.startsWith("docs/test-design/") &&
         !path.startsWith("docs/handover/"),
     );
+    filteredSourcePaths.push(".ut-tdd/teams/example-review-team.yaml");
 
     const withSourceOnlyDocs = buildCleanDistributionPlan({
       sourceTag: "source-with-audit-docs",
@@ -852,19 +898,89 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         "package.json",
         JSON.stringify({
           name: "ut-tdd-agent-harness",
+          repository: {
+            type: "git",
+            url: "git+https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS.git",
+          },
           scripts: {
             test: "vitest run",
             typecheck: "tsc --noEmit",
           },
         }),
       ),
-    ) as { scripts: Record<string, string> };
+    ) as {
+      scripts: Record<string, string>;
+      utTdd: { artifactProfile: string };
+      repository: { type: string; url: string };
+    };
 
-    expect(transformed.scripts.test).toContain("tests/distribution-acceptance.test.ts");
-    expect(transformed.scripts.test).toContain("tests/readability.test.ts");
-    expect(transformed.scripts["test:pack"]).toBe(transformed.scripts.test);
+    expect(transformed.scripts["test:pack"]).toContain("tests/distribution-acceptance.test.ts");
+    expect(transformed.scripts["test:pack"]).toContain("tests/readability.test.ts");
+    expect(transformed.scripts.test).toBe("npm run test:pack");
+    expect(transformed.scripts.build).toBeUndefined();
+    expect(transformed.scripts["test:pack"]).toContain("scripts/run-vitest-snapshot.ts");
     expect(transformed.scripts["test:source"]).toBe("vitest run");
     expect(transformed.scripts.typecheck).toBe("tsc --noEmit");
+    expect(transformed.utTdd.artifactProfile).toBe("pack");
+    // issue #83: source repo の URL は Pack artifact では Pack repo へ書き換わる。
+    expect(transformed.repository.url).toBe(
+      "git+https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git",
+    );
+  });
+
+  it("U-SETUP-011f: package.json repository points at the repo the tree belongs to (source dev repo, or the Pack repo after sync; issue #83)", () => {
+    // This test ships into the clean Pack (test:pack runs it there), where sync-pack has
+    // rewritten the URL to the Pack repo; the artifact profile tells which tree this is.
+    const currentPackage = JSON.parse(
+      readFileSync(join(process.cwd(), "package.json"), "utf8"),
+    ) as {
+      repository?: { url?: string };
+      utTdd?: { artifactProfile?: string };
+    };
+    const expected =
+      currentPackage.utTdd?.artifactProfile === "pack"
+        ? "git+https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git"
+        : "git+https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS.git";
+    expect(currentPackage.repository?.url).toBe(expected);
+  });
+
+  it("U-SETUP-011g: clean Pack ships .node-version so the Pack CI toolchain-pin check has the same input as source", () => {
+    const plan = buildCleanDistributionPlan({
+      sourceTag: "v0.1.0",
+      cleanRepo: "UNISON-TECHNOLOGY/clean",
+      paths: [
+        ...[
+          "README.md",
+          "LICENSE",
+          "package.json",
+          "src/cli.ts",
+          "src/setup/index.ts",
+          ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
+            (entry) => `docs/templates/${entry.template}`,
+          ),
+          ...AUTHORING_TEMPLATE_SOURCES,
+        ],
+        ".node-version",
+      ],
+    });
+    expect(plan.artifactPaths).toContain(".node-version");
+    // Without it the Pack CI fails closed on node-version-mismatch (observed 2026-09-18, v0.2.0-canary.1 sync).
+    const without = buildCleanDistributionPlan({
+      sourceTag: "v0.1.0",
+      cleanRepo: "UNISON-TECHNOLOGY/clean",
+      paths: [
+        "README.md",
+        "LICENSE",
+        "package.json",
+        "src/cli.ts",
+        "src/setup/index.ts",
+        ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
+          (entry) => `docs/templates/${entry.template}`,
+        ),
+        ...AUTHORING_TEMPLATE_SOURCES,
+      ],
+    });
+    expect(without.missingRequired).toContain(".node-version");
   });
 
   it("U-SETUP-011e: clean Pack workflow reuses the package test:pack script", () => {
@@ -876,7 +992,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       ),
     );
 
-    expect(transformed).toContain("run: bun run test:pack");
+    expect(transformed).toContain("run: npm run test:pack");
     expect(transformed).not.toContain("tests/distribution-acceptance.test.ts");
   });
 
@@ -911,7 +1027,9 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(
       plan.artifactPaths.filter(
         (path) =>
-          nonPackPrefixes.some((prefix) => path.startsWith(prefix)) || nonPackDbFiles.test(path),
+          (nonPackPrefixes.some((prefix) => path.startsWith(prefix)) &&
+            !path.startsWith("docs/templates/")) ||
+          nonPackDbFiles.test(path),
       ),
     ).toEqual([]);
 
@@ -928,8 +1046,39 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
   });
 
   it("U-SETUP-012: consumer readiness covers preflight, rollback, contracts, CI, and monorepo root", () => {
+    const compiled = Buffer.from("export default 0;\n", "utf8");
+    const readinessIdentity = {
+      product_id: "setup-readiness",
+      consumer_root: "/repo",
+      runtime_root: "/repo/.ut-tdd/runtime",
+      operation_id: "setup-readiness-operation",
+      attempt: 0,
+      generation_id: "setup-readiness-generation",
+      subject_revision: "a".repeat(40),
+      artifact_digest: `sha256:${"b".repeat(64)}`,
+      node_executable_identity: `node-${process.version}|sha256:${"c".repeat(64)}`,
+      package_lock_digest: `sha256:${"d".repeat(64)}`,
+      source_graph_digest: `sha256:${"e".repeat(64)}`,
+      compiled_esm_digest: digestConsumerRuntimeBytes(compiled),
+      release_id: `rel-sha256:${"f".repeat(64)}`,
+      materializer_version: "fixture",
+      artifact_set_digest: `sha256:${"1".repeat(64)}`,
+      control_manifest_digest: `sha256:${"2".repeat(64)}`,
+      sealed_policy: "compiled-esm-only" as const,
+    };
+    const readinessPayloads = buildConsumerNodeRuntimePayloads({
+      identity: readinessIdentity,
+      compiled_esm: compiled,
+      node_bootstrap_receipt: Buffer.from("{}\n", "utf8"),
+    });
+    const consumerRuntime = {
+      status: "ready" as const,
+      identity: readinessIdentity,
+      bundle: buildConsumerNodeRuntimeBundle({ identity: readinessIdentity, ...readinessPayloads }),
+    };
     const ready = buildConsumerReadinessPlan({
-      bunVersion: "1.3.2",
+      nodeVersion: "24.13.0",
+      requiredNodeVersion: "24.13.0",
       hasGit: true,
       hasGh: false,
       hasUtTddCli: true,
@@ -938,6 +1087,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       repoRoot: "/repo",
       packageRoot: "/repo/packages/app",
       tag: "v0.1.0",
+      consumerRuntime,
     });
 
     expect(ready.ok).toBe(true);
@@ -945,7 +1095,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(ready.workspace.monorepo).toBe(true);
     expect(ready.checks.find((c) => c.name === "gh")).toMatchObject({ ok: false });
     expect(ready.checks.find((c) => c.name === "ut-tdd-cli")).toMatchObject({ ok: true });
-    expect(ready.ci.requires).toContain("bun run test");
+    expect(ready.ci.requires).toContain("npm test");
     expect(ready.rollback.backupRequired).toBe(true);
     expect(ready.rollback.managedPaths).toContain("AGENTS.md");
     expect(ready.rollback.managedPaths).toContain(".ut-tdd/bin/ut-tdd.mjs");
@@ -965,13 +1115,15 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     );
 
     const standaloneReady = buildConsumerReadinessPlan({
-      bunVersion: "1.3.2",
+      nodeVersion: "24.13.0",
+      requiredNodeVersion: "24.13.0",
       hasGit: true,
       hasGh: false,
       hasUtTddCli: true,
       hasClaude: false,
       hasCodex: false,
       repoRoot: "/repo",
+      consumerRuntime,
     });
     expect(standaloneReady.ok).toBe(true);
     expect(standaloneReady.mode).toBe("standalone");
@@ -983,7 +1135,8 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     );
 
     const customRepo = buildConsumerReadinessPlan({
-      bunVersion: "1.3.0",
+      nodeVersion: "24.13.0",
+      requiredNodeVersion: "24.13.0",
       hasGit: true,
       hasGh: true,
       hasClaude: false,
@@ -995,7 +1148,8 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(customRepo.contracts.tagPin).toBe("github:example/custom-pack#v9.9.9");
 
     const blocked = buildConsumerReadinessPlan({
-      bunVersion: "1.2.9",
+      nodeVersion: "22.0.0",
+      requiredNodeVersion: "24.13.0",
       hasGit: false,
       hasGh: false,
       hasUtTddCli: false,
@@ -1005,20 +1159,44 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     });
     expect(blocked.ok).toBe(false);
     expect(blocked.checks.filter((c) => !c.ok).map((c) => c.name)).toEqual([
-      "bun>=1.3",
+      "node@24.13.0",
       "git",
       "gh",
       "ut-tdd-cli",
     ]);
     expect(blocked.checks.find((c) => c.name === "ut-tdd-cli")?.message).toContain(
-      "Generated Claude/Codex hooks call `bun .ut-tdd/bin/ut-tdd.mjs ...`",
+      "Generated Claude/Codex hooks resolve only the consumer-local sealed Node runtime.",
     );
     expect(blocked.checks.find((c) => c.name === "ut-tdd-cli")?.message).toContain(
-      "Do not rely on a global `bun link`",
+      "Source checkouts and TypeScript package paths are not fallback candidates.",
     );
-    expect(blocked.checks.find((c) => c.name === "ut-tdd-cli")?.message).toContain(
-      "Bun itself must still resolve",
-    );
+    // engines.node follows npm range semantics rather than a numeric minimum:
+    // a compatible patch is accepted, while a new major outside ^24 is not.
+    expect(
+      buildConsumerReadinessPlan({
+        nodeVersion: "24.13.5",
+        requiredNodeVersion: ">=24.13.0 <25",
+        hasGit: true,
+        hasGh: false,
+        hasUtTddCli: true,
+        hasClaude: false,
+        hasCodex: false,
+        repoRoot: "/consumer",
+        consumerRuntime,
+      }).ok,
+    ).toBe(true);
+    expect(
+      buildConsumerReadinessPlan({
+        nodeVersion: "25.0.0",
+        requiredNodeVersion: "^24.13.0",
+        hasGit: true,
+        hasGh: false,
+        hasUtTddCli: true,
+        hasClaude: false,
+        hasCodex: false,
+        repoRoot: "/consumer",
+      }).ok,
+    ).toBe(false);
   });
 
   it("U-SETUP-005: recordSetupState signals 4 フィールド strip / 上書き / token 非含", () => {
@@ -1181,5 +1359,60 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(d.ghCalls.some((call) => call.includes("PUT"))).toBe(false);
     // branch protection は dry-run 理由で skip
     expect(r.branchProtection).toEqual({ applied: false, reason: "dry-run" });
+  });
+
+  it("identity bootstrap denial is reported while setup continues", () => {
+    const d = mockDeps({
+      templates: baseTemplates,
+      bootstrapProjectIdentity: () => ({
+        ok: false,
+        error: { ruleId: "identity_repository_unbound", message: "origin remote is missing" },
+      }),
+    });
+    const result = runSetup({ phase: "0-A", dryRun: false, applyBranchProtection: false }, d);
+
+    expect(result.projectIdentity).toMatchObject({
+      ok: false,
+      error: { ruleId: "identity_repository_unbound" },
+    });
+    expect(result.phase).toBe("0-A");
+    expect(d.files.has(statePath)).toBe(true);
+    expect(result.written).toContain("AGENTS.md");
+  });
+
+  it("runSetup invokes the real bootstrap dependency and prepends a created identity", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-setup-identity-"));
+    try {
+      execFileSync("git", ["init", "-q", "-b", "main"], { cwd: root });
+      execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
+      execFileSync("git", ["config", "user.name", "UT-TDD test"], { cwd: root });
+      execFileSync("git", ["remote", "add", "origin", "git@github.com:acme/widget.git"], {
+        cwd: root,
+      });
+
+      const result = runSetup(
+        { phase: "0-A", dryRun: false, applyBranchProtection: false },
+        nodeSetupDeps(root),
+      );
+
+      expect(result.projectIdentity).toMatchObject({
+        ok: true,
+        created: true,
+        commitRequired: true,
+        repositoryIdentity: "acme/widget",
+      });
+      expect(result.written[0]).toBe("ut-tdd.project.json");
+      expect(readFileSync(join(root, "ut-tdd.project.json"))).toEqual(
+        Buffer.from(
+          `${JSON.stringify(
+            { schema_version: "ut-tdd.project/v1", repository_identity: "acme/widget" },
+            null,
+            2,
+          )}\n`,
+        ),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

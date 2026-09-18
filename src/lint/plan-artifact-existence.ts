@@ -33,8 +33,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { loadReviewPlans } from "./review-evidence";
-import { normalizePath } from "./shared";
+import { loadReviewPlans } from "./review-evidence.ts";
+import { normalizePath } from "./shared.ts";
 
 /** 完了宣言とみなす status。これらは generates 全件が実在 + 非空であるべき。 */
 const COMPLETED_STATUSES: ReadonlySet<string> = new Set(["confirmed", "completed", "accepted"]);

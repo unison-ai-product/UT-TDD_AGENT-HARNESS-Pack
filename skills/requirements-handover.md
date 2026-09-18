@@ -13,6 +13,31 @@ applies_to:
     - Scrum
     - Reverse
     - Recovery
+decision_points:
+  - when: "A session ends with an active L1/L3 PLAN and a prior handover's carry list exists"
+    choose: "Re-verify each carry item against ut-tdd status and git log before copying it forward"
+    over: "Copying carry items forward from the previous handover unchanged"
+    because: "Unverified copied carry items become ghost entries that persist for multiple sessions after the underlying work is already done"
+  - when: "An FR at L1 is ambiguous but must be handed off to L3"
+    choose: "Mark it clarification_pending with a linked open question in the PLAN review_evidence field"
+    over: "Leaving the ambiguity described only in prose or chat"
+    because: "An unresolved ambiguity that is not machine-visible propagates through L4-L7 as a silent design gap that is expensive to trace back"
+  - when: "A handover is about to be declared closed but ut-tdd doctor is not green"
+    choose: "Treat the handover as a false-clean baton and block session closure until doctor exits 0"
+    over: "Declaring the session closed because the handover JSON was written"
+    because: "A handover written without a green ut-tdd doctor hides orphaned FRs and broken dependencies from the successor"
+  - when: "A carry item needs to be recorded"
+    choose: "Anchor it to a PLAN ID"
+    over: "Recording it as free text without a PLAN reference"
+    because: "Free-text carry without a PLAN anchor is invisible to ut-tdd doctor and will not surface in ut-tdd status"
+  - when: "ut-tdd doctor flags CURRENT.json as stale"
+    choose: "Re-verify each carry item against ut-tdd status and git log, then overwrite CURRENT.json"
+    over: "Extending or appending to the stale CURRENT.json in place"
+    because: "CURRENT.json is a point-in-time snapshot, not a live dashboard; extending a stale snapshot compounds the staleness"
+  - when: "A Discovery PoC decision_outcome should influence an L3 requirement"
+    choose: "Make the link explicit by adding the PoC PLAN ID to the L3 PLAN's dependencies field"
+    over: "Leaving the influence implicit in narrative handover notes"
+    because: "A successor agent must reconstruct context from the handover record alone, without relying on prior chat history"
 ---
 
 # requirements handover

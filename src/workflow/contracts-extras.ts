@@ -1,4 +1,5 @@
-import type { ContractResult, Finding } from "./contracts-types";
+import { stableId } from "../stable-id.ts";
+import type { ContractResult, Finding } from "./contracts-types.ts";
 
 function finding(
   code: string,
@@ -17,9 +18,6 @@ function result(findings: Finding[], evidence_paths: string[] = []): ContractRes
   return { ok: findings.every((f) => f.severity !== "error"), findings, evidence_paths };
 }
 
-function stableId(prefix: string, value: string): string {
-  return `${prefix}:${value || "unknown"}`.replace(/[^A-Za-z0-9._:-]+/g, "-");
-}
 export function suggestSkillInjection(input: {
   task: string;
   layer: string;

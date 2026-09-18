@@ -11,12 +11,12 @@ import {
   loadDescentAdjacency,
   loadFrUnitCoverageOracles,
   loadTraceKeyedArtifacts,
-} from "../src/lint/descent-obligation";
+} from "../src/lint/descent-obligation.ts";
 import {
   DEFAULT_DESCENT_ADJACENCY,
   type DeferEntry,
   type TraceKeyedArtifact,
-} from "../src/lint/descent-obligation-types";
+} from "../src/lint/descent-obligation-types.ts";
 
 const a = (
   over: Partial<TraceKeyedArtifact> & Pick<TraceKeyedArtifact, "traceKey" | "layer" | "role">,

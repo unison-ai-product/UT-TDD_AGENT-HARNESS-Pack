@@ -1,44 +1,53 @@
 import { existsSync } from "node:fs";
-import { analyzeBackfill, backfillMessages, loadBackfillDocs } from "../lint/backfill-pairing";
+import { analyzeBackfill, backfillMessages, loadBackfillDocs } from "../lint/backfill-pairing.ts";
 import {
   analyzeForwardConvergence,
   forwardConvergenceMessages,
   legacyAuditDriftMessages,
   loadConvergenceDocs,
   loadLegacyAuditDrift,
-} from "../lint/forward-convergence";
+} from "../lint/forward-convergence.ts";
 import {
   analyzePlanBodySubstance,
   loadPlanBodySubstanceInput,
   planBodySubstanceMessages,
-} from "../lint/plan-body-substance";
+} from "../lint/plan-body-substance.ts";
 import {
   analyzePlanCompletionDrift,
   loadPlanCompletionDriftInput,
   planCompletionDriftMessages,
-} from "../lint/plan-completion-drift";
+} from "../lint/plan-completion-drift.ts";
 import {
   analyzePlanSupersession,
   loadSupersedePlans,
   planSupersessionMessages,
-} from "../lint/plan-supersession";
-import { analyzePropagation, loadPropagationDocs, propagationMessages } from "../lint/propagation";
+} from "../lint/plan-supersession.ts";
+import {
+  analyzePropagation,
+  loadPropagationDocs,
+  propagationMessages,
+} from "../lint/propagation.ts";
 import {
   analyzeReviewEvidence,
   loadReviewPlans,
   reviewEvidenceMessages,
-} from "../lint/review-evidence";
-import { analyzeScrumReverse, loadSrPlans, scrumReverseMessages } from "../lint/scrum-reverse";
+} from "../lint/review-evidence.ts";
+import { analyzeScrumReverse, loadSrPlans, scrumReverseMessages } from "../lint/scrum-reverse.ts";
+import {
+  analyzeTestDesignNaming,
+  loadTestDesignDocs,
+  testDesignNamingMessages,
+} from "../lint/test-design-naming.ts";
 import {
   analyzePlanReferenceFreshness,
   lintPlan,
   lintPlanWithGate,
   loadPlanGovernanceDocs,
   planReferenceFreshnessMessages,
-} from "../plan/lint";
-import type { GuardrailDecisionInput } from "../state-db/guardrail-invariants";
-import { inspectGuardrailInvariants } from "../state-db/guardrail-invariants";
-import { analyzePairFreeze, loadPairDocs, pairFreezeMessages } from "../vmodel/lint";
+} from "../plan/lint.ts";
+import type { GuardrailDecisionInput } from "../state-db/guardrail-invariants.ts";
+import { inspectGuardrailInvariants } from "../state-db/guardrail-invariants.ts";
+import { analyzePairFreeze, loadPairDocs, pairFreezeMessages } from "../vmodel/lint.ts";
 
 export function checkBackfillResult(repoRoot: string): { messages: string[]; ok: boolean } {
   try {
@@ -194,6 +203,21 @@ export function checkPairFreeze(repoRoot: string): { messages: string[]; ok: boo
   } catch {
     return {
       messages: ["pair-freeze - violation: design/test-design docs could not be read"],
+      ok: false,
+    };
+  }
+}
+
+export function checkTestDesignNaming(repoRoot: string): { messages: string[]; ok: boolean } {
+  if (!existsSync(repoRoot)) {
+    return { messages: ["test-design-naming - violation: repo root could not be read"], ok: false };
+  }
+  try {
+    const r = analyzeTestDesignNaming(loadTestDesignDocs(repoRoot));
+    return { messages: testDesignNamingMessages(r), ok: r.ok };
+  } catch {
+    return {
+      messages: ["test-design-naming - violation: test-design docs could not be read"],
       ok: false,
     };
   }

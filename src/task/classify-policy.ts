@@ -1,5 +1,5 @@
-import type { TaskKind } from "./classify";
-import { type DocumentPack, doc } from "./proposal-coverage-data";
+import type { TaskKind } from "./classify.ts";
+import { type DocumentPack, doc } from "./proposal-coverage-data.ts";
 
 export const KIND_PATTERNS: { kind: TaskKind; pattern: RegExp }[] = [
   { kind: "reverse", pattern: /\b(reverse|as-is|back-?fill|reconstruct)\b/i },

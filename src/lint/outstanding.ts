@@ -22,8 +22,8 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { analyzePlaceholderDeps, loadPlaceholderDepsDocs } from "./placeholder-deps";
-import { fmValue } from "./shared";
+import { analyzePlaceholderDeps, loadPlaceholderDepsDocs } from "./placeholder-deps.ts";
+import { fmValue } from "./shared.ts";
 
 /** 終端 (= 完了とみなす) status。これ以外 (archived を除く) が非終端 = 未了。 */
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(["confirmed", "completed", "accepted"]);

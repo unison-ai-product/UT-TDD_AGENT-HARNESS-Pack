@@ -5,7 +5,7 @@ import {
   type ProviderHandoverDeps,
   readProviderHandoverCurrent,
   runProviderHandover,
-} from "../src/runtime/provider-handover";
+} from "../src/runtime/provider-handover.ts";
 
 const NOW = "2026-06-08T00:00:00.000Z";
 

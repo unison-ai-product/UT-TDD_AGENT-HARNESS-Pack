@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { SECRET_PATTERN } from "../state-db/index";
+import { SECRET_PATTERN } from "../state-db/index.ts";
 
 export type QualityAuditBucket = "gate" | "actionable" | "telemetry";
 

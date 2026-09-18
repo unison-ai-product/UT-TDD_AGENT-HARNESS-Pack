@@ -6,8 +6,8 @@ import {
   loadSubDocCatalogDriftInput,
   parseRequirementCatalog,
   subDocCatalogDriftMessages,
-} from "../src/lint/sub-doc-catalog-drift";
-import { VALID_SUB_DOCS } from "../src/schema/index";
+} from "../src/lint/sub-doc-catalog-drift.ts";
+import { VALID_SUB_DOCS } from "../src/schema/index.ts";
 
 describe("parseRequirementCatalog (U-SDCD-001..002)", () => {
   it("U-SDCD-001: §G.1 code block の単一行/複数行 array を layer→値へ parse する", () => {
@@ -91,6 +91,13 @@ describe("loadSubDocCatalogDriftInput real repo (U-SDCD-007)", () => {
     expect(VALID_SUB_DOCS.L4 as readonly string[]).toContain("ui-standard");
     const input = loadSubDocCatalogDriftInput(process.cwd());
     expect(input.requirement.L4 ?? []).toContain("ui-standard");
+    expect(analyzeSubDocCatalogDrift(input).ok).toBe(true);
+  });
+
+  it("U-SDCD-011: L4 security slot が登録され schema↔要件 §G.1 で drift 0 (PLAN-L4-16)", () => {
+    expect(VALID_SUB_DOCS.L4 as readonly string[]).toContain("security");
+    const input = loadSubDocCatalogDriftInput(process.cwd());
+    expect(input.requirement.L4 ?? []).toContain("security");
     expect(analyzeSubDocCatalogDrift(input).ok).toBe(true);
   });
 

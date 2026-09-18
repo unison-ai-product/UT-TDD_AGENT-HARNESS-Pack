@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { describe, expect, it } from "vitest";
-import { registerDistributionCommands } from "../src/cli/distribution";
+import { registerDistributionCommands } from "../src/cli/distribution.ts";
 
 describe("CLI distribution registrar", () => {
   it("registers the clean distribution command group without the root CLI monolith", () => {
@@ -11,6 +11,7 @@ describe("CLI distribution registrar", () => {
     const distribution = program.commands.find((command) => command.name() === "distribution");
     expect(distribution).toBeDefined();
     expect(distribution?.commands.map((command) => command.name()).sort()).toEqual([
+      "authoring-smoke",
       "package",
       "plan",
       "release-plan",

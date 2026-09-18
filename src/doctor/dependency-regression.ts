@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { loadChangedFiles } from "../lint/change-impact";
+import { loadChangedFiles } from "../lint/change-impact.ts";
 import {
   analyzeDependencyDrift,
   type DependencyDriftResult,
@@ -7,7 +7,7 @@ import {
   expandRegressionScope,
   loadDependencyDriftInput,
   regressionExpansionMessages,
-} from "../lint/dependency-drift";
+} from "../lint/dependency-drift.ts";
 
 function loadChangedFilesForDoctor(repoRoot: string): string[] {
   try {

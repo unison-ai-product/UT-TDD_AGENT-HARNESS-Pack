@@ -8,25 +8,25 @@
  *   - 注入 skip (rebuild 失敗等) が session jsonl へ記録される。
  */
 import { describe, expect, it } from "vitest";
-import { computeSkillMetrics } from "../src/feedback/engine";
+import { computeSkillMetrics } from "../src/feedback/engine.ts";
 import {
   recordSkillInjectionAttempt,
   type SessionLogDeps,
   SKILL_INJECTION_UNKNOWN_SESSION_ID,
-} from "../src/runtime/session-log";
+} from "../src/runtime/session-log.ts";
 import {
   recommendSkillsForPlan,
   resolveRuntimeSessionId,
   UNKNOWN_RUNTIME_SESSION_ID,
-} from "../src/skill-engine/recommend";
-import { openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate } from "../src/state-db/migration";
+} from "../src/skill-engine/recommend.ts";
+import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate } from "../src/state-db/migration.ts";
 import {
   projectSkillMetrics,
   projectSkillTelemetry,
   REBUILD_INDIRECT_SESSION_ID,
   RUNTIME_SKILL_SOURCE_PREFIX,
-} from "../src/state-db/skill-projections";
+} from "../src/state-db/skill-projections.ts";
 
 const PLAN_ID = "PLAN-L7-262-skill-telemetry-provenance";
 const SKILL_ID = "skill:review-checklist";

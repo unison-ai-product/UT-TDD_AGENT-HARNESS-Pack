@@ -1,9 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { upsertSearchReference } from "../search/index";
-import type { HarnessDb } from "../state-db/index";
-import { upsertRow } from "../state-db/index";
+import { upsertSearchReference } from "../search/index.ts";
+import type { HarnessDb } from "../state-db/index.ts";
+import { upsertRow } from "../state-db/index.ts";
 
 export interface CatalogAutomationAssetsInput {
   repoRoot?: string;

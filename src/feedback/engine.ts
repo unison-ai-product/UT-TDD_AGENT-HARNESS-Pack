@@ -1,6 +1,15 @@
-import type { HarnessDb } from "../state-db/index";
-import { upsertRow } from "../state-db/index";
-import { RUNTIME_SKILL_SOURCE_PREFIX } from "../state-db/skill-projections";
+import { dirname, resolve } from "node:path";
+import { stableId } from "../stable-id.ts";
+import type { HarnessDb } from "../state-db/index.ts";
+import { upsertRow } from "../state-db/index.ts";
+import { detectorRouteCandidateAction } from "../state-db/route-candidate-review.ts";
+import { RUNTIME_SKILL_SOURCE_PREFIX } from "../state-db/skill-projections.ts";
+import {
+  formatPostMergeBackstop,
+  type PostMergeBackstopReason,
+  type PostMergeBackstopResult,
+  scanPostMergeBackstop,
+} from "./post-merge-backstop.ts";
 
 export interface SkillMetric {
   plan_id: string;
@@ -13,6 +22,10 @@ export interface FeedbackEvent {
   feedback_event_id: string;
   finding_id: string;
   plan_id: string;
+  source_table: string;
+  source_id: string;
+  source_generation: string;
+  source_color: string;
   signal_type: string;
   severity: string;
   status: string;
@@ -124,7 +137,7 @@ export function computeSkillMetrics(db: HarnessDb): SkillMetric[] {
 }
 
 function feedbackId(prefix: string, subject: string): string {
-  return `${prefix}:${subject}`.replace(/[^A-Za-z0-9._:-]+/g, "-");
+  return stableId(prefix, subject);
 }
 
 function signalSeverity(status: unknown): string {
@@ -134,7 +147,25 @@ function signalSeverity(status: unknown): string {
   return "info";
 }
 
-export function emitFeedbackEvents(db: HarnessDb): FeedbackEvent[] {
+export function emitFeedbackEvents(
+  db: HarnessDb,
+  options: { postMergeBackstop?: PostMergeBackstopResult } = {},
+): FeedbackEvent[] {
+  const detectorCandidates = db
+    .prepare(
+      `SELECT route_candidate_id, source_table, source_id, finding_kind, severity, subject_id,
+              filing_target_id, target_layer, target_sub_doc, candidate_status, reason
+       FROM detector_route_candidates
+       WHERE candidate_status IN ('non_ready', 'ready', 'open')
+       ORDER BY route_candidate_id`,
+    )
+    .all();
+  const detectorCandidateFindingIds = new Set(
+    detectorCandidates
+      .filter((candidate) => String(candidate.source_table ?? "") === "findings")
+      .map((candidate) => String(candidate.source_id ?? ""))
+      .filter(Boolean),
+  );
   const openFindings = db.prepare("SELECT * FROM findings WHERE status = 'open'").all();
   const failedSignals = db
     .prepare("SELECT * FROM quality_signals WHERE status IN ('fail', 'warn')")
@@ -142,16 +173,58 @@ export function emitFeedbackEvents(db: HarnessDb): FeedbackEvent[] {
   const createdAt = nowIso();
   const events: FeedbackEvent[] = [];
 
+  const postMergeBackstop =
+    options.postMergeBackstop ??
+    (db.path === ":memory:"
+      ? undefined
+      : scanPostMergeBackstop({
+          repoRoot: resolve(dirname(resolve(db.path)), ".."),
+        }));
+
   for (const finding of openFindings) {
+    const findingId = String(finding.finding_id ?? "");
+    if (detectorCandidateFindingIds.has(findingId)) continue;
     const subject = String(finding.subject_id ?? finding.finding_id ?? "");
     const event: FeedbackEvent = {
-      feedback_event_id: feedbackId("feedback:finding", String(finding.finding_id ?? subject)),
-      finding_id: String(finding.finding_id ?? ""),
+      feedback_event_id: feedbackId("feedback:finding", String(findingId || subject)),
+      finding_id: findingId,
       plan_id: subject.startsWith("PLAN-") ? subject : "",
+      source_table: "findings",
+      source_id: findingId || subject,
+      source_generation: feedbackId(
+        "feedback-generation",
+        `findings:${findingId || subject}:${String(finding.kind ?? "finding")}:${String(finding.severity ?? "warn")}:${subject}:${String(finding.source ?? "")}:${String(finding.evidence_path ?? "")}`,
+      ),
+      source_color: "",
       signal_type: String(finding.kind ?? "finding"),
       severity: String(finding.severity ?? "warn"),
       status: "open",
       next_action: `review finding ${finding.finding_id ?? subject}`,
+      created_at: createdAt,
+    };
+    upsertRow(db, { table: "feedback_events", primaryKey: "feedback_event_id", row: { ...event } });
+    events.push(event);
+  }
+
+  for (const candidate of detectorCandidates) {
+    const candidateId = String(candidate.route_candidate_id ?? "");
+    const subject = String(candidate.subject_id ?? candidateId);
+    const findingKind = String(candidate.finding_kind ?? "detector-route-candidate");
+    const event: FeedbackEvent = {
+      feedback_event_id: feedbackId("feedback:detector-route-candidate", candidateId || subject),
+      finding_id: "",
+      plan_id: subject.startsWith("PLAN-") ? subject : "",
+      source_table: "detector_route_candidates",
+      source_id: candidateId || subject,
+      source_generation: feedbackId(
+        "feedback-generation",
+        `detector_route_candidates:${candidateId || subject}:${String(candidate.candidate_status ?? "non_ready")}:${findingKind}:${signalSeverity(candidate.severity)}:${subject}:${String(candidate.filing_target_id ?? "")}:${String(candidate.target_layer ?? "")}:${String(candidate.target_sub_doc ?? "")}:${String(candidate.reason ?? "")}`,
+      ),
+      source_color: String(candidate.candidate_status ?? "non_ready"),
+      signal_type: `detector_route_candidate:${findingKind}`,
+      severity: signalSeverity(candidate.severity),
+      status: "open",
+      next_action: detectorRouteCandidateAction(candidate),
       created_at: createdAt,
     };
     upsertRow(db, { table: "feedback_events", primaryKey: "feedback_event_id", row: { ...event } });
@@ -164,6 +237,13 @@ export function emitFeedbackEvents(db: HarnessDb): FeedbackEvent[] {
       feedback_event_id: feedbackId("feedback:signal", String(signal.signal_id ?? subject)),
       finding_id: "",
       plan_id: subject.startsWith("PLAN-") ? subject : "",
+      source_table: "quality_signals",
+      source_id: String(signal.signal_id ?? subject),
+      source_generation: feedbackId(
+        "feedback-generation",
+        `quality_signals:${String(signal.signal_id ?? subject)}:${String(signal.source ?? "")}:${subject}:${String(signal.metric ?? "quality_signal")}:${String(signal.status ?? "warn")}:${String(signal.value ?? "")}:${String(signal.threshold ?? "")}`,
+      ),
+      source_color: "",
       signal_type: String(signal.metric ?? "quality_signal"),
       severity: signalSeverity(signal.status),
       status: "open",
@@ -172,6 +252,90 @@ export function emitFeedbackEvents(db: HarnessDb): FeedbackEvent[] {
     };
     upsertRow(db, { table: "feedback_events", primaryKey: "feedback_event_id", row: { ...event } });
     events.push(event);
+  }
+  for (const hook of db
+    .prepare(
+      "SELECT event_id, session_id, plan_id, occurred_at FROM hook_events WHERE event_type = 'memory_promotion_missed' ORDER BY event_id",
+    )
+    .all()) {
+    const eventId = String(hook.event_id ?? "");
+    const sessionId = String(hook.session_id ?? "");
+    const event: FeedbackEvent = {
+      feedback_event_id: feedbackId("feedback:memory-promotion", eventId || sessionId),
+      finding_id: "",
+      plan_id: String(hook.plan_id ?? ""),
+      source_table: "hook_events",
+      source_id: eventId || sessionId,
+      source_generation: feedbackId(
+        "feedback-generation",
+        `hook_events:${eventId || sessionId}:memory_promotion_missed`,
+      ),
+      source_color: "",
+      signal_type: "memory_promotion_missed",
+      severity: "info",
+      status: "open",
+      next_action:
+        "review session changes and promote durable knowledge to HARNESS memory when warranted",
+      created_at: createdAt,
+    };
+    upsertRow(db, { table: "feedback_events", primaryKey: "feedback_event_id", row: { ...event } });
+    events.push(event);
+  }
+
+  if (postMergeBackstop) {
+    const reasons: PostMergeBackstopReason[] = ["bypass_merge", "merged_without_verdict"];
+    for (const reason of reasons) {
+      const findings = postMergeBackstop.detections.filter((finding) => finding.reason === reason);
+      if (findings.length === 0) continue;
+      const event: FeedbackEvent = {
+        feedback_event_id: feedbackId("feedback:post-merge-backstop", reason),
+        finding_id: "",
+        plan_id: "",
+        source_table: "post_merge_backstop",
+        source_id: reason,
+        source_generation: feedbackId(
+          "feedback-generation",
+          `${reason}:${findings.map((finding) => `${finding.pr}:${finding.headSha}`).join(",")}`,
+        ),
+        source_color: postMergeBackstop.ok ? "" : "detection_unavailable",
+        signal_type: `post_merge_backstop:${reason}`,
+        severity: "warn",
+        status: "open",
+        next_action: formatPostMergeBackstop(postMergeBackstop),
+        created_at: createdAt,
+      };
+      upsertRow(db, {
+        table: "feedback_events",
+        primaryKey: "feedback_event_id",
+        row: { ...event },
+      });
+      events.push(event);
+    }
+    if (!postMergeBackstop.ok) {
+      const event: FeedbackEvent = {
+        feedback_event_id: feedbackId("feedback:post-merge-backstop", "detection-unavailable"),
+        finding_id: "",
+        plan_id: "",
+        source_table: "post_merge_backstop",
+        source_id: "detection-unavailable",
+        source_generation: feedbackId(
+          "feedback-generation",
+          `detection-unavailable:${postMergeBackstop.unavailableReason ?? "unknown"}:${postMergeBackstop.detections.map((finding) => `${finding.reason}:${finding.pr}`).join(",")}`,
+        ),
+        source_color: "detection_unavailable",
+        signal_type: "post_merge_backstop:detection_unavailable",
+        severity: "warn",
+        status: "open",
+        next_action: formatPostMergeBackstop(postMergeBackstop),
+        created_at: createdAt,
+      };
+      upsertRow(db, {
+        table: "feedback_events",
+        primaryKey: "feedback_event_id",
+        row: { ...event },
+      });
+      events.push(event);
+    }
   }
   return events.sort((a, b) => a.feedback_event_id.localeCompare(b.feedback_event_id));
 }

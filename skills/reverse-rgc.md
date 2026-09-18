@@ -10,6 +10,27 @@ applies_to:
   drive_models:
     - Reverse
     - Recovery
+decision_points:
+  - when: "Reverse type is `upgrade`."
+    choose: "skip RGC entirely and merge to Forward directly"
+    over: "running the RGC checklist"
+    because: "RGC applies to `code`, `design`, `normalization`, `fullback` only; `upgrade` is explicitly exempted, so forcing RGC on it would block a valid merge for no gain."
+  - when: "`has_existing_tests=false` for the reconstructed scope."
+    choose: "verify missing_pair_artifacts names every layer with a design artifact but no test-design, and treat those layers as blocked from L7"
+    over: "verifying R2-as-is-test-design.md exists"
+    because: "reverse.md §2.1: when no tests existed, there is nothing to reconstruct as-is test-design from — the correct gate is the missing-pair-artifact list feeding the routing destination's pair-freeze, not a document that cannot exist yet."
+  - when: "Checking whether the routing destination's pair-freeze gate has already passed."
+    choose: "treat that as out of scope for RGC and leave it to the Forward cycle"
+    over: "blocking RGC closure until the destination pair-freeze gate is green"
+    because: "the file's own 'What RGC does NOT check' section states RGC only confirms Reverse delivered the required inputs; conflating the two gates would make Reverse un-closeable while waiting on Forward-side work it does not control."
+  - when: "An R4 gap-register lists an invalidated gate."
+    choose: "confirm it is named in R4-gap-register.yaml's invalidated_gates list before allowing RGC to pass"
+    over: "allowing RGC to pass on R4 completeness alone"
+    because: "an invalidated gate not tracked here would let a stale Forward gate pass silently persist after Reverse closes."
+  - when: "An open gap exists with no clear Forward path."
+    choose: "require it be deferred to debt or a new PLAN before RGC passes"
+    over: "letting RGC pass with the gap implicitly dropped"
+    because: "the checklist states no open gap may be silently dropped; PLAN status: done must not imply completeness that was never verified."
 ---
 
 # reverse rgc

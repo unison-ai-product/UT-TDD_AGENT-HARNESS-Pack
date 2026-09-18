@@ -12,6 +12,31 @@ applies_to:
     - Reverse
     - Retrofit
     - Recovery
+decision_points:
+  - when: "Implementation exists in the codebase but no design doc or contract documentation exists for it"
+    choose: "Classify the cycle as reverse_type=code (R1 not skipped)"
+    over: "Classifying it as reverse_type=design (R1 skipped)"
+    because: "Without observed contracts, R1 contract extraction is required before R2 as-is design can be trusted"
+  - when: "Only naming/structure drift is observed and there is no contract gap"
+    choose: "Classify the cycle as reverse_type=normalization (R1 skipped)"
+    over: "Classifying it as reverse_type=code and running full contract extraction"
+    because: "Normalization drift does not change observable contracts, so R1 work would be redundant"
+  - when: "A Scrum increment completes and needs to be promoted to V-model artifacts"
+    choose: "Classify the cycle as reverse_type=fullback and route through R0-R4"
+    over: "Starting a fresh Forward PLAN without a Reverse evidence trail"
+    because: "fullback is the type designed to promote Discovery/Scrum closure into formally anchored Forward artifacts"
+  - when: "A dependency version bump has unknown downstream impact"
+    choose: "Classify the cycle as reverse_type=upgrade (R1 not skipped, RGC not used)"
+    over: "Classifying it as reverse_type=normalization"
+    because: "Upgrade impact assessment requires observed compatibility contracts from R1; normalization assumes no contract gap"
+  - when: "R4 routing has just been decided for a Reverse cycle"
+    choose: "Require the routing destination's Pair freeze gate (G1/G3/G4/G5) to pass before starting L7 work"
+    over: "Starting downstream implementation immediately after R4 completes"
+    because: "ut-tdd vmodel lint will surface missing pair artifacts if implementation starts before the gate is crossed"
+  - when: "R0 found has_existing_tests=false for the subject scope"
+    choose: "Record missing_pair_artifacts at R4 and require a test-design PLAN at the routing destination before G3/G4/G5"
+    over: "Having Reverse itself generate the missing test code"
+    because: "Reverse only observes and records the test-design state; it does not generate test code"
 ---
 
 # reverse analysis

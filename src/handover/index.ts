@@ -11,9 +11,9 @@
  * 型で分離し、AI が Next Action を捏造しない。current-plan 活性化 (Gap B) の writer は循環 import
  * 回避のため session-log.ts に置き、本 module は import 再利用する (PLAN §1.1)。
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { computeOutstandingWork, outstandingSummaryLine } from "../lint/outstanding";
+import { computeOutstandingWork, outstandingSummaryLine } from "../lint/outstanding.ts";
 import {
   activePlanStale,
   inferPlanFromCommit,
@@ -22,7 +22,8 @@ import {
   type SessionLogDeps,
   sanitize,
   setActivePlan,
-} from "../runtime/session-log";
+} from "../runtime/session-log.ts";
+import { ensureDir } from "../shared/fs.ts";
 import {
   CURRENT_PLAN_REL,
   GENERATED_BY,
@@ -31,7 +32,7 @@ import {
   MAX_SUMMARY_PLANS,
   PLAN_DIGEST_DIR,
   POINTER_PATH,
-} from "./handover-constants";
+} from "./handover-constants.ts";
 import type {
   BuildPointerInput,
   CapRender,
@@ -46,14 +47,14 @@ import type {
   HandoverStatus,
   PlanDigestRef,
   PlanMeta,
-} from "./handover-types";
+} from "./handover-types.ts";
 
 export {
   GENERATED_BY,
   HANDOVER_OUTSTANDING_MARKER,
   MAX_SAME_DAY_ENTRIES,
   MAX_SUMMARY_PLANS,
-} from "./handover-constants";
+} from "./handover-constants.ts";
 export type {
   BuildPointerInput,
   CapRender,
@@ -68,7 +69,7 @@ export type {
   HandoverStatus,
   PlanDigestRef,
   PlanMeta,
-} from "./handover-types";
+} from "./handover-types.ts";
 // Gap B 活性化 API を handover 表層からも再 export (CLI が import するため)。
 export { inferPlanFromCommit, resolveActivePlan, setActivePlan };
 
@@ -798,7 +799,7 @@ export function nodeHandoverDeps(repoRoot: string): HandoverDeps {
     now: () => new Date().toISOString(),
     readText: (p) => (existsSync(p) ? readFileSync(p, "utf8") : null),
     writeText: (p, c) => {
-      mkdirSync(dirname(p), { recursive: true });
+      ensureDir(dirname(p), { recursive: true });
       writeFileSync(p, c);
     },
     listDir: (dir) => (existsSync(dir) ? readdirSync(dir) : []),

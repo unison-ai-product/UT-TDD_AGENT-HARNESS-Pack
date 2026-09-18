@@ -8,7 +8,7 @@ import {
   analyzeAssetDrift,
   assetDriftMessages,
   loadAssetDriftInput,
-} from "../src/lint/asset-drift";
+} from "../src/lint/asset-drift.ts";
 
 const agent = (id: string, text = "---\nmodel: claude-sonnet-4-6\n---\nbody"): AssetDoc => ({
   path: `.claude/agents/${id}.md`,

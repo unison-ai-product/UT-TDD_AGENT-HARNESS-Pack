@@ -10,7 +10,7 @@ import {
   parseBacklogEntries,
   VALID_CANDIDATE,
   VALID_STATUS,
-} from "../src/lint/improvement-backlog";
+} from "../src/lint/improvement-backlog.ts";
 
 describe("improvement backlog (作業ログ → 機能化 pipeline)", () => {
   const md = loadBacklog();

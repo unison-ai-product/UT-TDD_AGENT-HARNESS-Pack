@@ -3,7 +3,7 @@ import {
   analyzeRuleAutomationClosure,
   loadRuleAutomationClosureDocs,
   ruleAutomationClosureMessages,
-} from "../src/lint/rule-automation-closure";
+} from "../src/lint/rule-automation-closure.ts";
 
 const doc = `# PLAN-X
 

@@ -1,7 +1,15 @@
-import { workflowModeForPlan as catalogWorkflowModeForPlan } from "../schema/mode-catalog";
-import type { HarnessDb } from "../state-db/index";
-import { upsertRow } from "../state-db/index";
-import { classifyTask } from "../task/classify";
+import { workflowModeForPlan as catalogWorkflowModeForPlan } from "../schema/mode-catalog.ts";
+import {
+  type SkillLearningSignals,
+  type SkillScoringContext,
+  scoreSkillDetailed,
+  shouldScoreSkillAsset,
+  skillScoreReason,
+} from "../skill-scoring/scoring.ts";
+import { stableId } from "../stable-id.ts";
+import type { HarnessDb } from "../state-db/index.ts";
+import { upsertRow } from "../state-db/index.ts";
+import { classifyTask } from "../task/classify.ts";
 
 export interface PlanSkillContext {
   plan_id: string;
@@ -17,16 +25,6 @@ export interface PlanSkillContext {
  * 自由文 由来 (recommendSkillsForText) の双方が同じ文脈型へ落ちることで、`--text` を flat ranked list の
  * まま additive に足せる (A-138 ITEM-2、cross_agent TL 裏取り済: flat-list 維持 / 3-bucket は PO 残課題)。
  */
-interface SkillScoringContext {
-  /** recommendation の plan_id 欄に入る参照子 (PLAN id か `text:<slug>` sentinel)。 */
-  reference: string;
-  layer: string;
-  drive: string;
-  kind: string;
-  workflowMode: string;
-  reason: string;
-}
-
 export interface SkillRecommendation {
   skill_recommendation_id: string;
   session_id: string;
@@ -151,10 +149,6 @@ export interface SkillInvocation {
   accepted: number;
 }
 
-function stableId(prefix: string, value: string): string {
-  return `${prefix}:${value.replace(/[^A-Za-z0-9._:-]+/g, "-")}`;
-}
-
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -188,70 +182,25 @@ function textReference(text: string): string {
   return `text:${slug || "task"}`;
 }
 
-/** L/駆動が空でも索引可能な category (skill-index.md §2.1)。skill-assignment と同一集合。 */
-const SITUATION_CATEGORIES = new Set<string>(["domain", "project"]);
-
-function tokenize(value: string): string[] {
-  return value
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length >= 3);
-}
-
-/**
- * ctx 由来 token と asset メタデータ token の重なり数に比例する graduated score (0..0.2)。
- * skill ごとに trigger/domain_tags/capability が異なるため score が分散し、score=1 飽和と
- * 同点アルファベット順退化を解消する (DISCOVERY-03 §5 実測限界 → skill-index.md §4 de-saturate)。
- * 決定論: Set の重なり数のみに依存し iteration 順に非依存。
- */
-function metadataOverlap(ctx: SkillScoringContext, asset: Record<string, unknown>): number {
-  const assetTokens = new Set(
-    tokenize(
-      [asset.trigger, asset.capability, asset.skill_type, asset.role, asset.category]
-        .map((value) => String(value ?? ""))
-        .join(" "),
-    ),
-  );
-  const ctxTokens = new Set(
-    tokenize([ctx.drive, ctx.kind, ctx.workflowMode, ctx.reference].join(" ")),
-  );
-  let matches = 0;
-  for (const token of ctxTokens) {
-    if (assetTokens.has(token)) matches += 1;
-  }
-  return Math.min(0.2, matches * 0.05);
-}
-
-function scoreSkill(ctx: SkillScoringContext, asset: Record<string, unknown>): number {
-  const appliesLayers = String(asset.applies_layers ?? "")
-    .split(",")
-    .filter(Boolean);
-  const appliesDriveModels = String(asset.applies_drive_models ?? "")
-    .split(",")
-    .filter(Boolean);
-  const category = String(asset.category ?? "").trim();
-  const reviewText = [asset.skill_type, asset.trigger, asset.capability, asset.role]
-    .map((value) => String(value ?? ""))
-    .join(" ")
-    .toLowerCase();
-  const overlap = metadataOverlap(ctx, asset); // graduated メタデータ軸 (de-saturator)
-  let score = 0.15;
-  if (ctx.layer && appliesLayers.includes(ctx.layer)) score += 0.3; // L 軸
-  if (appliesDriveModels.includes(ctx.workflowMode)) score += 0.3; // 駆動軸
-  score += overlap;
-  if (/review|checklist|quality|test|lint/.test(reviewText)) score += 0.05;
-  // domain/project skill は L 軸/駆動軸が 0 点ゆえ、task が domain_tags/industry に一致したとき
-  // (overlap>0) に situation-pull で浮上させる (skill-index.md §4 の「シチュエーションで引く」経路)。
-  if (SITUATION_CATEGORIES.has(category) && overlap > 0) score += 0.1;
-  return Math.min(1, Number(score.toFixed(2)));
-}
-
 // PLAN-L7-262: session_id 貫通。hook 経由でない CLI 実行は UT_TDD_SESSION_ID env を
 // 引き、無ければ明示の不明 marker を使う (空文字での偽装をやめる)。
 export const UNKNOWN_RUNTIME_SESSION_ID = "cli:unknown-session";
 
 export function resolveRuntimeSessionId(env: NodeJS.ProcessEnv = process.env): string {
   return env.UT_TDD_SESSION_ID?.trim() || UNKNOWN_RUNTIME_SESSION_ID;
+}
+
+function skillLearningSignals(db: HarnessDb, skillId: string): SkillLearningSignals | undefined {
+  const row = db.prepare("SELECT * FROM skill_evaluations WHERE skill_id = ?").get(skillId) as
+    | Record<string, unknown>
+    | undefined;
+  if (!row) return undefined;
+  return {
+    skillRating: Number(row.skill_rating ?? 0),
+    adoptionCount: Number(row.adoption_count ?? 0),
+    successCount: Number(row.success_count ?? 0),
+    unusedFlag: Number(row.unused_flag ?? 0),
+  };
 }
 
 /** 文脈非依存の共通ランキング: skill asset をスコアし top-N の SkillRecommendation を返す。 */
@@ -262,10 +211,17 @@ function rankSkills(
 ): SkillRecommendation[] {
   const assets = db
     .prepare("SELECT * FROM automation_assets WHERE asset_type = ? ORDER BY asset_id")
-    .all("skill");
+    .all("skill")
+    .filter(shouldScoreSkillAsset);
   const recommendedAt = options.recordedAt ?? nowIso();
   return assets
-    .map((asset) => ({ asset, score: scoreSkill(ctx, asset) }))
+    .map((asset) => {
+      const skillId = String(asset.asset_id ?? "");
+      const details = scoreSkillDetailed(ctx, asset, {
+        learning: skillLearningSignals(db, skillId),
+      });
+      return { asset, details, score: details.score };
+    })
     .filter((entry) => entry.score > 0)
     .sort(
       (a, b) =>
@@ -282,7 +238,7 @@ function rankSkills(
         skill_id: skillId,
         rank: index + 1,
         score: entry.score,
-        reason: ctx.reason,
+        reason: skillScoreReason(ctx, entry.asset, entry.details),
         recommended_at: recommendedAt,
       };
     });
@@ -312,7 +268,6 @@ export function recommendSkillsForPlan(
       drive: plan.drive,
       kind: plan.kind,
       workflowMode,
-      reason: `layer=${plan.layer}; technical_drive=${plan.drive}; drive_model=${workflowMode}; kind=${plan.kind}`,
     },
     options,
   );
@@ -338,10 +293,12 @@ export function recommendSkillsForText(
       drive: c.drive,
       kind: c.kind,
       workflowMode,
-      reason: `source=text; technical_drive=${c.drive}; drive_model=${workflowMode}; kind=${c.kind}; risk=${c.risk_flags.join("|") || "none"}`,
     },
     options,
-  );
+  ).map((row) => ({
+    ...row,
+    reason: `source=text; ${row.reason}; risk=${c.risk_flags.join("|") || "none"}`,
+  }));
 }
 
 export function recordSkillRecommendations(

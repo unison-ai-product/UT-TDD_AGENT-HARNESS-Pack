@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadFrDocs, parseFrRows } from "./fr-registry-audit";
-import { hasDbcTable } from "./shared";
+import { loadFrDocs, parseFrRows } from "./fr-registry-audit.ts";
+import { hasDbcTable } from "./shared.ts";
 
 export interface L6FrCoverageDocs {
   frIds: string[];

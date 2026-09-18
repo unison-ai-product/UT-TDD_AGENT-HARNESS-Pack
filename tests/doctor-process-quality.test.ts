@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkDriveModelPassage as checkDriveModelPassageFromIndex } from "../src/doctor/index";
+import { checkDriveModelPassage as checkDriveModelPassageFromIndex } from "../src/doctor/index.ts";
 import {
   checkCycleP4Verification,
   checkDbCurrency,
@@ -21,7 +21,7 @@ import {
   checkSubDocCatalogDrift,
   checkSubDocSectionStructure,
   checkTelemetryClosure,
-} from "../src/doctor/process-quality";
+} from "../src/doctor/process-quality.ts";
 
 describe("doctor process quality checks", () => {
   it("fails closed when process quality inputs cannot read the repo root", () => {

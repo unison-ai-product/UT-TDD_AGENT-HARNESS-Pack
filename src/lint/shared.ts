@@ -2,6 +2,9 @@
 // 配置 = src/lint (domain-boundary: lint 内 import と vmodel→lint import は許可)。
 import { basename } from "node:path";
 import type ts from "typescript";
+import { normalizePath } from "../shared/source-text.ts";
+
+export { normalizePath } from "../shared/source-text.ts";
 
 /**
  * frontmatter 1 行 `key: value` の value を取り出す。
@@ -25,11 +28,6 @@ export function hasDbcTable(text: string): boolean {
 
 // A-120 I-2: coding-rules / ddd-tdd-rules の境界チェックが各自コピペしていた
 // TS module 解決 helper を単一正本化する (boundary 判定そのものは各 lint で別ルール = 統合しない)。
-
-/** OS path 区切りを `/` に正規化。 */
-export function normalizePath(path: string): string {
-  return path.replaceAll("\\", "/");
-}
 
 /** AST ノード位置 → 1-origin 行番号。 */
 export function lineOf(sourceFile: ts.SourceFile, pos: number): number {

@@ -18,7 +18,7 @@ G1〜G5 を運用してきたが、(a) **各 G_N が何を check するか**の�
 |---|---|---|---|---|
 | G0.5 | L0 企画 | 構想の妥当性 (企画目的 ⇔ 価値検証 の trace) | PO (提案) | L0↔価値検証 (L14→L0 feedback) |
 | **G1** | L1 要求定義 | 5 sub-doc + 件数閉じ + G1-trace | ★ **PO** | L1↔L14 |
-| **G2** | L2 画面 | モック凍結 + 画面 trace | — (FR-13 未定義、§2.1 defer 中) | L2↔L10 |
+| **G2** | L2 画面 | モック凍結 + 画面 trace | ★ **PO** (サインオフ 2026-06-22、§2 台帳 G2=PASS。旧「FR-13 未定義 defer 中」は §2.1 解消済、PLAN-L7-459 M1 で本表同期) | L2↔L10 |
 | **G3** | L3 要件定義 | FR/AC/AT + G3-trace | ★ **PO** | L3↔L12 |
 | **G4** | L4 基本設計 | 4 sub-doc + 上流 trace + 集約整合 | ★ TL | L4↔L9 |
 | **G5** | L5 詳細設計 | DbC freeze (pre/post/invariant + edge docstring) | ★ TL | L5↔L8 |
@@ -77,7 +77,7 @@ G1〜G5 を運用してきたが、(a) **各 G_N が何を check するか**の�
 |---|---|---|---|
 | G0.5 | 既済 (再確定) | concept_v3.1 (L0) / A-100 | RECOVERY-02 後も L0⇔価値検証ペア方向に破綻なし (正規式モデル非破壊) |
 | G1 | ✅ PASS (再確定) | A-41 (初回) + **A-100 (改善4巡後 再freeze、2026-06-04)** | PO サインオフ済。A-41 は正規式前スコープ、A-100 で Phase 1 改善サイクル完了後に再確定 |
-| **G2** | ✅ **PASS (PO サインオフ 2026-06-22)** | A-63 defer (historical) + **G2 freeze 2026-06-22** (PM-06 追加で 15 画面、L2 mock 材料化、PO「L2 いったん閉じる、画面モック」) | screen track の L2 モック凍結。L2 4 sub-doc (screen-list/flow/ui-element/wireframe) confirmed、③ pair=wireframe self (L10)。下記 §2.1 closure |
+| **G2** | ✅ **PASS (PO サインオフ 2026-06-22)** | A-63 defer (historical) + **G2 freeze 2026-06-22** (PM-06 追加で 15 画面、L2 mock 材料化、PO「L2 いったん閉じる、画面モック」) | screen track の L2 モック凍結。L2 4 sub-doc (screen-list/flow/ui-element/wireframe) confirmed、③ pair=`L10-ux-validation-test-design.md`。下記 §2.1 closure |
 | G3 | ✅ PASS (再確定) | A-60 (初回) + **A-100 (再freeze)** | PO サインオフ済。Phase 1 (L0-L3) exit 条件 = L3 要件定義 confirmed を満たす |
 | G4 | ✅ **PASS (Phase 2 再確定)** | (旧) A-67/A-91 = historical + **A-101 (正規式 G4 audit、2026-06-05)** + **A-102 (workflow オーケストレーション add-design freeze、2026-06-05)** + **A-103 (L4 設計 doc を実装実体へ整合 + under-design 明示 defer、2026-06-05)** + **A-104 (内部資産 L4-10〜13 closure、2026-06-08)** | L4 core 4 doc (architecture/data/function/external-if) ⇔ L9 総合テスト設計を正規式 V-model (L4⇔L9 総合) で再 audit、**4 軸 PASS**。A-102/A-103 の add-design re-bless 後、A-104 で別スコープ未 freeze だった内部資産 L4-10〜13 を L5-05〜07 / L8 IT-ASSET へ段階分解し、L4 側も confirmed に closure。旧 A-91 (内部資産含む COND PASS、正規式前) は historical |
 | G5 | ✅ **PASS (Phase 2 freeze)** | (旧) A-70 = historical + **A-104 (L5 detailed design freeze、2026-06-08)** | A-100 park 後の再評価を A-104 で実施。L5 4 sub-doc + internal asset L5-05〜07 + L8 integration test design (§5 GWT) が confirmed。DbC freeze / L5↔L8 pair coverage / review-evidence / doctor green を確認 |
@@ -87,11 +87,11 @@ G1〜G5 を運用してきたが、(a) **各 G_N が何を check するか**の�
 
 harness core は **CLI/library (UI なし)**。screen track (PM/HM/GD 15 画面、L2) は L1 で要求確定済だが L2 モック検証前のため **G2 を defer (park)** し、**非 screen の forward spine (L3→L5) が先行**した。これは FR-13 (Forward ワークフロー順序制約) の AC-FR-13-02 「前工程未通過で後着手不可」の一般化に対する **product-choice 例外** (PO 承認)。
 
-> **G2 closure 注記 (2026-06-22、PO サインオフ — 上記 defer を解消)**: L2 画面モック (15 画面 = PM 6 + HM 8 + GD 1、PM-06 設計書ビューア追加) を本材料化し PO が「L2 いったん閉じる (どうせ画面モック)」とサインオフ。**G2 = DEFER → PASS**。L2 4 sub-doc (screen-list/flow/ui-element/wireframe) を `status: placeholder → confirmed` へ flip (③ pair=wireframe self、L2↔L10、独立③ doc なし)。これで screen track の **L2 凍結完了**。L4-screen / L10 は別レーン後続 (規約 §2.1 末尾、合流時 G1-trace 再検証)。High-Fi モック / 実画面実装 (src/web) は Phase B carry。
+> **G2 closure 注記 (2026-06-22、PO サインオフ — 上記 defer を解消)**: L2 画面モック (15 画面 = PM 6 + HM 8 + GD 1、PM-06 設計書ビューア追加) を本材料化し PO が「L2 いったん閉じる (どうせ画面モック)」とサインオフ。**G2 = DEFER → PASS**。L2 4 sub-doc (screen-list/flow/ui-element/wireframe) を `status: placeholder → confirmed` へ flip し、独立した③ `L10-ux-validation-test-design.md` と L2↔L10 pair を構成する。これで screen track の **L2 凍結完了**。L4-screen / L10 は別レーン後続 (規約 §2.1 末尾、合流時 G1-trace 再検証)。High-Fi モック / 実画面実装 (src/web) は Phase B carry。
 
 > **A-100 注記 (2026-06-04)**: 上記「L3→L5 先行」は正規式モデル確定前の経緯。RECOVERY-02 後、L4/L5 (G4/G5) は §2 のとおり park (要再評価) とし、**確定 (frozen) 済は L0-L3 (core track) まで**。L4-L6 は Phase 2 で Forward 実開発する。
 >
-> **A-100 追補 (2026-06-04, pair-freeze 対称性)**: G1/G3 は段階 A Pair freeze (concept §2.3 = 設計①+テスト設計③ の文書ペアを揃える) のため、初回 freeze で設計①側のみ confirmed 化しテスト設計③ (`L1-operational-test-design.md` / `L3-acceptance-test-design.md`) を draft 残置していた非対称を是正。両ファイルを `status: confirmed` へ flip し、L1/L3 の ①⇔③ ペアを両側 frozen で揃えた (frontmatter status 行のみ、本文不変)。L0 は価値検証 = 独立③ doc を持たず L14 実施 / L2 は wireframe self-pair のため③ flip 対象外。
+> **A-100 追補 (2026-06-04, pair-freeze 対称性)**: G1/G3 は段階 A Pair freeze (concept §2.3 = 設計①+テスト設計③ の文書ペアを揃える) のため、初回 freeze で設計①側のみ confirmed 化しテスト設計③ (`L1-operational-test-design.md` / `L3-acceptance-test-design.md`) を draft 残置していた非対称を是正。両ファイルを `status: confirmed` へ flip し、L1/L3 の ①⇔③ ペアを両側 frozen で揃えた (frontmatter status 行のみ、本文不変)。L0 は価値検証を L14 で実施し、L2 は独立③ `L10-ux-validation-test-design.md` と対を成す (旧 wireframe self-pair は PLAN-RECOVERY-09 で撤去)。
 >
 > **A-101 注記 (2026-06-05, G4 L4 freeze)**: Phase 2 で L4 core を正規式 V-model (L4⇔L9 総合) の G4 audit に通し **4 軸 PASS** (intra_runtime_subagent = pmo-sonnet で TL サインオフ代替)。L4 4 doc + L9 + PLAN-L4-00〜04 を `draft → confirmed` (10 ファイル flip)。**L9 骨格 (Given-When-Then は Phase 2 後続) + ST-ASSET (L6/L7 待ち placeholder_deps) は carry 許容**。**内部資産 L4-10〜13 は未 freeze (別スコープ)**。記録 = `.ut-tdd/audit/A-101-g4-l4-freeze.md`。G5 (L5 詳細設計) は park 維持、L5 降下後に再 audit。
 >

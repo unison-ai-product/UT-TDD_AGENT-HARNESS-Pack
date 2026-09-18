@@ -4,7 +4,7 @@ import {
   extractSignals,
   loadPropagationDocs,
   propagationMessages,
-} from "../src/lint/propagation";
+} from "../src/lint/propagation.ts";
 
 const CONCEPT = `
 ## §2.6 signal routing

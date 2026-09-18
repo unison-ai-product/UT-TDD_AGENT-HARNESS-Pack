@@ -13,6 +13,27 @@ applies_to:
     - Reverse
     - Add-feature
     - Retrofit
+decision_points:
+  - when: "a Reverse R1 pass finds a field with existing consumers but no contract entry"
+    choose: "treat it as a blocking finding in ut-tdd review --uncommitted"
+    over: "leaving the undocumented-but-used field out of the extracted L4 contract doc"
+    because: "a field with consumers but no contract entry is an explicit blocking condition, since it marks undocumented deletion risk"
+  - when: "a contract's compatibility class is stable and a field needs removal or renaming"
+    choose: "record a deprecation period with a sunset date in the L4 doc before removing it"
+    over: "removing or renaming the field immediately once the replacement is ready"
+    because: "stable contracts require a deprecation period — this is the compatibility-class guarantee callers depend on"
+  - when: "a breaking change must be made to a stable contract"
+    choose: "bump the version in the PLAN's generates list and update every consumer reference before pair-freeze"
+    over: "shipping the breaking change and updating consumers in a follow-up PLAN"
+    because: "breaking changes to a stable contract must have all consumers updated in the same PLAN, not deferred"
+  - when: "choosing a compatibility class for a new contract (stable/beta/internal)"
+    choose: "pick the class based on the actual change-without-notice policy the provider commits to"
+    over: "defaulting every new contract to stable regardless of consumer guarantees"
+    because: "each class carries a different change-without-notice policy, and stable is the most restrictive — over-declaring it creates false obligations"
+  - when: "extracting a contract from existing code in Reverse R1"
+    choose: "enumerate every exported field/status code from source, then grep consumer call sites for actual field access before writing the doc"
+    over: "writing the contract doc from the provider's intended/documented shape alone"
+    because: "the extraction order (source enumeration, then consumer grep, then doc) is required to annotate deletion risk accurately"
 ---
 
 # api contract

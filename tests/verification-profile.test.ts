@@ -14,14 +14,14 @@ import {
   verificationProfileGateMessages,
   verificationRecommendationMermaid,
   verificationRecommendationMessages,
-} from "../src/lint/verification-profile";
-import { PROFILES } from "../src/lint/verification-profile-catalog";
+} from "../src/lint/verification-profile.ts";
+import { PROFILE_RUNNERS, PROFILES } from "../src/lint/verification-profile-catalog.ts";
 import {
   analyzeVerificationProfileSafety,
   planExternalProfileActivation,
   renderGeneratedMcpConfig,
-} from "../src/lint/verification-profile-safety";
-import type { VerificationProfileRunResult as SidecarVerificationProfileRunResult } from "../src/lint/verification-profile-types";
+} from "../src/lint/verification-profile-safety.ts";
+import type { VerificationProfileRunResult as SidecarVerificationProfileRunResult } from "../src/lint/verification-profile-types.ts";
 
 function deps(over: Partial<VerificationProbeDeps> = {}): VerificationProbeDeps {
   return {
@@ -127,7 +127,7 @@ describe("verification profile recommendation", () => {
     expect(result?.checks.map((check) => check.name)).toContain("package");
     expect(result?.checks.map((check) => check.name)).toContain("executable");
     expect(
-      result?.checks.some((check) => check.message.includes("bun add -D testcontainers")),
+      result?.checks.some((check) => check.message.includes("npm install -D testcontainers")),
     ).toBe(true);
   });
 
@@ -183,11 +183,23 @@ describe("verification profile recommendation", () => {
     expect(result?.exitCode).toBe(7);
   });
 
+  it("U-VPROF-RUNNER-001: PROFILE_RUNNERS entries stay identical to the profile command (no silent divergence)", () => {
+    // PLAN-L7-462 step 3 blind review R1 の申し送り: command (表示/MCP config 面) と
+    // PROFILE_RUNNERS (実行面) が別の起動形へ分岐しても既存テストは緑のままだった。
+    // 同一 profile の 2 面は常に同一 argv を指すことを恒久固定する。
+    for (const [id, runner] of Object.entries(PROFILE_RUNNERS)) {
+      const [command, args] = runner;
+      const profile = PROFILES[id as keyof typeof PROFILES];
+      expect(profile, `runner entry ${id} has no profile`).toBeDefined();
+      expect([command, ...args].join(" "), `profile ${id}`).toBe(profile.command);
+    }
+  });
+
   it("supports dry-run for builtin profile runners", () => {
     const result = runVerificationProfile("bun-unit", { dryRun: true }, deps());
 
     expect(result?.status).toBe("dry-run");
-    expect(result?.command).toBe("bun run test");
+    expect(result?.command).toBe("node scripts/run-vitest-snapshot.ts");
   });
 
   it("saves normalized evidence records for later DB collection", () => {
@@ -225,7 +237,7 @@ describe("verification profile recommendation", () => {
     expect(result?.ready).toBe(false);
     expect(result?.checks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: "executable", ok: true, message: "bun --version" }),
+        expect.objectContaining({ name: "executable", ok: true, message: "node --version" }),
         expect.objectContaining({ name: "launcher", ok: false, message: "ut-tdd --help" }),
       ]),
     );
@@ -348,17 +360,17 @@ describe("MCP profile config and safety (U-MCPPROFILE-001..014)", () => {
 
     // command is the head token; args carry the remaining argv (no re-inclusion
     // of the executable, no whole-command-string-as-one-arg).
-    expect(config.mcpServers["bun-unit"].command).toBe("bun");
-    expect(config.mcpServers["bun-unit"].args).toEqual(["run", "test"]);
+    expect(config.mcpServers["bun-unit"].command).toBe("node");
+    expect(config.mcpServers["bun-unit"].args).toEqual(["scripts/run-vitest-snapshot.ts"]);
 
     // Wrapper command whose first token ("ut-tdd") differs from the probe-hint
-    // executable ("bun"): the launch command is the command head, not the hint.
+    // executable ("node"): the launch command is the command head, not the hint.
     expect(config.mcpServers["mcp-inspector-smoke"].command).toBe("ut-tdd");
     expect(config.mcpServers["mcp-inspector-smoke"].args[0]).toBe("mcp");
 
     // Regression for the pre-fix bug: args must never be the whole command line.
     for (const server of Object.values(config.mcpServers)) {
-      expect(server.args).not.toContain("bun run test");
+      expect(server.args).not.toContain("node scripts/run-vitest-snapshot.ts");
       expect(server.args[0]).not.toBe(server.command);
     }
   });

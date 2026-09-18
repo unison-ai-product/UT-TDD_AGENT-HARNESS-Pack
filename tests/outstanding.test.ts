@@ -8,7 +8,7 @@ import {
   loadOutstandingPlanRows,
   type OutstandingPlanRow,
   outstandingSummaryLine,
-} from "../src/lint/outstanding";
+} from "../src/lint/outstanding.ts";
 
 // IMP-139: 「未了の正の集計シグナル」(非終端 PLAN 層別 + open defer) の additive surface 回帰。
 

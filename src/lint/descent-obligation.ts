@@ -17,8 +17,8 @@ import {
   type Obligation,
   type ThinCoverageAdvisory,
   type TraceKeyedArtifact,
-} from "./descent-obligation-types";
-import { normalizePath } from "./shared";
+} from "./descent-obligation-types.ts";
+import { normalizePath } from "./shared.ts";
 
 const DOC_FR_TRACE_RE = /\bFR-L1-(\d+)(?:(?:[〜～]|\.\.)(?:FR-L1-)?(\d+)|((?:\/\d+)+))?/g;
 const U_FR_TRACE_RE = /\bU-FR-L1-(\d+)(?:(?:[〜～]|\.\.)(?:U-FR-L1-)?(\d+))?/g;

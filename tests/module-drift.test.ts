@@ -11,7 +11,7 @@ import {
   moduleDriftMessages,
   parseListedModules,
   scanActualModules,
-} from "../src/lint/module-drift";
+} from "../src/lint/module-drift.ts";
 
 const docs = (listed: string[], actual: string[]): ModuleDocs => ({ listed, actual });
 

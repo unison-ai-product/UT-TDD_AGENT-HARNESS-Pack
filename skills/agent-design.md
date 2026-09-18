@@ -13,6 +13,27 @@ applies_to:
     - Add-feature
     - Discovery
     - Refactor
+decision_points:
+  - when: "defining a new .claude/agents/<name>.md and choosing whether model can be left blank"
+    choose: "set model explicitly, even if it would match the parent"
+    over: "omitting model and relying on inheritance"
+    because: "the guard blocks omitted model — it does NOT silently inherit the parent, so an omission is a hard failure, not a convenience"
+  - when: "a subagent_type is needed but does not appear in the current guard allowlist"
+    choose: "update agent-guard.ts allowlist and document the capability class before using it"
+    over: "invoking the role anyway or approximating with a similar allowlisted name"
+    because: "any role outside the list is blocked fail-close; there is no fuzzy match"
+  - when: "assigning a model tier to a new agent's capability class"
+    choose: "assign the minimum capable tier for that class (e.g., fast/cheap for research, primary-equivalent for adversarial review)"
+    over: "defaulting every new agent to the primary model for safety"
+    because: "the taxonomy exists precisely to avoid over-provisioning cost to roles that don't need primary-tier judgement"
+  - when: "the guard rejects an Agent call and the cause is unclear"
+    choose: "check subagent_type match, model presence, and allowlist membership in that order before assuming a bug"
+    over: "reaching for UT_TDD_ALLOW_RAW_AGENT=1 as the first fix"
+    because: "bypass is for a diagnosed emergency only, not a default troubleshooting step"
+  - when: "UT_TDD_ALLOW_RAW_AGENT=1 is used to unblock a spawn"
+    choose: "write an audit entry to .ut-tdd/audit/ recording who, which call, and why"
+    over: "using the bypass silently and moving on once the call succeeds"
+    because: "bypass without audit evidence leaves the emergency undocumented and unreviewable"
 ---
 
 # agent design

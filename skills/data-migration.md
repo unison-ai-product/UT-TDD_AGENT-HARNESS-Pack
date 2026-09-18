@@ -16,6 +16,31 @@ applies_to:
     - Add-feature
     - Retrofit
     - Recovery
+decision_points:
+  - when: "A migration PLAN reaches pair-freeze but the design doc is missing one of before/after/transform-rules/rollback"
+    choose: "Block pair-freeze until all four sections exist"
+    over: "Allowing pair-freeze with a partial design doc and filling gaps during implementation"
+    because: "Pair-freeze is explicitly blocked until the design doc exists and is linked as parent_design; retrofitting sections after freeze breaks V-model traceability"
+  - when: "Deciding when to trigger rollback during a strangler-fig cutover"
+    choose: "Define a measurable trigger at L5 (integrity-check failure, error-rate threshold, or explicit operator decision) before deploying"
+    over: "Rolling back based on subjective discomfort or ad-hoc judgement after deployment"
+    because: "The rollback decision gate explicitly forbids subjective triggers and requires the criterion recorded before deploy"
+  - when: "A migration touches auth or credential handling"
+    choose: "Escalate to PO"
+    over: "Implementing credential rotation as part of the migration PLAN"
+    because: "Credential rotation is explicitly out of scope and named a harness escalation boundary"
+  - when: "A row fails during the migration run"
+    choose: "Log the row id and continue to a summary"
+    over: "Silently skipping the row or aborting the whole run"
+    because: "L7 implementation rules require explicit error handling and forbid silent skips"
+  - when: "Advancing a strangler-fig phase (0-4)"
+    choose: "Pass the phase's verification step (count/checksum/integration test) before moving to the next phase"
+    over: "Advancing phases on a schedule regardless of verification"
+    because: "Each boundary requires a passing verification step before the next phase per the phasing table"
+  - when: "Onboarding an existing project (FR-L1-44) into UT-TDD"
+    choose: "Treat the import as a Phase 0 migration and verify harness.db asset counts against the file-system count before new work"
+    over: "Running ut-tdd setup and immediately starting new PLANs without a baseline check"
+    because: "The onboarding note requires baselining via ut-tdd status and verifying asset counts match before starting new work"
 ---
 
 # data migration
@@ -66,7 +91,7 @@ Record the test design under `docs/test-design/` paired with the L5 doc;
 
 ## L7 implementation rules
 
-- [ ] Migration code is TypeScript/Bun — no ad-hoc shell/Python that escapes
+- [ ] Migration code uses the TypeScript/Node project toolchain — no ad-hoc shell/Python that escapes
       harness traceability.
 - [ ] Idempotent: re-running on an already-migrated target is safe.
 - [ ] Explicit error handling: on a row failure, log the row id and continue to

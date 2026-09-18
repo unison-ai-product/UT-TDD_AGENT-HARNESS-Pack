@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate } from "../src/state-db/migration";
+import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate } from "../src/state-db/migration.ts";
 
 function seedQueue(db: ReturnType<typeof openHarnessDb>): void {
   upsertRow(db, {

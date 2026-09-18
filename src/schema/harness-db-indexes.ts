@@ -1,4 +1,4 @@
-import type { IndexDef } from "./harness-db";
+import type { IndexDef } from "./harness-db.ts";
 
 export const HARNESS_DB_INDEXES: IndexDef[] = [
   {
@@ -86,6 +86,21 @@ export const HARNESS_DB_INDEXES: IndexDef[] = [
     columns: ["source_table", "source_id"],
   },
   {
+    name: "idx_feedback_lifecycle_event",
+    table: "feedback_lifecycle",
+    columns: ["feedback_event_id", "source_generation", "occurred_at"],
+  },
+  {
+    name: "idx_refactor_candidates_state",
+    table: "refactor_candidates",
+    columns: ["state", "confidence", "last_seen_at"],
+  },
+  {
+    name: "idx_refactor_candidates_plan",
+    table: "refactor_candidates",
+    columns: ["linked_plan_id", "state"],
+  },
+  {
     name: "idx_memory_kind_updated",
     table: "memory_entries",
     columns: ["kind", "updated_at"],
@@ -171,6 +186,11 @@ export const HARNESS_DB_INDEXES: IndexDef[] = [
     columns: ["plan_id", "has_evidence"],
   },
   {
+    name: "idx_github_review_lane_subject",
+    table: "github_review_lane_receipts",
+    columns: ["plan_id", "plan_revision", "subject_head", "lane"],
+  },
+  {
     name: "idx_descent_obligation_trace_status",
     table: "descent_obligations",
     columns: ["trace_key", "status", "required_layer"],
@@ -195,5 +215,152 @@ export const HARNESS_DB_INDEXES: IndexDef[] = [
     name: "idx_screen_trace_screen",
     table: "screen_trace",
     columns: ["screen_id", "requirement_kind"],
+  },
+  {
+    name: "idx_spec_defs_owner",
+    table: "spec_defs",
+    columns: ["owner_path", "section_anchor"],
+  },
+  {
+    name: "idx_spec_defs_kind_layer_status",
+    table: "spec_defs",
+    columns: ["spec_kind", "layer", "lifecycle_status"],
+  },
+  { name: "idx_spec_defs_plan", table: "spec_defs", columns: ["plan_id"] },
+  {
+    name: "idx_spec_relations_from_kind",
+    table: "spec_relations",
+    columns: ["from_spec_id", "relation_kind"],
+  },
+  {
+    name: "idx_spec_relations_to_kind",
+    table: "spec_relations",
+    columns: ["to_spec_id", "relation_kind"],
+  },
+  {
+    name: "idx_schedule_plan_status",
+    table: "schedule_entries",
+    columns: ["plan_id", "status", "rag"],
+  },
+  {
+    name: "idx_schedule_layer_subdoc_status",
+    table: "schedule_entries",
+    columns: ["layer", "sub_doc", "status"],
+  },
+  {
+    name: "idx_activation_profile_status",
+    table: "activation_entries",
+    columns: ["profile_id", "scope_status"],
+  },
+  {
+    name: "idx_activation_version_status",
+    table: "activation_entries",
+    columns: ["target_version", "scope_status"],
+  },
+  {
+    name: "idx_activation_schedule_plan_profile",
+    table: "activation_schedule_reviews",
+    columns: ["plan_id", "profile_id", "scope_status"],
+  },
+  {
+    name: "idx_activation_schedule_scope_rag",
+    table: "activation_schedule_reviews",
+    columns: ["scope_status", "rag", "enabled"],
+  },
+  {
+    name: "idx_document_catalog_layer_subdoc",
+    table: "document_catalog_entries",
+    columns: ["layer", "sub_doc", "applicability"],
+  },
+  {
+    name: "idx_document_catalog_doc_type",
+    table: "document_catalog_entries",
+    columns: ["doc_type_id", "default_status"],
+  },
+  {
+    name: "idx_document_scale_profile_entry",
+    table: "document_scale_profile_entries",
+    columns: ["profile_id", "doc_type_id", "decision"],
+  },
+  {
+    name: "idx_document_scale_profile_review",
+    table: "document_scale_profile_reviews",
+    columns: ["profile_id", "decision", "catalog_layer"],
+  },
+  {
+    name: "idx_spec_rag_closure_rag_status",
+    table: "spec_rag_closure_entries",
+    columns: ["rag", "closure_status"],
+  },
+  {
+    name: "idx_spec_rag_closure_spec",
+    table: "spec_rag_closure_entries",
+    columns: ["spec_id", "requires_test"],
+  },
+  {
+    name: "idx_detector_candidates_source",
+    table: "detector_route_candidates",
+    columns: ["source_table", "source_id"],
+  },
+  {
+    name: "idx_detector_candidates_filing",
+    table: "detector_route_candidates",
+    columns: ["filing_target_id", "severity", "candidate_status"],
+  },
+  {
+    name: "idx_detector_candidates_subject",
+    table: "detector_route_candidates",
+    columns: ["subject_id"],
+  },
+  {
+    name: "idx_agent_contracts_target",
+    table: "agent_contracts",
+    columns: ["target_path"],
+  },
+  { name: "idx_vmodel_source_ordinal", table: "vmodel_sources", columns: ["ordinal"] },
+  {
+    name: "idx_vmodel_item_category_source",
+    table: "vmodel_semantic_items",
+    columns: ["category_id", "source_ref", "item_id"],
+  },
+  {
+    name: "idx_vmodel_source_item",
+    table: "vmodel_source_item_edges",
+    columns: ["source_id", "item_id"],
+  },
+  {
+    name: "idx_vmodel_source_target",
+    table: "vmodel_source_target_edges",
+    columns: ["source_id", "target_type", "target_ref"],
+  },
+  {
+    name: "idx_vmodel_item_target_status",
+    table: "vmodel_item_target_edges",
+    columns: ["item_id", "target_status", "target_kind"],
+  },
+  {
+    name: "idx_document_scale_profile_axis_rank",
+    table: "document_scale_profiles",
+    columns: ["profile_axis", "profile_rank"],
+  },
+  {
+    name: "idx_execution_readiness_state_order",
+    table: "execution_readiness_projection",
+    columns: ["readiness", "implementation_order", "plan_id"],
+  },
+  {
+    name: "idx_github_project_sync_status",
+    table: "github_project_item_projection",
+    columns: ["repository_id", "sync_status", "plan_id"],
+  },
+  {
+    name: "idx_github_binding_plan_kind",
+    table: "github_object_bindings",
+    columns: ["repository_id", "plan_id", "object_kind", "state"],
+  },
+  {
+    name: "idx_github_outbox_status",
+    table: "github_projection_outbox",
+    columns: ["status", "updated_at", "outbox_id"],
   },
 ];

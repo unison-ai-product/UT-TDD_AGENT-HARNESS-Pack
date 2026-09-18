@@ -12,7 +12,7 @@
  * (`attemptsFromSessionEvents`) を分離し、emission/wiring は呼び出し側に委ねる
  * (forced-stop.ts と同方針、fail-open)。
  */
-import type { SessionEvent } from "./session-log";
+import type { SessionEvent } from "./session-log.ts";
 
 /** 1 回の修正試行。subject=対象 (file path / gate id / test name)、outcome=結果。 */
 export interface AttemptRecord {
@@ -30,6 +30,7 @@ export interface EscalationSignal {
 }
 
 export const DEFAULT_ATTEMPT_THRESHOLD = 3;
+export const DEFAULT_ESCALATION_SURFACE_LIMIT = 10;
 
 /**
  * 試行列から escalation signal を導く純関数。
@@ -124,15 +125,24 @@ export function selectPrecedingSessionFile(
  * escalation signals を引き継ぎ surface 向けテキストブロックに整形する。signal が無ければ空文字
  * (出力しない)。文面は「直すな」ではなく「STOP → root cause を疑え → 検証反復を止めろ」へ誘導する。
  */
-export function renderEscalationSignals(signals: EscalationSignal[]): string {
+export function renderEscalationSignals(
+  signals: EscalationSignal[],
+  opts: { maxSignals?: number } = {},
+): string {
   if (signals.length === 0) return "";
+  const maxSignals = opts.maxSignals ?? DEFAULT_ESCALATION_SURFACE_LIMIT;
+  const surfaced = maxSignals > 0 ? signals.slice(0, maxSignals) : signals;
   const lines = [
     `attempt-escalation (Iron Law) warning - 直前 session で ${signals.length} 件の連続失敗ループを検出 (STOP / 根本原因を疑え):`,
   ];
-  for (const s of signals) {
+  for (const s of surfaced) {
     lines.push(
       `  - ${s.subject}: ${s.failureCount} consecutive failures - STOP, question the root cause`,
     );
+  }
+  const hidden = signals.length - surfaced.length;
+  if (hidden > 0) {
+    lines.push(`  - (+${hidden} more escalation signals - inspect previous session log)`);
   }
   return `${lines.join("\n")}\n`;
 }

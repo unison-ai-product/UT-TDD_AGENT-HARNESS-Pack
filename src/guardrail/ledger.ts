@@ -2,9 +2,9 @@ import {
   type GuardrailDecisionInput,
   type GuardrailDecisionValue,
   inspectGuardrailInvariants,
-} from "../state-db/guardrail-invariants";
-import type { HarnessDb } from "../state-db/index";
-import { upsertRow } from "../state-db/index";
+} from "../state-db/guardrail-invariants.ts";
+import type { HarnessDb } from "../state-db/index.ts";
+import { upsertRow } from "../state-db/index.ts";
 
 // The invariant logic + decision types live in state-db (single source of truth,
 // shared with the projection advisory path) to avoid a guardrail <-> state-db
@@ -16,8 +16,8 @@ export type {
   GuardrailInvariantInspection,
   GuardrailInvariantRule,
   GuardrailInvariantViolation,
-} from "../state-db/guardrail-invariants";
-export { inspectGuardrailInvariants } from "../state-db/guardrail-invariants";
+} from "../state-db/guardrail-invariants.ts";
+export { inspectGuardrailInvariants } from "../state-db/guardrail-invariants.ts";
 
 export interface GuardrailDecisionRow {
   guardrail_decision_id: string;

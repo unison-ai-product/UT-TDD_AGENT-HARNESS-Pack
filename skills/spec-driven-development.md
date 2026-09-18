@@ -14,6 +14,31 @@ applies_to:
     - Add-feature
     - Discovery
     - Scrum
+decision_points:
+  - when: "A design doc section describes behaviour in prose that could be read two ways."
+    choose: "add the ambiguous term to the L0 glossary and rewrite the section to reference it"
+    over: "leaving the prose as-is and relying on shared team understanding"
+    because: "the spec must let a test author derive assertions without asking a clarifying question; unresolved ambiguity at spec time becomes a design gap discovered only at test-authoring or later."
+  - when: "An L8 GWT integration test block has no corresponding line in the L5 spec's Outputs/Postconditions section."
+    choose: "treat it as a design gap and route it back to the L5 spec, not accept it as a valid test"
+    over: "keeping the test since it exercises real behaviour"
+    because: "the file states a GWT block with no L5 line reference is a design gap, not a test — accepting it breaks the spec-to-test traceability the skill exists to enforce."
+  - when: "`ut-tdd doctor` and `ut-tdd plan lint` both exit 0 for a PLAN at pair-freeze."
+    choose: "still verify spec substance (five required sections, no TBD) manually before treating pair-freeze as satisfied"
+    over: "treating the green machine checks as sufficient evidence the spec is complete"
+    because: "the anti-patterns section states doctor checks structural governance (link existence, schema), not spec substance — green machine gates are necessary but not sufficient."
+  - when: "A spec section is labelled 'TBD' at pair-freeze."
+    choose: "treat it as an unresolved dependency and a PLAN blocker"
+    over: "letting the PLAN cross pair-freeze with the TBD section deferred to implementation time"
+    because: "the anti-patterns section names this explicitly; deferring spec decisions into implementation defeats the Red-first test discipline the pairing exists to protect."
+  - when: "Choosing between writing a full L5 spec vs. a lightweight spec for Discovery/Scrum S2 PoC work."
+    choose: "use the lightweight path (Objective + Spike question + Done condition) written as a failing scratch assertion before any PoC code"
+    over: "writing a full five-section L5 spec for a PoC spike"
+    because: "the file scopes the lightweight path specifically to Discovery/Scrum PoC; forcing a full spec on a spike adds process cost without matching the PoC's throwaway nature, while skipping the failing-assertion-first step would abandon spec-first discipline entirely."
+  - when: "Implementation is already complete and a spec does not yet exist for it."
+    choose: "flag this as a violation and require the spec be authored to reflect the intended design before treating the PLAN as passing pair-freeze"
+    over: "writing the spec afterward to match what was built"
+    because: "the anti-patterns section states writing a spec after implementation to retroactively justify it defeats the design-signal purpose of spec-first."
 ---
 
 # spec driven development

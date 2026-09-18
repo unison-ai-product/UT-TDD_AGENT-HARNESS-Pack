@@ -10,7 +10,7 @@ updated: 2026-06-23
 
 # Refactor Mode
 
-Refactor mode is the behaviour-invariant brush-up workflow for existing code.
+Refactor mode is the behaviour-invariant / behavior-invariant brush-up workflow for existing code.
 It removes structural debt without adding functional scope, changing public
 contracts, or changing persisted state semantics.
 
@@ -19,7 +19,8 @@ Sources of truth:
 - concept v3.1 section 2.5 and 2.6
 - requirements v1.2 section 1.3, 1.6, 1.8, 6.8.9
 - FR-L1-25
-- `docs/skills/refactoring.md`
+- `skills/refactoring.md` (旧 `docs/skills/` は ADR-004 訂正で `skills/` へ移行済、PLAN-L7-459 H3)
+- `docs/governance/vmodel-refactor-qa-release-gates.md`
 - `src/workflow/contracts.ts#assertRefactorInvariant`
 
 ## 1. Entry Contract
@@ -38,6 +39,13 @@ Refactor is not a feature path. If the work adds a new observable function,
 changes a public CLI/API contract, changes `.ut-tdd/` state schema, changes
 `harness.db` schema, or changes expected user behaviour, stop Refactor and route
 to Add-feature, Retrofit, Troubleshoot, or Incident.
+
+ZIP 108 trigger thresholds are part of this entry contract and are kept in
+`docs/governance/vmodel-refactor-qa-release-gates.md`: cyclomatic complexity
+over 15 per function, duplicate code over 5%, unit test runtime over 10 minutes,
+or two regressions in the last three changes for the same module. These
+thresholds create Refactor candidates; they do not automatically authorize a
+behaviour change.
 
 ## 2. TDD Brush-up Loop
 

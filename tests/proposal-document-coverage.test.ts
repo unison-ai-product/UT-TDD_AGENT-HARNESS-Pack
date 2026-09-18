@@ -6,12 +6,12 @@ import {
   analyzeProposalDocumentCoverage,
   loadProposalDocumentCoverageLintInput,
   proposalDocumentCoverageMessages,
-} from "../src/lint/proposal-document-coverage";
+} from "../src/lint/proposal-document-coverage.ts";
 import {
   DEFAULT_PROPOSAL_COVERAGE_SCENARIOS,
   PROPOSAL_ROUTING_DOC_PATH,
-} from "../src/lint/proposal-document-coverage-policy";
-import { classifyProposalDocumentCoverage } from "../src/task/classify";
+} from "../src/lint/proposal-document-coverage-policy.ts";
+import { classifyProposalDocumentCoverage } from "../src/task/classify.ts";
 
 describe("proposal document coverage lint", () => {
   it("passes for the real repo routing doc and representative coverage scenarios", () => {

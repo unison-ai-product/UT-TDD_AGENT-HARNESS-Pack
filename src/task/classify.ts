@@ -3,13 +3,13 @@ import {
   PROPOSAL_SUBAGENT_LANES,
   type ProposalSubagentLaneName,
   type TaskDifficulty,
-} from "../team/model-policy";
+} from "../team/model-policy.ts";
 import {
   classifyDrive,
   evaluateRouteCommand,
   type Finding,
   scoreTaskComplexity,
-} from "../workflow/contracts";
+} from "../workflow/contracts.ts";
 import {
   BASELINE_DOCUMENT_PACK,
   KIND_PATTERNS,
@@ -17,7 +17,7 @@ import {
   PROPOSAL_DOCUMENT_COVERAGE_ROUTING_TEST_DOC,
   RISK_TERMS,
   UNCERTAINTY_TERMS,
-} from "./classify-policy";
+} from "./classify-policy.ts";
 import {
   DOCUMENT_PACKS,
   type DocumentPack,
@@ -28,7 +28,7 @@ import {
   RESEARCH_ADOPTION_BY_PATTERN,
   RESEARCH_REJECTION_KEYWORDS,
   RESEARCH_REJECTION_RULES,
-} from "./proposal-coverage-data";
+} from "./proposal-coverage-data.ts";
 
 /**
  * FR-L1-39 public task classification surface.

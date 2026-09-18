@@ -1,4 +1,4 @@
-import type { ExecutionMode } from "../runtime/detect";
+import type { ExecutionMode } from "../runtime/detect.ts";
 import {
   type Drive,
   driveSchema,
@@ -7,7 +7,7 @@ import {
   type OrchestrationMode,
   orchestrationModeSchema,
   type Role,
-} from "../schema";
+} from "../schema/index.ts";
 
 export interface VmodelInjection {
   drive: Drive;

@@ -3,7 +3,7 @@ import {
   analyzeDesignLanguage,
   type DesignLanguageDoc,
   designLanguageMessages,
-} from "../src/lint/design-language";
+} from "../src/lint/design-language.ts";
 
 function doc(text: string): DesignLanguageDoc {
   return { path: "docs/design/harness/example.md", text };
@@ -41,5 +41,17 @@ describe("design-language lint", () => {
 
     expect(result.ok).toBe(true);
     expect(result.violations).toEqual([]);
+  });
+
+  it("allows machine-readable Markdown table identifier headers without exempting prose cells", () => {
+    const identifiers = analyzeDesignLanguage([
+      doc("# 設計\n\n| meta_source_ref | allowed_source_status | source_file_policy | reason |"),
+    ]);
+    const prose = analyzeDesignLanguage([
+      doc("# 設計\n\n| This document explains the product workflow boundary |"),
+    ]);
+
+    expect(identifiers.ok).toBe(true);
+    expect(prose.violations.map((violation) => violation.reason)).toEqual(["english-prose"]);
   });
 });

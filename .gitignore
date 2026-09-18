@@ -24,6 +24,20 @@ credentials.json
 # historical handover docs stay tracked (gitignore never untracks). PLAN-L7-144 follow-up.
 docs/handover/session-handover-*.md
 .ut-tdd/logs/
+# legacy memory corpus local archive (PLAN-L7-566 PR-2); untracked corpus is never committed
+.ut-tdd/archive/
+# review custody projection (requests / receipts / verdicts)。src/runtime/review-guard.ts:65-68 の
+# isReviewCustodyProjection が 3 つを同一 class として扱い、read-only role の mutated path 判定から
+# 除外している。いずれも機械生成の runtime evidence で正本は harness.db projection。
+# .ut-tdd/review/ 直下の cross-review-*.md 等は明示 tracked な audit 証跡であり対象外
+# (gitignore は既 tracked を untrack しない)。
+.ut-tdd/review/requests/
+.ut-tdd/review/receipts/
+.ut-tdd/review/verdicts/
+# gate 実行証跡 JSON (機械生成 runtime evidence、harness.db projection が正本。
+# tests/gate-static.test.ts U-GATE-006 等の live-tree 書き込み残渣も混入するため未 track。
+# live tree への test 書き込み自体は PLAN-L7-421 (test-hygiene-live-tree-fence) が塞ぐ)
+.ut-tdd/gate_runs/
 .ut-tdd/adapters/local*.yaml
 .ut-tdd/teams/local*.yaml
 .ut-tdd/tmp/
@@ -33,13 +47,22 @@ docs/handover/session-handover-*.md
 .ut-tdd/release-*/
 # harness.db projection (runtime state, rebuildable from docs/state/logs; never tracked)
 .ut-tdd/harness.db
+.ut-tdd/harness.db-journal
 .ut-tdd/harness.db-wal
 .ut-tdd/harness.db-shm
+# canonical ledger DBs under .ut-tdd/ledger/ (runtime state, never tracked —
+# same rationale as harness.db; separated per physical-data.md §2.7.1)
+.ut-tdd/ledger/*.db
+.ut-tdd/ledger/*.db-wal
+.ut-tdd/ledger/*.db-shm
+.ut-tdd/ledger/*.db-journal
 # Codex 委譲タスク入力 (transient、PM が貼る目標プロンプト)
 .ut-tdd/codex-tasks/
 .tools/
 # 外部 DL の設計テンプレ研究素材 (transient scratch、アーキ境界外・成果物でない)
 downloads/
+# ルート直下の参考 zip (PO 指示 2026-07-08: 参考ファイル、track 対象外)
+/*.zip
 
 # Python bytecode (旧 W1-W3a port の残骸。ADR-001 で TS rebuild、念のため残置)
 __pycache__/

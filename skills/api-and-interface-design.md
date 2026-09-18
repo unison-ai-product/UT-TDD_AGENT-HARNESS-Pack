@@ -13,6 +13,27 @@ applies_to:
     - Add-feature
     - Reverse
     - Refactor
+decision_points:
+  - when: "describing a boundary crossing at L3"
+    choose: "state only the actor, trigger, and observable system response"
+    over: "describing transport or encoding details (headers, serialisation format) at L3"
+    because: "transport/encoding is explicitly out of scope at L3 — that belongs to L4"
+  - when: "an L2/L3 boundary is shared with another PLAN's scope"
+    choose: "create a placeholder_dep in the PLAN"
+    over: "duplicating ownership of that boundary in both PLANs"
+    because: "no boundary may be owned by two PLANs simultaneously — duplication breaks single ownership"
+  - when: "documenting who owns which side of a boundary in the L2 diagram"
+    choose: "record ownership explicitly per boundary crossing (source, target, direction, schema owner)"
+    over: "leaving ownership implicit and inferable only from the diagram shape"
+    because: "each boundary-crossing record requires explicit ownership so trace-lint and cross-PLAN checks can verify it"
+  - when: "a Discovery Scrum S2 PoC needs a boundary sketch"
+    choose: "use a lightweight informal component diagram directly in the PLAN doc"
+    over: "authoring a full L2/L3 design doc before any code is written"
+    because: "S2 PoC explicitly allows an informal sketch; formalisation is deferred to before S3 verify"
+  - when: "an S2 PoC is about to proceed to S3 verify"
+    choose: "promote the informal sketch to a proper L2 or L3 design doc referenced by the PLAN's generates field"
+    over: "carrying the informal sketch forward as the permanent design record"
+    because: "the informal sketch is only sufficient pre-S3 — it must be promoted before S3 verify per Discovery drive usage"
 ---
 
 # api and interface design
@@ -68,7 +89,7 @@ that `ut-tdd vmodel lint` checks.
 - [ ] Every boundary in the diagram has a named L3 interface point.
 - [ ] Each interface point has a matching `requires` or `placeholder_dep` in the
       PLAN for the L4 doc that will resolve it.
-- [ ] No boundary is owned by two PLANs simultaneously (check `ut-tdd graph`).
+- [ ] No boundary is owned by two PLANs simultaneously (check `ut-tdd graph export --format mermaid`).
 - [ ] `ut-tdd plan lint` and `ut-tdd doctor` exit 0.
 - [ ] Refactor PLANs: confirm via `ut-tdd review --uncommitted` that no externally
       visible boundary name changed without a corresponding contract version bump.

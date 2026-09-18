@@ -11,7 +11,7 @@
  * ③ Forward 降下 = Forward 本線 + Discovery 合流点、は既存機構を合成する (再発明しない)。
  * 合成は contracts.ts の routeSignalToMode (既存 Discovery routing) を再利用して担保する。
  */
-import { type ContractResult, type Finding, routeSignalToMode } from "./contracts";
+import { type ContractResult, type Finding, routeSignalToMode } from "./contracts.ts";
 
 export interface BackendCapability {
   /** backend 側の供給源の種別。FE 要件はこれらから derive される。 */

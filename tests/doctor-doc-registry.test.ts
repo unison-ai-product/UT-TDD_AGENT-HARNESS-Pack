@@ -5,8 +5,8 @@ import {
   checkDocConsistency,
   checkEntityCoverage,
   checkFrRegistryAudit,
-} from "../src/doctor/doc-registry";
-import { checkDocConsistency as checkDocConsistencyFromIndex } from "../src/doctor/index";
+} from "../src/doctor/doc-registry.ts";
+import { checkDocConsistency as checkDocConsistencyFromIndex } from "../src/doctor/index.ts";
 
 describe("doctor doc registry checks", () => {
   it("fails closed when doc registry inputs cannot read the repo root", () => {

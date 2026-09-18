@@ -6,8 +6,8 @@ import {
   type DoctorDeps,
   doctorSlotsDeps,
   handoverDeps,
-} from "../src/doctor/runtime-state";
-import type { Slot } from "../src/runtime/agent-slots";
+} from "../src/doctor/runtime-state.ts";
+import type { Slot } from "../src/runtime/agent-slots.ts";
 
 const NOW = "2026-06-04T00:10:00.000Z";
 const root = "/repo";

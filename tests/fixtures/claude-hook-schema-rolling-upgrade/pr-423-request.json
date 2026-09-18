@@ -1,0 +1,9 @@
+{
+  "memoryId": "memory:project:pr-423-canonical-delta-request-exact-f829e941--61f2bbb92c29",
+  "pr": 423,
+  "exactHead": "f829e9414d0f14aa67d3e62364865d3c291ca995",
+  "reviewRevision": "rv1-89b41293dbf4c9843dc9d769e03aecf6efd5b4898832ce58bd099065042d5ade",
+  "authorFamily": "codex",
+  "requestedAt": "2026-08-27T03:15:07.128Z",
+  "invocationNonce": "nonce-89b41293dbf4c9843dc9d769e03aecf6"
+}

@@ -1,3 +1,5 @@
+import { releaseArtifactFileNames } from "../setup/distribution.ts";
+
 export type GithubOpsGuardCode =
   | "poc-no-main-merge"
   | "hotfix-postmortem-missing"
@@ -31,6 +33,7 @@ export interface ReleasePublicationPlan {
   tag: string;
   repo: string;
   dryRun: boolean;
+  packageAssets: string[];
   commands: string[];
   externalPublishRequiresApproval: true;
 }
@@ -123,16 +126,21 @@ export function buildReleasePublicationPlan(input: {
   const tag = input.tag.trim();
   const repo = input.repo.trim();
   const dryRun = input.dryRun !== false;
-  const tarball = `.ut-tdd/release/${tag}.tar.gz`;
+  const artifactNames = releaseArtifactFileNames(tag);
+  const tarball = `.ut-tdd/release/${artifactNames.tarball}`;
+  const checksum = `.ut-tdd/release/${artifactNames.checksum}`;
+  const manifest = `.ut-tdd/release/${artifactNames.manifest}`;
+  const packageAssets = [tarball, checksum, manifest];
   return {
     ok: /^v\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?$/.test(tag) && repo.length > 0,
     tag,
     repo,
     dryRun,
+    packageAssets,
     commands: [
       `git tag -a ${tag} -m "release ${tag}"`,
-      `bun src/cli.ts distribution package --tag ${tag}`,
-      `gh release create ${tag} ${tarball} ${tarball}.sha256 ${tarball}.sig --repo ${repo} --verify-tag --notes-file .ut-tdd/release/${tag}.manifest.json`,
+      `node src/cli.ts distribution package --tag ${tag}`,
+      `gh release create ${tag} ${packageAssets.join(" ")} --repo ${repo} --verify-tag --notes-file ${manifest}`,
     ],
     externalPublishRequiresApproval: true,
   };

@@ -6,7 +6,7 @@ import {
   analyzeL14CloseAudit,
   l14CloseAuditMessages,
   loadL14CloseAuditDocs,
-} from "../src/lint/l14-close-audit";
+} from "../src/lint/l14-close-audit.ts";
 
 const compliant = `# A-TEST
 

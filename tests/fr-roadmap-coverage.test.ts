@@ -4,7 +4,7 @@ import {
   analyzeFrRoadmapCoverageWithRoot,
   frRoadmapCoverageMessages,
   loadFrRoadmapCoverageDocs,
-} from "../src/lint/fr-roadmap-coverage";
+} from "../src/lint/fr-roadmap-coverage.ts";
 
 const compliant = `# A-TEST
 

@@ -5,7 +5,7 @@ import {
   analyzeTrackedCanonical,
   loadTrackedCanonicalInput,
   TRACKED_CANONICAL_BASELINE,
-} from "../src/lint/tracked-canonical";
+} from "../src/lint/tracked-canonical.ts";
 
 describe("analyzeTrackedCanonical (U-TCAN-001..003)", () => {
   const canonicalText = "src/ tests/ docs/ scripts/ .ut-tdd/ .claude/ vendor/";

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,20 +6,18 @@ import {
   loadMemoryEntries,
   renderMemorySurface,
   selectMemoryEntries,
-  writeMemoryEntry,
-} from "../src/memory/index";
-import { isSecretLike } from "../src/secret";
-import { openHarnessDb } from "../src/state-db/index";
-import { rebuildHarnessDb } from "../src/state-db/projection-writer";
+} from "../src/memory/index.ts";
+import { writeMemory } from "../src/memory/service.ts";
+import { isSecretLike } from "../src/secret.ts";
+import { openHarnessDb } from "../src/state-db/index.ts";
+import { rebuildHarnessDb } from "../src/state-db/projection-writer.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 function tempRepo(): string {
   return mkdtempSync(join(tmpdir(), "ut-tdd-memory-"));
 }
 
-function cleanupRepo(repo: string): void {
-  (globalThis as { Bun?: { gc: (sync: boolean) => void } }).Bun?.gc(true);
-  rmSync(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
-}
+const cleanupRepo = removeTestTree;
 
 describe("shared harness memory", () => {
   it("uses the shared secret detector directly", () => {
@@ -31,12 +29,15 @@ describe("shared harness memory", () => {
   it("writes authored .ut-tdd/memory markdown and reloads it deterministically", () => {
     const repo = tempRepo();
     try {
-      const entry = writeMemoryEntry(repo, {
-        kind: "project",
-        title: "Pack target repo",
-        body: "配布 Pack は unison-ai-product/UT-TDD_AGENT-HARNESS-Pack へ publish する。",
-        tags: ["distribution", "github"],
-        now: "2026-07-01T00:00:00.000Z",
+      const entry = writeMemory({
+        repoRoot: repo,
+        input: {
+          kind: "project",
+          title: "Pack target repo",
+          body: "配布 Pack は unison-ai-product/UT-TDD_AGENT-HARNESS-Pack へ publish する。",
+          tags: ["distribution", "github"],
+          now: "2026-07-01T00:00:00.000Z",
+        },
       });
 
       expect(entry.memory_id).toBe("memory:project:pack-target-repo");
@@ -63,10 +64,13 @@ describe("shared harness memory", () => {
     const repo = tempRepo();
     try {
       expect(() =>
-        writeMemoryEntry(repo, {
-          kind: "user",
-          title: "bad token",
-          body: `do not store sk-${"a".repeat(20)}`,
+        writeMemory({
+          repoRoot: repo,
+          input: {
+            kind: "user",
+            title: "bad token",
+            body: `do not store sk-${"a".repeat(20)}`,
+          },
         }),
       ).toThrow(/secret-like/);
       expect(loadMemoryEntries(repo)).toEqual([]);
@@ -99,12 +103,15 @@ describe("shared harness memory", () => {
         ].join("\n"),
         "utf8",
       );
-      writeMemoryEntry(repo, {
-        kind: "feedback",
-        title: "Cross runtime review rule",
-        body: "Claude と Codex の両方が SessionStart で同じ harness memory を読む。",
-        tags: ["runtime", "review"],
-        now: "2026-07-01T01:00:00.000Z",
+      writeMemory({
+        repoRoot: repo,
+        input: {
+          kind: "feedback",
+          title: "Cross runtime review rule",
+          body: "Claude と Codex の両方が SessionStart で同じ harness memory を読む。",
+          tags: ["runtime", "review"],
+          now: "2026-07-01T01:00:00.000Z",
+        },
       });
 
       const db = openHarnessDb(":memory:", { repoRoot: repo });

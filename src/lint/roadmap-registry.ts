@@ -13,8 +13,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { type Roadmap, roadmapSchema, validateRoadmapStructure } from "../schema/roadmap";
-import { fmValue } from "./shared";
+import { type Roadmap, roadmapSchema, validateRoadmapStructure } from "../schema/roadmap.ts";
+import { fmValue } from "./shared.ts";
 
 /** content から frontmatter block (先頭 `---` 〜 次 `---`) のテキストを返す。無ければ null。 */
 function frontmatterBlock(content: string): string | null {

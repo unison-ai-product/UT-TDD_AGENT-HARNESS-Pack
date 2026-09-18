@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeBranches, parseBranchRefs, renderBranchAudit } from "../src/audit/branches";
+import { analyzeBranches, parseBranchRefs, renderBranchAudit } from "../src/audit/branches.ts";
 
 describe("branch audit", () => {
   it("keeps current/protected branches and marks gone or merged branches as delete candidates", () => {

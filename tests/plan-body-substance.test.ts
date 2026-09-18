@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkPlanBodySubstance } from "../src/doctor/index";
+import { checkPlanBodySubstance } from "../src/doctor/index.ts";
 import {
   analyzePlanBodySubstance,
   countSubstantiveBodyLines,
   loadPlanBodySubstanceInput,
-} from "../src/lint/plan-body-substance";
+} from "../src/lint/plan-body-substance.ts";
 
 // PLAN-L7-92: concept AP-13「本文 0 行・declare のみの PLAN は無効」を機械強制する gate の回帰。
 

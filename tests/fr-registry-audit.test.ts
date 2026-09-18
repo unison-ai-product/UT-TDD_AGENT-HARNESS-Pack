@@ -10,7 +10,7 @@ import {
   extractExplainedGapNums,
   loadFrDocs,
   parseFrRows,
-} from "../src/lint/fr-registry-audit";
+} from "../src/lint/fr-registry-audit.ts";
 
 describe("FR registry audit (機能一覧 漏れ監査)", () => {
   const docs = loadFrDocs();

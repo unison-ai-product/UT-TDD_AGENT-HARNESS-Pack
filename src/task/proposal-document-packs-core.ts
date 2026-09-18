@@ -1,4 +1,4 @@
-import { type DocumentPack, doc } from "./proposal-document-pack-types";
+import { type DocumentPack, doc } from "./proposal-document-pack-types.ts";
 
 export const DOCUMENT_PACKS_CORE: DocumentPack[] = [
   {
@@ -34,7 +34,7 @@ export const DOCUMENT_PACKS_CORE: DocumentPack[] = [
     testDocs: [
       doc(
         "acceptance-test-design",
-        "docs/test-design/harness/L3-acceptance-test-design.md",
+        "docs/test-design/harness/L12-acceptance-test-design.md",
         "user-visible screen behavior",
       ),
       doc(
@@ -76,7 +76,7 @@ export const DOCUMENT_PACKS_CORE: DocumentPack[] = [
     testDocs: [
       doc(
         "acceptance-test-design",
-        "docs/test-design/harness/L3-acceptance-test-design.md",
+        "docs/test-design/harness/L12-acceptance-test-design.md",
         "business acceptance",
       ),
     ],
@@ -96,7 +96,7 @@ export const DOCUMENT_PACKS_CORE: DocumentPack[] = [
     testDocs: [
       doc(
         "acceptance-test-design",
-        "docs/test-design/harness/L3-acceptance-test-design.md",
+        "docs/test-design/harness/L12-acceptance-test-design.md",
         "UX acceptance",
       ),
       doc(
@@ -142,7 +142,7 @@ export const DOCUMENT_PACKS_CORE: DocumentPack[] = [
     testDocs: [
       doc(
         "acceptance-test-design",
-        "docs/test-design/harness/L3-acceptance-test-design.md",
+        "docs/test-design/harness/L12-acceptance-test-design.md",
         "UX acceptance task",
       ),
       doc(

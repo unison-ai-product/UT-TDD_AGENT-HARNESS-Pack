@@ -14,14 +14,36 @@ applies_to:
     - Reverse
     - Refactor
     - Retrofit
+decision_points:
+  - when: "Scoring Uncertainty for a Reverse or Retrofit PLAN"
+    choose: "read the existing source first and score Uncertainty at 2 or 3 by default"
+    over: "assigning Uncertainty=1 because the change looks small before reading the code"
+    because: "existing code without design coverage is typically 2 or 3; scoring 1 without reading understates the actual unknowns in undocumented code"
+  - when: "A PLAN's three-axis sum lands at 5 or higher"
+    choose: "split or timebox the PLAN and annotate the §工程表 with the session-split point and expected handover artifact path"
+    over: "scheduling it as a single uninterrupted session because the team is confident"
+    because: "a session that crosses a natural gate without a handover record is an untracked session split — the score threshold exists specifically to force that annotation"
+  - when: "One axis (Size, Dependency depth, or Uncertainty) scores 3 but the total sum is only 4-5"
+    choose: "trigger decomposition review based on the single 3-score axis"
+    over: "using the sum alone to decide the PLAN fits one session"
+    because: "a single axis at 3 signals a specific risk (cross-layer scope, unresolved dep chain, or novel/PoC-required work) that averaging into a lower sum would hide"
+  - when: "Delegating a PLAN scored 7+ to a sub-agent"
+    choose: "split it into child PLANs before delegating"
+    over: "delegating the 7+ PLAN as-is and trusting the agent to manage scope"
+    because: "a 7+ PLAN handed to a delegate invites runaway scope expansion with no natural checkpoint"
+  - when: "A \"small fix\" PLAN is being authored"
+    choose: "run the three-axis scoring anyway and record it in the PLAN body"
+    over: "skipping sizing because the fix looks trivial"
+    because: "unscored PLANs accumulate into stalled sessions — the skip itself is the failure mode, not any single small fix"
 ---
 
 # estimation
 
 Complexity and effort scoring for UT-TDD PLANs before schedule commitment
-(FR-L1-39 task complexity / effort). There is no `ut-tdd task classify` or
-`ut-tdd task estimate` CLI yet; scoring is done by the author at PLAN
-authoring time and recorded in the PLAN body.
+(FR-L1-39 task complexity / effort). `ut-tdd task classify --text "..."` is
+implemented and auto-scores `size` / `complexity_score` / `difficulty` /
+`risk_flags` — run it first and record its output in the PLAN body; author
+judgment adjusts the result rather than replacing it with manual scoring.
 
 ## When to load this skill
 

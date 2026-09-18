@@ -4,7 +4,7 @@ import {
   parseCanonicalDocumentStructure,
   recordDocumentExportArtifact,
   renderDocumentExport,
-} from "../src/export/document-export";
+} from "../src/export/document-export.ts";
 
 const requirementsDoc = `# Requirements
 

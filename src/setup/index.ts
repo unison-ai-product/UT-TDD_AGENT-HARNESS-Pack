@@ -13,16 +13,99 @@
  *   ④ 検出不能は solo に安全フォールバック (緩い側に倒す)。
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, readSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { ensureDir } from "../shared/fs.ts";
 import {
   applyBranchProtection as applyBranchProtectionImpl,
   type Confirm,
   type GhRunner,
-} from "./branch-protection";
+} from "./branch-protection.ts";
+import {
+  type ConsumerLocalRuntimeAdmission,
+  isConsumerLocalRuntimeAdmission,
+} from "./consumer-local-runtime-admission.ts";
+import {
+  buildConsumerNodeRuntimeBundle,
+  buildConsumerNodeRuntimePayloads,
+  type ConsumerNodeRuntimeBundle,
+  type ConsumerNodeRuntimeIdentity,
+  type ConsumerNodeRuntimeInstallResult,
+  installConsumerNodeRuntimeOnFilesystem,
+  renderConsumerNodeWrapper,
+} from "./consumer-node-runtime.ts";
+import {
+  bootstrapProjectIdentity,
+  PROJECT_IDENTITY_PATH,
+  type ProjectIdentityBootstrapResult,
+} from "./project-identity-bootstrap.ts";
 
-export type { CleanDistributionPlan, ConsumerReadinessPlan, PackSyncPlan } from "./distribution";
+export {
+  AUTHORING_TEMPLATE_ARTIFACT_PATHS,
+  AUTHORING_TEMPLATE_INVENTORY,
+  type AuthoringArtifactSetValidation,
+  type AuthoringInventoryValidation,
+  type AuthoringProjectionError,
+  type AuthoringProjectionResult,
+  type AuthoringTemplateFamily,
+  type AuthoringTemplateInventoryEntry,
+  authoringArtifactPath,
+  authoringInventoryRequiredPaths,
+  authoringSourcePath,
+  isAuthoringArtifactPath,
+  projectTrackedTeamBlob,
+  type TrackedGitBlob,
+  validateAuthoringArtifactSet,
+  validateAuthoringTemplateInventory,
+} from "./authoring-template-inventory.ts";
+export {
+  admitConsumerLocalRuntime,
+  applyConsumerLocalRuntime,
+  type ConsumerArtifactIdentity,
+  type ConsumerLocalRuntimeAdmission,
+  type ConsumerLocalRuntimeAdmissionError,
+  type ConsumerLocalRuntimeAdmissionInput,
+  type ConsumerLocalRuntimeAdmissionResult,
+  type ConsumerLocalRuntimeInstallResult,
+  type ConsumerReceipt,
+  type ConsumerRuntimeLayout,
+  installConsumerLocalRuntime,
+  isConsumerLocalRuntimeAdmission,
+} from "./consumer-local-runtime-admission.ts";
+export {
+  buildConsumerNodeRuntimeBundle,
+  buildConsumerNodeRuntimePayloads,
+  bundlePathFor,
+  type ConsumerNodeRuntimeBundle,
+  type ConsumerNodeRuntimeBundleInput,
+  type ConsumerNodeRuntimeIdentity,
+  type ConsumerNodeRuntimeInstallResult,
+  type ConsumerNodeRuntimePorts,
+  type ConsumerNodeRuntimeReadinessInput,
+  type ConsumerRuntimeDenyReason,
+  createConsumerNodeRuntimeFilesystemPorts,
+  digestConsumerRuntimeBytes,
+  digestConsumerRuntimeValue,
+  installConsumerNodeRuntime,
+  installConsumerNodeRuntimeOnFilesystem,
+  quarantinePathFor,
+  renderConsumerNodeWrapper,
+  stagingPathFor,
+  validateConsumerNodeRuntimeBundle,
+  validateConsumerReadiness,
+} from "./consumer-node-runtime.ts";
+export type { CleanDistributionPlan, ConsumerReadinessPlan, PackSyncPlan } from "./distribution.ts";
 export {
   buildCleanDistributionPlan,
   buildConsumerReadinessPlan,
@@ -32,10 +115,70 @@ export {
   DEFAULT_PACK_REPO,
   gitAddPathspecCommands,
   PACK_SAFE_TEST_SCRIPT,
+  releaseArtifactFileNames,
+  releaseArtifactStem,
   transformCleanDistributionArtifact,
-} from "./distribution";
+} from "./distribution.ts";
+export {
+  inspectPackAuthoringEntries,
+  type PackAuthoringSmokeEntry,
+  type PackAuthoringSmokeResult,
+  runPackAuthoringSmoke,
+} from "./pack-authoring-smoke.ts";
+export {
+  bootstrapProjectIdentity,
+  canonicalProjectIdentityBytes,
+  PROJECT_IDENTITY_PATH,
+  type ProjectIdentityBootstrapResult,
+  type ProjectIdentityBootstrapRuleId,
+  repositoryIdentityFromOrigin,
+} from "./project-identity-bootstrap.ts";
+export {
+  admitReleaseAggregate,
+  applySealedReleaseAggregate,
+  type ReleaseAggregateAdmissionDependencies,
+  type ReleaseAggregateAdmissionInput,
+  type ReleaseAggregateAdmissionResult,
+  type ReleaseAggregateApplyDependencies,
+  type ReleaseAggregateApplyResult,
+  type ReleaseAggregateFinalTree,
+  type ReleaseAggregateFinding,
+  type ReleaseChannelMapping,
+  type ReleaseManifestTreeEntry,
+  type SealedReleaseAggregatePlan,
+} from "./release-aggregate-admission.ts";
+export {
+  digestMaterializedReleaseEntries,
+  type MaterializedReleaseEntry,
+  materializeReleaseArtifacts,
+  type ReleaseEntryMode,
+  type ReleaseMaterializationResult,
+  type ReleaseMaterializerDependencies,
+  type ReleaseSourceEntry,
+} from "./release-materializer.ts";
+export {
+  type CanonicalCiEvidence,
+  classifyRollbackApply,
+  evaluatePromotionGate,
+  type GateLegStatus,
+  type PromotionEvidenceBinding,
+  type PromotionGateInput,
+  type PromotionGateReason,
+  type PromotionGateResult,
+  type QaGateStatus,
+  type QaReleaseGateEvidence,
+  type ReviewEvidenceBinding,
+  type ReviewGateEvidence,
+  type RollbackApplyResult,
+  type RollbackCandidate,
+  type RollbackGateReason,
+  type RollbackPointerDelta,
+  type RollbackSelectionInput,
+  type RollbackSelectionResult,
+  selectRollbackCandidate,
+} from "./release-promotion-rollback-gate.ts";
 
-import { BUILTIN_GITHUB_TEMPLATES, COMMON_FILES, type TemplateSet } from "./templates";
+import { BUILTIN_GITHUB_TEMPLATES, COMMON_FILES, type TemplateSet } from "./templates.ts";
 
 export type { Confirm, GhRunner };
 
@@ -93,12 +236,87 @@ export interface SetupArgs {
   dryRun: boolean;
   applyBranchProtection: boolean;
   teams?: TeamSlugs;
+  consumerRuntime?: SetupConsumerRuntimeInput;
 }
 
 export interface SetupResult {
   phase: SetupPhase;
   written: string[];
   branchProtection: { applied: boolean; reason: string };
+  projectIdentity?: ProjectIdentityBootstrapResult;
+  consumerRuntime?: SetupConsumerRuntimeInstall;
+}
+
+/** Sealed runtime input handed from the release materializer to setup. */
+export interface SetupConsumerRuntimeInput {
+  readonly identity: ConsumerNodeRuntimeIdentity;
+  /** Same-process capability returned by admitConsumerLocalRuntime. */
+  readonly admission: ConsumerLocalRuntimeAdmission;
+  readonly compiled_esm: Uint8Array;
+  readonly node_bootstrap_receipt: Uint8Array;
+  readonly prior_bundle_digest?: string;
+  readonly prior_history_tip_digest?: string;
+  readonly history_sequence?: number;
+  readonly prior_history?: Uint8Array;
+  readonly prior_identity?: ConsumerNodeRuntimeIdentity;
+  readonly prior_pointer?:
+    | import("./consumer-node-runtime.ts").ConsumerNodeRuntimePriorPointer
+    | null;
+  readonly operation_kind?: import("./consumer-node-runtime.ts").ConsumerNodeRuntimeOperationKind;
+  readonly prior_attestation?: Uint8Array;
+  readonly fault?: (barrier: string) => void;
+  readonly verifySealedAggregate?: () => void;
+}
+
+export interface SetupConsumerRuntimeInstall {
+  readonly bundle: ConsumerNodeRuntimeBundle;
+  readonly result: ConsumerNodeRuntimeInstallResult;
+}
+
+/**
+ * Production setup ingress for a sealed release aggregate.  The caller must
+ * provide the actual compiled bytes and the producer's NodeBootstrapReceipt;
+ * setup never searches a source checkout or synthesizes a receipt.
+ */
+export async function installConsumerRuntimeFromSetup(
+  input: SetupConsumerRuntimeInput,
+): Promise<SetupConsumerRuntimeInstall> {
+  if (!isConsumerLocalRuntimeAdmission(input.admission))
+    throw new Error("consumer_runtime_aggregate_denied");
+  const admission = input.admission;
+  if (
+    admission.productId !== input.identity.product_id ||
+    !sameCanonicalSetupPath(admission.consumerRoot, input.identity.consumer_root) ||
+    !sameCanonicalSetupPath(admission.runtimeRoot, input.identity.runtime_root) ||
+    admission.identity.releaseId !== input.identity.release_id ||
+    admission.identity.sourceRevision !== input.identity.subject_revision ||
+    admission.identity.materializerVersion !== input.identity.materializer_version ||
+    admission.identity.artifactSetDigest !== input.identity.artifact_set_digest ||
+    admission.controlManifestSnapshotDigest !== input.identity.control_manifest_digest
+  )
+    throw new Error("consumer_runtime_identity_mismatch");
+  const payloads = buildConsumerNodeRuntimePayloads(input);
+  const bundle = buildConsumerNodeRuntimeBundle({
+    identity: input.identity,
+    ...payloads,
+    ...(input.prior_bundle_digest === undefined
+      ? {}
+      : { prior_bundle_digest: input.prior_bundle_digest }),
+    ...(input.prior_history_tip_digest === undefined
+      ? {}
+      : { prior_history_tip_digest: input.prior_history_tip_digest }),
+    ...(input.history_sequence === undefined ? {} : { history_sequence: input.history_sequence }),
+  });
+  const result = await installConsumerNodeRuntimeOnFilesystem({
+    identity: input.identity,
+    bundle,
+    payloads,
+    fault: input.fault,
+    verifySealedAggregate: () => {
+      if (input.verifySealedAggregate) input.verifySealedAggregate();
+    },
+  });
+  return { bundle, result };
 }
 
 /** gh 実行 seam (raw token 非依存 = gh の認証状態に委ねる)。test=mock。 */
@@ -114,6 +332,7 @@ export interface SetupDeps {
   confirm: Confirm;
   isInteractive: boolean;
   templates: TemplateSet;
+  bootstrapProjectIdentity?: () => ProjectIdentityBootstrapResult;
 }
 
 const CODEOWNERS_TARGET = join(".github", "CODEOWNERS");
@@ -121,7 +340,6 @@ const STATE_PATH = join(".ut-tdd", "state", "setup.json");
 const BP_SCRIPT = join("scripts", "setup-branch-protection.sh");
 const MANAGED_START = "<!-- UT-TDD:managed:start -->";
 const MANAGED_END = "<!-- UT-TDD:managed:end -->";
-const SETUP_SOURCE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "cli.ts");
 const MERGEABLE_ADAPTER_DOCS = new Set(["AGENTS.md", "CLAUDE.md", join(".claude", "CLAUDE.md")]);
 
 /**
@@ -237,7 +455,7 @@ function renderArtifacts(
   for (const f of plan.files) {
     const name = templateNameFor(f.path);
     let content = templates[name] ?? BUILTIN_GITHUB_TEMPLATES[name] ?? "";
-    content = content.replace(/\{\{UT_TDD_SOURCE_CLI_JSON\}\}/g, JSON.stringify(SETUP_SOURCE_CLI));
+    if (f.path === join(".ut-tdd", "bin", "ut-tdd.mjs")) content = renderConsumerNodeWrapper();
     if (f.path === CODEOWNERS_TARGET && plan.teams) {
       content = content
         .replace(/\{\{TL_TEAM\}\}/g, plan.teams.tl)
@@ -347,6 +565,13 @@ export function applyBranchProtection(
  * invariant: dryRun=true は副作用ゼロ (state 非書込・remote 非適用、branchProtection.reason="dry-run")。
  */
 export function runSetup(args: SetupArgs, deps: SetupDeps): SetupResult {
+  // Dry-run is side-effect free, including the identity bootstrap write.
+  const projectIdentity = args.dryRun ? undefined : deps.bootstrapProjectIdentity?.();
+  // Identity is a project binding input, not the owner of the rest of setup.
+  // A typed denial must be reported to the caller while the non-identity setup
+  // artifacts still follow their normal, non-destructive orchestration. This
+  // keeps remote-less local repositories usable without weakening identity
+  // read/create fail-close behavior.
   const scale = detectProjectScale(deps);
   let phase: SetupPhase;
   let decidedBy: SetupState["decidedBy"];
@@ -373,11 +598,230 @@ export function runSetup(args: SetupArgs, deps: SetupDeps): SetupResult {
     recordSetupState({ phase, decidedAt: deps.now(), decidedBy, signals: scale }, deps);
   }
   const plan = planSetup(phase, { teams: args.teams, dryRun: args.dryRun });
-  const written = emitSetup(plan, deps.templates, deps);
+  const emitted = emitSetup(plan, deps.templates, deps);
+  const written =
+    projectIdentity?.ok && projectIdentity.created ? [projectIdentity.path, ...emitted] : emitted;
   const branchProtection = args.dryRun
     ? { applied: false, reason: "dry-run" }
     : applyBranchProtection(plan, deps, { apply: args.applyBranchProtection });
-  return { phase, written, branchProtection };
+  return { phase, written, branchProtection, ...(projectIdentity ? { projectIdentity } : {}) };
+}
+
+/** Async composition root used when setup is supplied a sealed runtime input. */
+export async function runSetupAsync(args: SetupArgs, deps: SetupDeps): Promise<SetupResult> {
+  if (!args.consumerRuntime || args.dryRun) return runSetup(args, deps);
+  assertSetupRuntimeRoot(args.consumerRuntime.identity, deps.repoRoot);
+  const setupSnapshot = captureSetupFiles(deps.repoRoot);
+  const runtimeSnapshot = captureRuntimeTree(args.consumerRuntime.identity.runtime_root);
+  // Admission and publication happen before setup emits any consumer files.
+  // A denied/failed runtime must not leave a seemingly-installed wrapper or
+  // setup state behind for the CLI to discover.
+  try {
+    const consumerRuntime = await installConsumerRuntimeFromSetup(args.consumerRuntime);
+    if (!consumerRuntime.result.ok) throw new Error(consumerRuntime.result.reason);
+    const result = runSetup(args, deps);
+    return { ...result, consumerRuntime };
+  } catch (error) {
+    let setupRestoreError: unknown;
+    let runtimeRestoreError: unknown;
+    try {
+      restoreSetupFiles(setupSnapshot);
+    } catch (restoreError) {
+      setupRestoreError = restoreError;
+    }
+    try {
+      restoreRuntimeTree(args.consumerRuntime.identity.runtime_root, runtimeSnapshot);
+    } catch (restoreError) {
+      runtimeRestoreError = restoreError;
+    }
+    if (setupRestoreError !== undefined || runtimeRestoreError !== undefined) {
+      throw new Error(
+        `consumer_runtime_indeterminate:setup=${String(setupRestoreError)};runtime=${String(runtimeRestoreError)};primary=${String(error)}`,
+      );
+    }
+    throw error;
+  }
+}
+
+/** Compare an admitted path with its identity across Windows 8.3/case/realpath forms. */
+function sameCanonicalSetupPath(left: string, right: string): boolean {
+  try {
+    return canonicalSetupPath(left) === canonicalSetupPath(right);
+  } catch {
+    return false;
+  }
+}
+
+function canonicalSetupPath(path: string): string {
+  let current = resolve(path);
+  const suffix: string[] = [];
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) throw new Error("consumer_runtime_external_path");
+    suffix.unshift(basename(current));
+    current = parent;
+  }
+  return resolve(realpathSync.native(current), ...suffix);
+}
+
+function assertSetupRuntimeRoot(identity: ConsumerNodeRuntimeIdentity, repoRoot: string): void {
+  const expectedRoot = resolve(repoRoot);
+  const expectedRuntime = resolve(expectedRoot, ".ut-tdd", "runtime");
+  if (
+    resolve(identity.consumer_root) !== expectedRoot ||
+    resolve(identity.runtime_root) !== expectedRuntime
+  )
+    throw new Error("consumer_runtime_external_path");
+  try {
+    const rootReal = realpathSync.native(expectedRoot);
+    const identityRootReal = realpathSync.native(identity.consumer_root);
+    if (rootReal !== identityRootReal) throw new Error("consumer_runtime_external_path");
+    if (existsSync(identity.runtime_root)) {
+      const runtimeReal = realpathSync.native(identity.runtime_root);
+      if (!containedReal(rootReal, runtimeReal)) throw new Error("consumer_runtime_external_path");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === "consumer_runtime_external_path") throw error;
+    throw new Error("consumer_runtime_external_path");
+  }
+}
+
+function containedReal(parent: string, child: string): boolean {
+  const rel = relative(parent, child);
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`);
+}
+
+type SetupFileSnapshot = { readonly bytes: Buffer; readonly mode: number } | null;
+type SetupDirectorySnapshot = { readonly exists: boolean; readonly mode?: number };
+type SetupSnapshot = {
+  readonly files: ReadonlyMap<string, SetupFileSnapshot>;
+  readonly directories: ReadonlyMap<string, SetupDirectorySnapshot>;
+};
+type RuntimeTreeEntry =
+  | { readonly kind: "directory"; readonly mode: number }
+  | { readonly kind: "file"; readonly bytes: Buffer; readonly mode: number };
+type RuntimeTreeSnapshot = { readonly entries: ReadonlyMap<string, RuntimeTreeEntry> } | null;
+
+function setupTargetPaths(): readonly string[] {
+  const paths = new Set<string>([PROJECT_IDENTITY_PATH, STATE_PATH]);
+  for (const phase of ["0-A", "0-B"] as const)
+    for (const file of planSetup(phase, { dryRun: false }).files) paths.add(file.path);
+  return [...paths];
+}
+
+function captureSetupFiles(repoRoot: string): SetupSnapshot {
+  const files = new Map<string, SetupFileSnapshot>();
+  const directories = new Map<string, SetupDirectorySnapshot>();
+  for (const relativePath of setupTargetPaths()) {
+    const path = resolve(repoRoot, relativePath);
+    if (!existsSync(path)) {
+      files.set(path, null);
+    } else {
+      const stat = statSync(path);
+      if (!stat.isFile()) throw new Error("consumer_runtime_setup_snapshot");
+      files.set(path, { bytes: readFileSync(path), mode: stat.mode & 0o777 });
+    }
+    let parent = dirname(path);
+    while (parent !== resolve(repoRoot) && parent !== dirname(parent)) {
+      if (!directories.has(parent)) {
+        if (!existsSync(parent)) directories.set(parent, { exists: false });
+        else {
+          const stat = statSync(parent);
+          if (!stat.isDirectory()) throw new Error("consumer_runtime_setup_snapshot");
+          directories.set(parent, { exists: true, mode: stat.mode & 0o777 });
+        }
+      }
+      parent = dirname(parent);
+    }
+  }
+  return { files, directories };
+}
+
+function restoreSetupFiles(snapshot: SetupSnapshot): void {
+  for (const [path, value] of snapshot.files) {
+    if (value === null) {
+      rmSync(path, { recursive: true, force: true });
+      continue;
+    }
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, value.bytes, { mode: value.mode });
+    chmodSync(path, value.mode);
+  }
+  for (const [path, value] of [...snapshot.directories.entries()].sort(
+    ([left], [right]) => right.length - left.length,
+  )) {
+    if (!value.exists) {
+      if (existsSync(path) && statSync(path).isDirectory() && readdirSync(path).length === 0)
+        rmSync(path, { recursive: false, force: true });
+      continue;
+    }
+    mkdirSync(path, { recursive: true });
+    chmodSync(path, value.mode ?? 0o755);
+  }
+}
+
+function captureRuntimeTree(root: string): RuntimeTreeSnapshot {
+  if (!existsSync(root)) return null;
+  const rootStat = statSync(root);
+  if (!rootStat.isDirectory()) throw new Error("consumer_runtime_setup_snapshot");
+  const entries = new Map<string, RuntimeTreeEntry>();
+  entries.set("", { kind: "directory", mode: rootStat.mode & 0o777 });
+  const visit = (path: string, relativePath: string): void => {
+    for (const name of readdirSync(path)) {
+      const child = join(path, name);
+      const childRelative = join(relativePath, name);
+      const stat = statSync(child);
+      if (stat.isDirectory()) {
+        entries.set(childRelative, { kind: "directory", mode: stat.mode & 0o777 });
+        visit(child, childRelative);
+      } else if (stat.isFile())
+        entries.set(childRelative, {
+          kind: "file",
+          bytes: readFileSync(child),
+          mode: stat.mode & 0o777,
+        });
+      else throw new Error("consumer_runtime_setup_snapshot");
+    }
+  };
+  visit(root, "");
+  return { entries };
+}
+
+function restoreRuntimeTree(root: string, snapshot: RuntimeTreeSnapshot): void {
+  makeRuntimeTreeWritable(root);
+  rmSync(root, { recursive: true, force: true });
+  if (snapshot === null) return;
+  // Recreate the topology writable first. Sealed bundle directories are
+  // intentionally read-only (0555); applying those modes before restoring
+  // their files makes the rollback fail on POSIX.
+  mkdirSync(root, { recursive: true, mode: 0o755 });
+  for (const [relativePath, value] of [...snapshot.entries.entries()]
+    .filter(([path, entry]) => path !== "" && entry.kind === "directory")
+    .sort(([left], [right]) => left.length - right.length)) {
+    if (value.kind !== "directory") continue;
+    const path = join(root, relativePath);
+    mkdirSync(path, { recursive: false, mode: 0o755 });
+  }
+  for (const [relativePath, value] of snapshot.entries) {
+    if (value.kind !== "file") continue;
+    const path = join(root, relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, value.bytes, { mode: value.mode });
+    chmodSync(path, value.mode);
+  }
+  for (const [relativePath, value] of snapshot.entries) {
+    if (value.kind !== "directory") continue;
+    chmodSync(join(root, relativePath), value.mode);
+  }
+}
+
+function makeRuntimeTreeWritable(path: string): void {
+  if (!existsSync(path)) return;
+  const stat = statSync(path);
+  if (stat.isDirectory()) {
+    chmodSync(path, 0o755);
+    for (const name of readdirSync(path)) makeRuntimeTreeWritable(join(path, name));
+  } else if (stat.isFile()) chmodSync(path, 0o644);
 }
 
 // ── node 実 deps (real I/O / gh / confirm / templates) ──────────────────────
@@ -439,11 +883,12 @@ export function nodeSetupDeps(repoRoot: string): SetupDeps {
     gh: nodeGh,
     readText: (p) => (existsSync(p) ? readFileSync(p, "utf8") : null),
     writeText: (p, c) => {
-      mkdirSync(dirname(p), { recursive: true });
+      ensureDir(dirname(p), { recursive: true });
       writeFileSync(p, c);
     },
     confirm: nodeConfirm,
     isInteractive: Boolean(process.stdin.isTTY) && Boolean(process.stderr.isTTY) && !process.env.CI,
     templates: loadTemplates(repoRoot),
+    bootstrapProjectIdentity: () => bootstrapProjectIdentity(repoRoot),
   };
 }

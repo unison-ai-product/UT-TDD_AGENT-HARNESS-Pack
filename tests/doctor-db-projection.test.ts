@@ -1,7 +1,10 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkDbProjectionCoverage, checkDbProjectionIngestion } from "../src/doctor/db-projection";
+import {
+  checkDbProjectionCoverage,
+  checkDbProjectionIngestion,
+} from "../src/doctor/db-projection.ts";
 
 describe("doctor db projection checks", () => {
   it("fails closed when coverage and ingestion inputs cannot read the repo root", () => {

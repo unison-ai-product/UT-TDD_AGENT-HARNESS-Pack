@@ -10,13 +10,17 @@ import {
   lintPlanWithGate,
   planGovernanceMessages,
   planScheduleMessages,
-} from "../src/plan/lint";
+} from "../src/plan/lint.ts";
 import {
   READY_DEPENDENCY_STATUSES,
+  ROUTE_MODE_ALLOWED_KINDS,
   ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS,
   ROUTE_MODE_KIND_LEGACY_LANDED_PLAN_IDS,
-} from "../src/plan/lint-policy";
-import type { LintResult as SidecarLintResult } from "../src/plan/lint-types";
+  ROUTE_MODE_LAYER_BANDS,
+  VERSION_UP_PARKING_LEGACY_LANDED_PLAN_IDS,
+} from "../src/plan/lint-policy.ts";
+import type { LintResult as SidecarLintResult } from "../src/plan/lint-types.ts";
+import { PARENT_DRIVE_MISMATCH_BASELINE } from "../src/plan/parent-drive-mismatch-baseline.ts";
 
 const compliant = `---
 plan_id: PLAN-X
@@ -258,8 +262,104 @@ describe("plan schedule lint (IMP-081)", () => {
     expect(reasons).toContain("skip_sub_doc_reason");
   });
 
+  it("U-PLANGOV-002a: different slugs cannot reuse the same PLAN namespace and ordinal", () => {
+    const docs = [
+      planDoc("PLAN-L6-991-contract-a", { layer: "L6", subDoc: "function-spec" }),
+      planDoc("PLAN-L6-991-contract-b", { layer: "L6", subDoc: "function-spec" }),
+    ];
+
+    const violations = analyzePlanGovernance(docs).violations.filter(
+      (violation) => violation.reason === "duplicate_plan_identity",
+    );
+
+    expect(violations.map((violation) => violation.file)).toEqual([
+      "docs/plans/PLAN-L6-991-contract-a.md",
+      "docs/plans/PLAN-L6-991-contract-b.md",
+    ]);
+    expect(violations.every((violation) => violation.detail?.includes("L6:991"))).toBe(true);
+  });
+
+  it("U-PLANGOV-002b: zero padding does not create a second PLAN identity", () => {
+    const docs = [
+      planDoc("PLAN-RECOVERY-070-repair-a", {
+        kind: "recovery",
+        layer: "cross",
+        subDoc: null,
+      }),
+      planDoc("PLAN-RECOVERY-70-repair-b", {
+        kind: "recovery",
+        layer: "cross",
+        subDoc: null,
+      }),
+    ];
+
+    const violations = analyzePlanGovernance(docs).violations.filter(
+      (violation) => violation.reason === "duplicate_plan_identity",
+    );
+
+    expect(violations).toHaveLength(2);
+    expect(violations.every((violation) => violation.detail?.includes("RECOVERY:70"))).toBe(true);
+  });
+
+  const legacyL6CollisionDocs = () => [
+    planDoc("PLAN-L6-70-source-catalog-profile-resolver-contracts", {
+      layer: "L6",
+      subDoc: "function-spec",
+    }),
+    planDoc("PLAN-L6-70-vmodel-judgement-skill-pack", {
+      layer: "L6",
+      subDoc: "function-spec",
+    }),
+  ];
+
+  it("U-PLANGOV-002c: accepts only the exact legacy collision set", () => {
+    const violations = analyzePlanGovernance(legacyL6CollisionDocs()).violations.filter(
+      (violation) => violation.reason === "duplicate_plan_identity",
+    );
+
+    expect(violations).toEqual([]);
+  });
+
+  it("U-PLANGOV-002d: rejects a third PLAN at a legacy collision coordinate", () => {
+    const docs = [
+      ...legacyL6CollisionDocs(),
+      planDoc("PLAN-L6-070-third-collision", {
+        layer: "L6",
+        subDoc: "function-spec",
+      }),
+    ];
+    const violations = analyzePlanGovernance(docs).violations.filter(
+      (violation) => violation.reason === "duplicate_plan_identity",
+    );
+
+    expect(violations).toHaveLength(3);
+  });
+
+  it("U-PLANGOV-002e: rejects substitution inside a legacy collision set", () => {
+    const docs = [
+      legacyL6CollisionDocs()[0],
+      planDoc("PLAN-L6-70-substituted-plan", {
+        layer: "L6",
+        subDoc: "function-spec",
+      }),
+    ];
+    const violations = analyzePlanGovernance(docs).violations.filter(
+      (violation) => violation.reason === "duplicate_plan_identity",
+    );
+
+    expect(violations).toHaveLength(2);
+  });
+
+  it("U-PLANGOV-002f: accepts a coordinate after its legacy collision is resolved", () => {
+    const violations = analyzePlanGovernance([legacyL6CollisionDocs()[0]]).violations.filter(
+      (violation) => violation.reason === "duplicate_plan_identity",
+    );
+
+    expect(violations).toEqual([]);
+  });
+
   it("U-PLANGOV-006: L4 標準成果物カタログ拡張 (report/batch/notification/code-value) を plan lint が valid sub_doc として受理", () => {
-    const newTypes = ["report", "batch", "notification", "code-value"];
+    const newTypes = ["report", "batch", "notification", "code-value", "security"];
     const docs = newTypes.map((t, i) => planDoc(`PLAN-L4-8${i}-${t}`, { layer: "L4", subDoc: t }));
     const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
     expect(reasons).not.toContain("invalid_sub_doc");
@@ -302,6 +402,107 @@ describe("plan schedule lint (IMP-081)", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("U-PLANGOV-003a: parent_drive_mismatch applies to impl kind children", () => {
+    const docs = [
+      planDoc("PLAN-L7-91-parent-drive", {
+        kind: "add-impl",
+        layer: "L7",
+        drive: "be",
+        status: "draft",
+        subDoc: "function-spec",
+      }),
+      planDoc("PLAN-L7-92-child-impl", {
+        kind: "impl",
+        layer: "L7",
+        drive: "agent",
+        subDoc: null,
+        dependencies:
+          "  parent: docs/plans/PLAN-L7-91-parent-drive.md\n  requires: []\n  blocks: []",
+      }),
+    ];
+
+    const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
+
+    expect(reasons).toContain("parent_drive_mismatch");
+  });
+
+  it("U-PLANGOV-003d: 非 PLAN 親参照はファイル実在なら親チェックを通過する", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-plan-governance-nonplan-parent-"));
+    try {
+      const parentArtifact = join(
+        root,
+        "docs",
+        "design",
+        "harness",
+        "L6-function-design",
+        "function-spec.md",
+      );
+      mkdirSync(join(root, "docs", "design", "harness", "L6-function-design"), { recursive: true });
+      writeFileSync(parentArtifact, "---\nstatus: completed\n---\n", "utf8");
+
+      const docs = [
+        planDoc("PLAN-L7-1000-impl", {
+          kind: "impl",
+          layer: "L7",
+          drive: "agent",
+          parentDesign: "docs/design/harness/L6-function-design/function-spec.md",
+          dependencies: `  parent: docs/design/harness/L6-function-design/function-spec.md\n  requires: []\n  blocks: []`,
+          subDoc: null,
+        }),
+      ];
+
+      const reasons = analyzePlanGovernance(docs, root).violations.map((v) => v.reason);
+
+      expect(reasons).not.toContain("parent_missing");
+      expect(reasons).not.toContain("parent_drive_mismatch");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-PLANGOV-003b: parent_drive_mismatch debt は既知項目で WARN（fail-close しない）", () => {
+    const baselinePlanId = [...PARENT_DRIVE_MISMATCH_BASELINE][0];
+    const baselineDocs = [
+      planDoc("PLAN-L7-basis-parent", {
+        kind: "impl",
+        layer: "L7",
+        drive: "agent",
+        status: "confirmed",
+      }),
+      planDoc(baselinePlanId, {
+        kind: "impl",
+        layer: "L7",
+        drive: "be",
+        dependencies: "  parent: docs/plans/PLAN-L7-basis-parent.md\n  requires: []\n  blocks: []",
+      }),
+    ];
+    const reasons = analyzePlanGovernance(baselineDocs).violations.map((v) => v.reason);
+
+    expect(reasons).not.toContain("parent_drive_mismatch");
+    expect(reasons).not.toContain("parent_drive_mismatch_debt_stale");
+  });
+
+  it("U-PLANGOV-003c: parent_drive_mismatch debt を fixed すると baseline stale として再通知", () => {
+    const baselinePlanId = [...PARENT_DRIVE_MISMATCH_BASELINE][0];
+    const baselineMatchFixed = [
+      planDoc("PLAN-L7-basis-parent", {
+        kind: "impl",
+        layer: "L7",
+        drive: "agent",
+        status: "confirmed",
+      }),
+      planDoc(baselinePlanId, {
+        kind: "impl",
+        layer: "L7",
+        drive: "agent",
+        dependencies: "  parent: docs/plans/PLAN-L7-basis-parent.md\n  requires: []\n  blocks: []",
+      }),
+    ];
+    const reasons = analyzePlanGovernance(baselineMatchFixed).violations.map((v) => v.reason);
+
+    expect(reasons).toContain("parent_drive_mismatch_debt_stale");
   });
 
   it("U-PLANGOV-004: artifact requires use filesystem existence instead of PLAN status", () => {
@@ -436,6 +637,129 @@ dependencies:
 
       expect(r.ok).toBe(false);
       expect(r.messages[0]).toContain("plan-governance - violation");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-PLANLINT-001: default plan lint includes frontmatter governance", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-plan-lint-default-"));
+    try {
+      const plansDir = join(root, "docs", "plans");
+      mkdirSync(plansDir, { recursive: true });
+      const fixture = planDoc("PLAN-L4-96-default-lint", {
+        extra: 'github_issue_id: "bad"\n',
+      });
+      const content = fixture.content.replace(
+        "## body",
+        "## §3 工程表 (Step + 進捗)\n\n### Step 1: [直列] review\n直列理由: downstream_dependency\n\n## §3.1 実装計画\n\n## body",
+      );
+      writeFileSync(join(plansDir, "PLAN-L4-96-default-lint.md"), content, "utf8");
+
+      const r = lintPlanWithGate(undefined, root);
+
+      expect(r.ok).toBe(false);
+      expect(r.messages.some((message) => message.includes("plan-schedule — OK"))).toBe(true);
+      expect(r.messages.some((message) => message.includes("plan-governance - violation"))).toBe(
+        true,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-PLANLINT-002: path-form default lint resolves cross-record refs from the full PLAN corpus", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-plan-lint-path-context-"));
+    try {
+      const plansDir = join(root, "docs", "plans");
+      mkdirSync(plansDir, { recursive: true });
+      const parent = planDoc("PLAN-L6-97-parent", {
+        kind: "design",
+        layer: "L6",
+        status: "confirmed",
+        subDoc: "function-spec",
+      });
+      const child = planDoc("PLAN-L7-97-child", {
+        kind: "add-impl",
+        layer: "L7",
+        subDoc: null,
+        dependencies: "  parent: PLAN-L6-97-parent\n  requires: [PLAN-L6-97-parent]\n  blocks: []",
+      });
+      writeFileSync(join(root, parent.file), parent.content, "utf8");
+      writeFileSync(join(root, child.file), child.content, "utf8");
+
+      const result = lintPlanWithGate(child.file, root);
+
+      expect(result.ok).toBe(true);
+      expect(result.messages.some((message) => message.includes("parent_missing"))).toBe(false);
+      expect(result.messages.some((message) => message.includes("requires_missing"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-PLANLINT-003: path-form governance violations survive slash normalization", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-plan-lint-path-scope-"));
+    try {
+      const plansDir = join(root, "docs", "plans");
+      mkdirSync(plansDir, { recursive: true });
+      const fixture = planDoc("PLAN-L4-98-path-scope", {
+        extra: 'github_issue_id: "bad"\n',
+      });
+      writeFileSync(join(root, fixture.file), fixture.content, "utf8");
+
+      const forward = lintPlanWithGate(fixture.file, root);
+      expect(forward.ok).toBe(false);
+      expect(forward.messages.some((message) => message.includes("invalid_frontmatter"))).toBe(
+        true,
+      );
+
+      if (process.platform === "win32") {
+        const windowsPath = fixture.file.replaceAll("/", "\\");
+        const backslash = lintPlanWithGate(windowsPath, root);
+        expect(backslash.ok).toBe(false);
+        expect(backslash.messages.some((message) => message.includes("invalid_frontmatter"))).toBe(
+          true,
+        );
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-PLANLINT-004: path scope uses canonical identity and fails closed outside corpus", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-plan-lint-path-identity-"));
+    try {
+      const plansDir = join(root, "docs", "plans");
+      const draftsDir = join(root, "docs", "drafts");
+      const nestedDir = join(plansDir, "sub");
+      mkdirSync(draftsDir, { recursive: true });
+      mkdirSync(nestedDir, { recursive: true });
+
+      const corpus = planDoc("PLAN-L4-99-path-identity", {
+        extra: 'github_issue_id: "bad"\n',
+      });
+      writeFileSync(join(root, corpus.file), corpus.content, "utf8");
+      const clean = planDoc("PLAN-L4-99-path-identity").content;
+      const targets = [
+        [join(draftsDir, "PLAN-L4-99-path-identity.md"), clean],
+        [join(nestedDir, "PLAN-L4-99-path-identity.md"), clean],
+        // Keep the lowercase basename on a distinct directory: Windows treats
+        // a case-only spelling of the corpus path as the same physical file.
+        [join(nestedDir, "plan-l4-99-path-identity.md"), clean],
+      ] as const;
+
+      for (const [target, content] of targets) {
+        writeFileSync(target, content, "utf8");
+        const result = lintPlanWithGate(target, root);
+        expect(result.ok).toBe(false);
+        expect(result.messages.some((message) => message.includes("target_context_missing"))).toBe(
+          true,
+        );
+        expect(result.messages.some((message) => message.includes("invalid_frontmatter"))).toBe(
+          false,
+        );
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -750,6 +1074,12 @@ dependencies:
         subDoc: null,
         extra: "created: 2026-06-23\nupdated: 2026-06-23\n",
       }),
+      planDoc("PLAN-L7-198-verify-left-arm", {
+        kind: "verify",
+        layer: "L7",
+        subDoc: null,
+        extra: "created: 2026-07-07\nupdated: 2026-07-07\n",
+      }),
     ];
 
     const violations = analyzePlanGovernance(docs).violations.filter(
@@ -762,6 +1092,7 @@ dependencies:
       "add-design:L7:expected_L3-L6",
       "add-impl:L6:expected_L7",
       "research:L7:expected_L1-L4",
+      "verify:L7:expected_L8-L14",
     ]);
   });
 
@@ -796,6 +1127,13 @@ dependencies:
         layer: "L3",
         subDoc: null,
         extra: "created: 2026-06-23\nupdated: 2026-06-23\n",
+      }),
+      planDoc("PLAN-L9-198-verify-ok", {
+        kind: "verify",
+        layer: "L9",
+        subDoc: null,
+        extra:
+          "route_signal: verification_plan\nroute_mode: verify\nverification_gate: G9\ncreated: 2026-07-07\nupdated: 2026-07-07\n",
       }),
       planDoc("PLAN-M-198-master-hub", {
         kind: "design",
@@ -942,7 +1280,7 @@ dependencies:
         parentDesign: "docs/design/harness/L6-function-design/function-spec.md",
         extra: "route_mode: add-feature\n",
       }),
-      planDoc("PLAN-L7-902-add-feature-add-design", {
+      planDoc("PLAN-L6-902-add-feature-add-design", {
         kind: "add-design",
         layer: "L6",
         status: "draft",
@@ -954,6 +1292,297 @@ dependencies:
     const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
 
     expect(reasons).not.toContain("route_mode_kind_mismatch");
+  });
+
+  it("U-PLANGOV-011v2: route_mode=verify accepts only kind=verify", () => {
+    const docs = [
+      planDoc("PLAN-L9-910-verify-ok", {
+        kind: "verify",
+        layer: "L9",
+        subDoc: null,
+        extra:
+          "route_signal: verification_plan\nroute_mode: verify\nverification_gate: G9\ncreated: 2026-07-07\nupdated: 2026-07-07\n",
+      }),
+      planDoc("PLAN-L7-911-verify-wrong-kind", {
+        kind: "add-impl",
+        layer: "L7",
+        subDoc: null,
+        extra:
+          "route_signal: verification_plan\nroute_mode: verify\ncreated: 2026-07-07\nupdated: 2026-07-07\n",
+      }),
+    ];
+
+    const reasons = analyzePlanGovernance(docs).violations.map((v) => v.reason);
+
+    expect(reasons).toContain("route_mode_kind_mismatch");
+  });
+
+  it("U-PLANGOV-011v3: route_mode=incident accepts troubleshoot/recovery only", () => {
+    const docs = [
+      planDoc("PLAN-L7-912-incident-troubleshoot-ok", {
+        kind: "troubleshoot",
+        layer: "L7",
+        subDoc: null,
+        extra:
+          "route_signal: incident\nroute_mode: incident\ncreated: 2026-07-08\nupdated: 2026-07-08\n",
+      }),
+      planDoc("PLAN-RECOVERY-913-incident-recovery-ok", {
+        kind: "recovery",
+        layer: "cross",
+        subDoc: null,
+        extra:
+          "route_signal: incident\nroute_mode: incident\ncreated: 2026-07-08\nupdated: 2026-07-08\n",
+      }),
+      planDoc("PLAN-L7-914-incident-wrong-kind", {
+        kind: "refactor",
+        layer: "L7",
+        subDoc: null,
+        extra:
+          "route_signal: incident\nroute_mode: incident\ncreated: 2026-07-08\nupdated: 2026-07-08\n",
+      }),
+    ];
+
+    const violations = analyzePlanGovernance(docs).violations;
+    const okDocs = new Set([
+      "docs/plans/PLAN-L7-912-incident-troubleshoot-ok.md",
+      "docs/plans/PLAN-RECOVERY-913-incident-recovery-ok.md",
+    ]);
+    const mismatchFiles = violations
+      .filter((v) => v.reason === "route_mode_kind_mismatch")
+      .map((v) => v.file);
+
+    for (const file of okDocs) expect(mismatchFiles).not.toContain(file);
+    expect(mismatchFiles).toContain("docs/plans/PLAN-L7-914-incident-wrong-kind.md");
+  });
+
+  it("U-PLANGOV-011v3b: all L4 §3.1 drive route modes are registered with allowed kinds and layer bands", () => {
+    const expectedKinds: Record<string, string[]> = {
+      "add-feature": ["add-design", "add-impl"],
+      "design-bottomup": ["add-design", "add-impl"],
+      discovery: ["poc"],
+      forward: ["design", "impl"],
+      incident: ["troubleshoot", "recovery"],
+      recovery: ["recovery"],
+      redesign: ["design", "add-design"],
+      refactor: ["refactor"],
+      research: ["research"],
+      retrofit: ["retrofit"],
+      reverse: ["reverse"],
+      scrum: ["poc"],
+      "version-up": ["impl"],
+      verify: ["verify"],
+    };
+    const expectedLayerBands: Record<string, string[]> = {
+      "add-feature": ["L3", "L4", "L5", "L6", "L7"],
+      "design-bottomup": ["L2", "L3", "L4", "L5", "L6", "L7"],
+      discovery: ["cross"],
+      forward: ["L1", "L2", "L3", "L4", "L5", "L6", "L7"],
+      incident: ["L7", "cross"],
+      recovery: ["cross"],
+      redesign: ["L1", "L2", "L3", "L4", "L5", "L6"],
+      refactor: ["L7"],
+      research: ["L1", "L2", "L3", "L4"],
+      retrofit: ["L7"],
+      reverse: ["cross"],
+      scrum: ["cross"],
+      "version-up": ["L7"],
+      verify: ["L8", "L9", "L10", "L11", "L12", "L13", "L14"],
+    };
+
+    expect(ROUTE_MODE_ALLOWED_KINDS).toEqual(expectedKinds);
+    expect(ROUTE_MODE_LAYER_BANDS).toEqual(expectedLayerBands);
+  });
+
+  it("U-PLANGOV-011v3d: canonical forward design/impl route is registered, not unknown", () => {
+    const docs = [
+      planDoc("PLAN-L7-906-forward-impl", {
+        kind: "impl",
+        layer: "L7",
+        subDoc: null,
+        extra:
+          "route_signal: forward\nroute_mode: forward\ncreated: 2026-07-31\nupdated: 2026-07-31\n",
+      }),
+    ];
+
+    const violations = analyzePlanGovernance(docs).violations.filter((violation) =>
+      ["route_certificate_mismatch", "route_mode_kind_mismatch"].includes(violation.reason),
+    );
+
+    expect(violations).toEqual([]);
+  });
+
+  it("U-PLANGOV-011v3c: newly registered route modes no longer fail as unknown route_mode", () => {
+    const docs = [
+      planDoc("PLAN-DISCOVERY-901-discovery-poc", {
+        kind: "poc",
+        layer: "cross",
+        subDoc: null,
+        extra:
+          "route_signal: requirement_undefined\nroute_mode: discovery\ncreated: 2026-07-09\nupdated: 2026-07-09\n",
+      }),
+      planDoc("PLAN-DISCOVERY-902-scrum-poc", {
+        kind: "poc",
+        layer: "cross",
+        subDoc: null,
+        extra:
+          "route_signal: user_feedback_iteration\nroute_mode: scrum\ncreated: 2026-07-09\nupdated: 2026-07-09\n",
+      }),
+      planDoc("PLAN-L7-903-retrofit-ok", {
+        kind: "retrofit",
+        layer: "L7",
+        subDoc: null,
+        extra:
+          "route_signal: upgrade\nroute_mode: retrofit\ncreated: 2026-07-09\nupdated: 2026-07-09\n",
+      }),
+      planDoc("PLAN-L4-904-research-ok", {
+        kind: "research",
+        layer: "L4",
+        subDoc: null,
+        extra:
+          "route_signal: adr_required\nroute_mode: research\ncreated: 2026-07-09\nupdated: 2026-07-09\n",
+      }),
+      planDoc("PLAN-L2-905-design-bottomup-ok", {
+        kind: "add-design",
+        layer: "L2",
+        subDoc: null,
+        extra:
+          "route_signal: design_bottomup\nroute_mode: design-bottomup\ncreated: 2026-07-09\nupdated: 2026-07-09\n",
+      }),
+    ];
+
+    const details = analyzePlanGovernance(docs)
+      .violations.filter((v) => v.reason === "route_mode_kind_mismatch")
+      .map((v) => v.detail ?? "");
+
+    expect(details.some((detail) => detail.includes("unknown route_mode="))).toBe(false);
+  });
+
+  it("U-PLANGOV-011v4: route_mode layer band rejects mismatched V-model layers", () => {
+    const docs = [
+      planDoc("PLAN-L9-915-verify-layer-ok", {
+        kind: "verify",
+        layer: "L9",
+        subDoc: null,
+        extra:
+          "route_signal: verification_plan\nroute_mode: verify\nverification_gate: G9\ncreated: 2026-07-08\nupdated: 2026-07-08\n",
+      }),
+      planDoc("PLAN-L7-916-verify-layer-wrong", {
+        kind: "verify",
+        layer: "L7",
+        subDoc: null,
+        extra:
+          "route_signal: verification_plan\nroute_mode: verify\ncreated: 2026-07-08\nupdated: 2026-07-08\n",
+      }),
+      planDoc("PLAN-L2-917-add-feature-layer-wrong", {
+        kind: "add-design",
+        layer: "L2",
+        status: "draft",
+        subDoc: null,
+        extra:
+          "route_signal: feature_addition\nroute_mode: add-feature\ncreated: 2026-07-08\nupdated: 2026-07-08\n",
+      }),
+    ];
+
+    const mismatchFiles = analyzePlanGovernance(docs)
+      .violations.filter((v) => v.reason === "route_mode_kind_layer_mismatch")
+      .map((v) => v.file);
+
+    expect(mismatchFiles).not.toContain("docs/plans/PLAN-L9-915-verify-layer-ok.md");
+    expect(mismatchFiles).toContain("docs/plans/PLAN-L7-916-verify-layer-wrong.md");
+    expect(mismatchFiles).toContain("docs/plans/PLAN-L2-917-add-feature-layer-wrong.md");
+  });
+
+  it("U-PLANGOV-011v4a: version-up is parked-only and active work uses add-feature", () => {
+    const docs = [
+      planDoc("PLAN-L7-930-version-up-parked-ok", {
+        kind: "impl",
+        layer: "L7",
+        status: "draft",
+        subDoc: null,
+        extra:
+          "version_target: v2\nroute_signal: version_deferral\nroute_mode: version-up\ncreated: 2026-07-10\nupdated: 2026-07-10\n",
+      }),
+      planDoc("PLAN-L4-931-active-upgrade-ok", {
+        kind: "add-design",
+        layer: "L4",
+        subDoc: "function",
+        extra:
+          "route_signal: feature_addition\nroute_mode: add-feature\ncreated: 2026-07-10\nupdated: 2026-07-10\n",
+      }),
+      planDoc("PLAN-L4-932-version-up-active-wrong", {
+        kind: "add-design",
+        layer: "L4",
+        subDoc: "function",
+        extra:
+          "route_signal: version_deferral\nroute_mode: version-up\ncreated: 2026-07-10\nupdated: 2026-07-10\n",
+      }),
+    ];
+
+    const violations = analyzePlanGovernance(docs).violations;
+    const kindMismatches = violations
+      .filter((violation) => violation.reason === "route_mode_kind_mismatch")
+      .map((violation) => violation.file);
+    const layerMismatches = violations
+      .filter((violation) => violation.reason === "route_mode_kind_layer_mismatch")
+      .map((violation) => violation.file);
+
+    expect(kindMismatches).not.toContain("docs/plans/PLAN-L7-930-version-up-parked-ok.md");
+    expect(layerMismatches).not.toContain("docs/plans/PLAN-L7-930-version-up-parked-ok.md");
+    expect(kindMismatches).not.toContain("docs/plans/PLAN-L4-931-active-upgrade-ok.md");
+    expect(layerMismatches).not.toContain("docs/plans/PLAN-L4-931-active-upgrade-ok.md");
+    expect(kindMismatches).toContain("docs/plans/PLAN-L4-932-version-up-active-wrong.md");
+    expect(layerMismatches).toContain("docs/plans/PLAN-L4-932-version-up-active-wrong.md");
+  });
+
+  it("U-PLANGOV-011v5: verify PLANs bind L8-L14 layers to matching G8-G14 verification_gate", () => {
+    const docs = [
+      planDoc("PLAN-L10-918-verify-gate-ok", {
+        kind: "verify",
+        layer: "L10",
+        subDoc: null,
+        extra:
+          "route_signal: verification_plan\nroute_mode: verify\nverification_gate: G10\ncreated: 2026-07-09\nupdated: 2026-07-09\n",
+      }),
+      planDoc("PLAN-L10-919-verify-gate-missing", {
+        kind: "verify",
+        layer: "L10",
+        subDoc: null,
+        extra:
+          "route_signal: verification_plan\nroute_mode: verify\ncreated: 2026-07-09\nupdated: 2026-07-09\n",
+      }),
+      planDoc("PLAN-L10-920-verify-gate-mismatch", {
+        kind: "verify",
+        layer: "L10",
+        subDoc: null,
+        extra:
+          "route_signal: verification_plan\nroute_mode: verify\nverification_gate: G9\ncreated: 2026-07-09\nupdated: 2026-07-09\n",
+      }),
+      planDoc("PLAN-L7-921-nonverify-gate", {
+        kind: "add-impl",
+        layer: "L7",
+        subDoc: null,
+        parentDesign: "docs/design/harness/L6-function-design/function-spec.md",
+        extra:
+          "route_signal: feature_addition\nroute_mode: add-feature\nverification_gate: G8\ncreated: 2026-07-09\nupdated: 2026-07-09\n",
+      }),
+    ];
+
+    const violations = analyzePlanGovernance(docs).violations;
+    const missingFiles = violations
+      .filter((v) => v.reason === "verify_gate_missing")
+      .map((v) => v.file);
+    const mismatchFiles = violations
+      .filter((v) => v.reason === "verify_gate_layer_mismatch")
+      .map((v) => v.file);
+
+    expect(missingFiles).toEqual(["docs/plans/PLAN-L10-919-verify-gate-missing.md"]);
+    expect(mismatchFiles).toEqual([
+      "docs/plans/PLAN-L10-920-verify-gate-mismatch.md",
+      "docs/plans/PLAN-L7-921-nonverify-gate.md",
+    ]);
+    expect(violations.map((v) => v.file)).not.toContain(
+      "docs/plans/PLAN-L10-918-verify-gate-ok.md",
+    );
   });
 
   it("U-PLANGOV-011w: draft debt is exempt while draft and fails closed on start (着手時昇格)", () => {
@@ -1035,6 +1664,27 @@ dependencies:
     );
   });
 
+  it("U-PLANGOV-011x3: unknown route_mode fails closed, not fail-open (RECOVERY-10 Stage 1 P2)", () => {
+    // 従来は ROUTE_MODE_ALLOWED_KINDS 未登録 mode が `if (!allowedKinds) return []` で素通り (fail-open)。
+    // Stage 1 P2 で fail-close 化: 未知 route_mode は検査漏れでなく違反として surface する。
+    const docs = [
+      planDoc("PLAN-L7-990-fabricated-unknown-route-mode", {
+        kind: "impl",
+        layer: "L7",
+        status: "draft",
+        subDoc: null,
+        parentDesign: "docs/design/harness/L6-function-design/function-spec.md",
+        extra: "route_mode: bogus-unregistered-mode\n",
+      }),
+    ];
+
+    const result = analyzePlanGovernance(docs);
+    const detail = result.violations.find((v) => v.reason === "route_mode_kind_mismatch")?.detail;
+
+    expect(result.violations.map((v) => v.reason)).toContain("route_mode_kind_mismatch");
+    expect(detail).toContain("unknown route_mode=bogus-unregistered-mode");
+  });
+
   it("U-PLANGOV-011y: route_mode_kind debt ledger doc stays in sync with lint allowlists", () => {
     const ledgerPath = join(
       process.cwd(),
@@ -1047,10 +1697,95 @@ dependencies:
       /## (?:legacy landed|draft debt)[^\n]*\n/,
     );
     const idsOf = (section: string) =>
-      new Set([...section.matchAll(/^\|\s*(PLAN-[A-Za-z0-9-]+)\s*\|/gm)].map((m) => m[1]));
+      new Set(
+        [...section.matchAll(/^\|\s*(PLAN-[A-Za-z0-9-]+)\s*\|([^\n]*)$/gm)]
+          .filter(
+            ([, planId, row]) =>
+              planId !== "PLAN-L7-245-sub-doc-schema-integrity" || !row.includes("昇格済 promoted"),
+          )
+          .map((m) => m[1]),
+      );
 
     expect(idsOf(legacySection)).toEqual(ROUTE_MODE_KIND_LEGACY_LANDED_PLAN_IDS);
     expect(idsOf(draftSection)).toEqual(ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS);
+  });
+
+  it("U-PLANGOV-011y2: parked version-up requires target and landed debt tuple is immutable", () => {
+    const missingTarget = analyzePlanGovernance([
+      planDoc("PLAN-L7-930-version-up-missing-target", {
+        kind: "impl",
+        layer: "L7",
+        status: "draft",
+        subDoc: null,
+        extra:
+          "route_signal: version_deferral\nroute_mode: version-up\ncreated: 2026-07-10\nupdated: 2026-07-10\n",
+      }),
+    ]);
+    expect(missingTarget.violations.map((violation) => violation.reason)).toContain(
+      "version_route_certificate_missing",
+    );
+
+    const legacyId = "PLAN-L7-303-digest-commit-anchor";
+    const exactLegacy = analyzePlanGovernance([
+      planDoc(legacyId, {
+        kind: "impl",
+        layer: "L7",
+        status: "confirmed",
+        subDoc: null,
+        extra:
+          "route_signal: version_deferral\nroute_mode: version-up\ncreated: 2026-07-01\nupdated: 2026-07-01\n",
+      }),
+    ]);
+    expect(exactLegacy.violations.map((violation) => violation.reason)).not.toContain(
+      "version_route_certificate_mismatch",
+    );
+
+    const changedLegacy = analyzePlanGovernance([
+      planDoc(legacyId, {
+        kind: "impl",
+        layer: "L7",
+        status: "archived",
+        subDoc: null,
+        extra:
+          "route_signal: version_deferral\nroute_mode: version-up\ncreated: 2026-07-01\nupdated: 2026-07-10\n",
+      }),
+    ]);
+    expect(changedLegacy.violations.map((violation) => violation.reason)).toContain(
+      "version_route_certificate_mismatch",
+    );
+    const emptyTargetKey = analyzePlanGovernance([
+      planDoc(legacyId, {
+        kind: "impl",
+        layer: "L7",
+        status: "confirmed",
+        subDoc: null,
+        extra:
+          "version_target:\nroute_signal: version_deferral\nroute_mode: version-up\ncreated: 2026-07-01\nupdated: 2026-07-10\n",
+      }),
+    ]);
+    expect(emptyTargetKey.violations.map((violation) => violation.reason)).toContain(
+      "version_route_certificate_mismatch",
+    );
+    expect(VERSION_UP_PARKING_LEGACY_LANDED_PLAN_IDS).toEqual(
+      new Set(["PLAN-L7-303-digest-commit-anchor"]),
+    );
+    const debtLedger = readFileSync(
+      join(process.cwd(), "docs/governance/version-up-route-debt-2026-07-10.md"),
+      "utf8",
+    );
+    const ledgerIds = new Set(
+      [...debtLedger.matchAll(/^\|\s*(PLAN-[A-Za-z0-9-]+)\s*\|/gm)].map((match) => match[1]),
+    );
+    expect(ledgerIds).toEqual(VERSION_UP_PARKING_LEGACY_LANDED_PLAN_IDS);
+    const landedPlan = readFileSync(
+      join(process.cwd(), "docs/plans/PLAN-L7-303-digest-commit-anchor.md"),
+      "utf8",
+    );
+    expect(landedPlan).toMatch(/^status:\s*confirmed$/m);
+    expect(landedPlan).toMatch(/^route_mode:\s*version-up$/m);
+    expect(landedPlan).toMatch(/^kind:\s*impl$/m);
+    expect(landedPlan).toMatch(/^layer:\s*L7$/m);
+    expect(landedPlan).not.toMatch(/^version_target:/m);
   });
 
   it("U-PLANGOV-011z: draft PLAN code-line references surface missing paths and stale line numbers as advisory findings", () => {
@@ -1145,9 +1880,9 @@ dependencies:
 
   it("U-PLANSCH-011: active gate docs do not point to stale trace/stub commands", () => {
     const activeDocs = [
-      "docs/test-design/harness/L1-operational-test-design.md",
+      "docs/test-design/harness/L14-operational-test-design.md",
       "docs/design/harness/L3-functional/README.md",
-      "docs/test-design/harness/L3-acceptance-test-design.md",
+      "docs/test-design/harness/L12-acceptance-test-design.md",
       "docs/design/harness/L3-functional/functional-requirements.md",
       "docs/design/harness/L3-functional/roadmap.md",
     ];

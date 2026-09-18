@@ -1,14 +1,36 @@
-import { COMMON_FILES } from "./templates";
+import { satisfies, valid, validRange } from "semver";
+import {
+  AUTHORING_TEMPLATE_ARTIFACT_PATHS,
+  AUTHORING_TEMPLATE_INVENTORY,
+  type AuthoringTemplateInventoryEntry,
+  authoringArtifactPath,
+  authoringSourcePath,
+  validateAuthoringTemplateInventory,
+} from "./authoring-template-inventory.ts";
+import {
+  type ConsumerNodeRuntimeReadinessInput,
+  type ConsumerRuntimeDenyReason,
+  validateConsumerReadiness,
+} from "./consumer-node-runtime.ts";
+import { COMMON_FILES } from "./templates.ts";
 
 export interface CleanDistributionPlan {
   ok: boolean;
-  channel: "clean-repo-plus-signed-tarball";
+  channel: "clean-repo-plus-tarball";
   sourceTag: string;
   cleanRepo: string;
   artifactPaths: string[];
   excludedPaths: string[];
   missingRequired: string[];
   denylistViolations: string[];
+  authoringInventory: {
+    ok: boolean;
+    missingFamilies: string[];
+    duplicateFamilies: string[];
+    unknownFamilies: string[];
+    duplicateArtifactPaths: string[];
+    missingArtifactPaths: string[];
+  };
   releaseIntegrity: {
     required: boolean;
     artifacts: string[];
@@ -40,6 +62,8 @@ export interface ConsumerReadinessPlan {
     stable: string[];
   };
   smokeScenarios: string[];
+  /** Consumer-local sealed runtime is the authority when supplied by setup. */
+  consumerRuntime?: { ok: boolean; reason?: ConsumerRuntimeDenyReason };
 }
 
 export interface PackSyncPlan {
@@ -61,10 +85,31 @@ export interface PackSyncPlan {
 }
 
 export const DEFAULT_PACK_REPO = "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack";
+
+/** package/release-plan が共有する、release artifact の安全なファイル名変換。 */
+export function releaseArtifactStem(sourceTag: string): string {
+  return sourceTag.replace(/[^A-Za-z0-9._-]+/g, "-");
+}
+
+export function releaseArtifactFileNames(sourceTag: string): {
+  tarball: string;
+  checksum: string;
+  manifest: string;
+} {
+  const stem = releaseArtifactStem(sourceTag);
+  const tarball = `${stem}.tar.gz`;
+  return {
+    tarball,
+    checksum: `${tarball}.sha256`,
+    manifest: `${stem}.manifest.json`,
+  };
+}
+
 const CLEAN_REQUIRED_PATHS = [
   "README.md",
   "LICENSE",
   "package.json",
+  ".node-version",
   "src/cli.ts",
   "src/setup/index.ts",
   ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
@@ -110,12 +155,14 @@ const CLEAN_ALLOW_FILES = new Set([
   ".editorconfig",
   ".gitattributes",
   ".gitignore",
+  // toolchain-pin (doctor) reads .node-version; the Pack CI runs the same check.
+  ".node-version",
   ".github/workflows/harness-check.yml",
   "CHANGELOG.md",
   "LICENSE",
   "README.md",
   "biome.json",
-  "bun.lock",
+  "package-lock.json",
   "docs/governance/README.md",
   "docs/governance/audit-framework.md",
   "docs/governance/coding-rules.md",
@@ -144,14 +191,26 @@ function isDeniedCleanPath(path: string): boolean {
   );
 }
 
-function isAllowedCleanPath(path: string): boolean {
+function isAllowedCleanPath(
+  path: string,
+  inventory: readonly AuthoringTemplateInventoryEntry[] = AUTHORING_TEMPLATE_INVENTORY,
+): boolean {
   const p = normalizeDistributionPath(path);
   if (CLEAN_ALLOW_FILES.has(p)) return true;
-  return CLEAN_ALLOW_PREFIXES.some((prefix) => p.startsWith(prefix));
+  return (
+    CLEAN_ALLOW_PREFIXES.some((prefix) => p.startsWith(prefix)) ||
+    authoringArtifactPath(p, inventory) !== null ||
+    authoringSourcePath(p, inventory) !== null
+  );
 }
 
-export function cleanDistributionArtifactPath(path: string): string {
+export function cleanDistributionArtifactPath(
+  path: string,
+  inventory: readonly AuthoringTemplateInventoryEntry[] = AUTHORING_TEMPLATE_INVENTORY,
+): string {
   const p = normalizeDistributionPath(path);
+  const authoring = authoringArtifactPath(p, inventory);
+  if (authoring !== null) return authoring;
   if (p.startsWith("docs/skills/")) return `skills/${p.slice("docs/skills/".length)}`;
   return p;
 }
@@ -159,12 +218,20 @@ export function cleanDistributionArtifactPath(path: string): string {
 export function cleanDistributionSourcePath(
   artifactPath: string,
   sourcePaths: Iterable<string>,
+  inventory: readonly AuthoringTemplateInventoryEntry[] = AUTHORING_TEMPLATE_INVENTORY,
 ): string {
   const artifact = normalizeDistributionPath(artifactPath);
   if (artifact === ".github/workflows/harness-check.yml") {
     return "docs/templates/github/common/pack-harness-check.yml";
   }
   const sources = new Set([...sourcePaths].map(normalizeDistributionPath));
+  const authoring = authoringSourcePath(artifact, inventory);
+  if (authoring !== null) {
+    // The destination itself is the only valid source once the artifact is already in a
+    // clean Pack checkout. In a source checkout, the explicit source path is required.
+    if (sources.has(artifact)) return artifact;
+    return authoring;
+  }
   if (sources.has(artifact)) return artifact;
   if (artifact.startsWith("skills/")) {
     const legacy = `docs/skills/${artifact.slice("skills/".length)}`;
@@ -176,7 +243,12 @@ export function cleanDistributionSourcePath(
 // Clean Pack excludes source-only governance docs, so its default `test` script
 // must stay on this distributable smoke suite instead of raw `vitest run`.
 export const PACK_SAFE_TEST_SCRIPT =
-  "vitest run tests/setup.test.ts tests/distribution-acceptance.test.ts tests/skill-recommend.test.ts tests/skill-scaffold.test.ts tests/dependency-drift.test.ts tests/readability.test.ts tests/toolchain-pin.test.ts --reporter=dot";
+  "node scripts/run-vitest-snapshot.ts tests/setup.test.ts tests/distribution-acceptance.test.ts tests/skill-recommend.test.ts tests/skill-scaffold.test.ts tests/dependency-drift.test.ts tests/readability.test.ts tests/toolchain-pin.test.ts --reporter=dot";
+
+// Source repo's package.json points at the source development repo (issue #83);
+// the clean Pack artifact must keep pointing at the public Pack repo instead.
+export const PACK_REPOSITORY_URL =
+  "git+https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git";
 
 export function transformCleanDistributionArtifact(artifactPath: string, content: string): string {
   const artifact = normalizeDistributionPath(artifactPath);
@@ -188,8 +260,16 @@ export function transformCleanDistributionArtifact(artifactPath: string, content
   const scripts = { ...(parsed.scripts ?? {}) };
   scripts["test:source"] ??= scripts.test ?? "vitest run";
   scripts["test:pack"] = PACK_SAFE_TEST_SCRIPT;
-  scripts.test = PACK_SAFE_TEST_SCRIPT;
-  return `${JSON.stringify({ ...parsed, scripts }, null, 2)}\n`;
+  scripts.test = "npm run test:pack";
+  // PLAN-L7-522 §2.1.1: source の build script remains the rollback route, but
+  // generated consumers must not retain a reachable non-Node build path.
+  delete scripts.build;
+  const utTdd = {
+    ...((parsed.utTdd as Record<string, unknown> | undefined) ?? {}),
+    artifactProfile: "pack",
+  };
+  const repository = { type: "git", url: PACK_REPOSITORY_URL };
+  return `${JSON.stringify({ ...parsed, scripts, utTdd, repository }, null, 2)}\n`;
 }
 
 function shellQuotePath(path: string): string {
@@ -199,69 +279,107 @@ function shellQuotePath(path: string): string {
 export function gitAddPathspecCommands(
   repoDir: string,
   artifactPaths: readonly string[],
+  removedPaths: readonly string[] = [],
 ): string[] {
   const commands: string[] = [];
   const chunkSize = 80;
-  for (let i = 0; i < artifactPaths.length; i += chunkSize) {
-    const chunk = artifactPaths
-      .slice(i, i + chunkSize)
-      .map(shellQuotePath)
-      .join(" ");
-    commands.push(`git -C ${repoDir} add -- ${chunk}`);
-  }
+  const addCommands = (verb: string, paths: readonly string[]): void => {
+    for (let i = 0; i < paths.length; i += chunkSize) {
+      const chunk = paths
+        .slice(i, i + chunkSize)
+        .map(shellQuotePath)
+        .join(" ");
+      commands.push(`git -C ${repoDir} ${verb} -- ${chunk}`);
+    }
+  };
+  addCommands("add", artifactPaths);
+  addCommands("rm --ignore-unmatch", removedPaths);
   return commands;
 }
 
-function hasMinimumBun(version: string, minimum = "1.3.0"): boolean {
-  const parse = (v: string): number[] => {
-    const match = v.match(/\d+(?:\.\d+){0,2}/)?.[0] ?? "0";
-    return match.split(".").map((n) => Number.parseInt(n, 10));
-  };
-  const a = parse(version);
-  const b = parse(minimum);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const av = a[i] ?? 0;
-    const bv = b[i] ?? 0;
-    if (av !== bv) return av > bv;
-  }
-  return true;
+/**
+ * PLAN-L7-522 §2.2 (S1-a): readiness の runtime 検査は Node authority を見る。
+ * 判定基準は consumer package root の `engines.node` であり、ここで別の pin を持たない
+ * (第二の正本を作らない)。`required` が空なら fail-close する。
+ */
+function satisfiesRequiredNode(version: string | null, required: string | null): boolean {
+  const observed = version?.trim();
+  const range = required?.trim();
+  return Boolean(
+    observed && range && valid(observed) && validRange(range) && satisfies(observed, range),
+  );
 }
 
 export function buildCleanDistributionPlan(input: {
-  paths: string[];
+  paths: readonly string[];
   sourceTag?: string;
   cleanRepo?: string;
+  authoringInventory?: readonly AuthoringTemplateInventoryEntry[];
 }): CleanDistributionPlan {
   const sourceTag = input.sourceTag ?? "unreleased";
   const cleanRepo = input.cleanRepo ?? DEFAULT_PACK_REPO;
+  const inventory = input.authoringInventory ?? AUTHORING_TEMPLATE_INVENTORY;
+  const inventoryResult = validateAuthoringTemplateInventory(inventory);
   const normalized = [...new Set(input.paths.map(normalizeDistributionPath))].sort();
-  const includedSourcePaths = normalized.filter(
-    (path) => isAllowedCleanPath(path) && !isDeniedCleanPath(path),
-  );
-  const artifactPaths = [...new Set(includedSourcePaths.map(cleanDistributionArtifactPath))].sort();
-  const artifactSet = new Set(artifactPaths);
-  const missingRequired = CLEAN_REQUIRED_PATHS.filter((path) => !artifactSet.has(path));
+  const includedSourcePaths = normalized.filter((path) => isAllowedCleanPath(path, inventory));
+  // Projection must be resolved before the output deny fence: the team source is intentionally
+  // under .ut-tdd, but its destination is a normal docs/templates artifact.
+  const artifactPaths = [
+    ...new Set(
+      includedSourcePaths
+        .map((path) => cleanDistributionArtifactPath(path, inventory))
+        .filter((path) => !isDeniedCleanPath(path)),
+    ),
+  ].sort();
+  // D-2 fail-close (PLAN-L7-413 followup): violation は **最終出荷集合 (artifactPaths)** を
+  // deny で監視する。include filter の退行や remap の denied 空間衝突で denied path が
+  // 出荷側に達したときのみ fire する出力ガード。denied な入力 path 自体は通常の除外
+  // (excludedPaths) — 全 denied 入力を fail にすると full repo walk (.ut-tdd/ 等常在) と
+  // 意図的 carve-out (src/web/ は tracked .gitkeep を持つ) で plan が恒常 blocked になる
+  // (PR #42 の過剰 fail-close、cli-surface 実 repo 回帰で検出)。「denied 入力が出荷されない」
+  // 側の fence は tests/distribution-acceptance.test.ts の D-2 テストが固定する。
   const denylistViolations = artifactPaths.filter(isDeniedCleanPath);
+  const artifactSet = new Set(artifactPaths);
+  const missingRequired = [...CLEAN_REQUIRED_PATHS, ...AUTHORING_TEMPLATE_ARTIFACT_PATHS].filter(
+    (path, index, required) => required.indexOf(path) === index && !artifactSet.has(path),
+  );
   const includedSourceSet = new Set(includedSourcePaths);
-  const excludedPaths = normalized.filter((path) => !includedSourceSet.has(path));
+  // A path can pass the source allowlist and still be removed by the output deny fence
+  // (for example the tracked `src/web/` carve-out). Report that source as excluded too;
+  // otherwise callers see neither an artifact nor an exclusion for a denied input.
+  const excludedPaths = normalized.filter(
+    (path) =>
+      !includedSourceSet.has(path) ||
+      isDeniedCleanPath(cleanDistributionArtifactPath(path, inventory)),
+  );
+  const authoringInventory = {
+    ok: inventoryResult.ok,
+    missingFamilies: [...inventoryResult.missingFamilies],
+    duplicateFamilies: [...inventoryResult.duplicateFamilies],
+    unknownFamilies: [...inventoryResult.unknownFamilies],
+    duplicateArtifactPaths: [...inventoryResult.duplicateArtifactPaths],
+    missingArtifactPaths: [...inventoryResult.missingArtifactPaths],
+  };
   return {
-    ok: missingRequired.length === 0 && denylistViolations.length === 0,
-    channel: "clean-repo-plus-signed-tarball",
+    ok: inventoryResult.ok && missingRequired.length === 0 && denylistViolations.length === 0,
+    channel: "clean-repo-plus-tarball",
     sourceTag,
     cleanRepo,
     artifactPaths,
     excludedPaths,
     missingRequired,
     denylistViolations,
+    authoringInventory,
     releaseIntegrity: {
       required: true,
-      artifacts: [`${sourceTag}.tar.gz`, `${sourceTag}.tar.gz.sha256`, `${sourceTag}.tar.gz.sig`],
+      artifacts: [`${sourceTag}.tar.gz`, `${sourceTag}.tar.gz.sha256`],
     },
   };
 }
 
 export function buildConsumerReadinessPlan(input: {
-  bunVersion: string | null;
+  nodeVersion: string | null;
+  requiredNodeVersion: string | null;
   hasGit: boolean;
   hasGh: boolean;
   hasUtTddCli?: boolean;
@@ -272,8 +390,9 @@ export function buildConsumerReadinessPlan(input: {
   packageRoot?: string;
   tag?: string;
   cleanRepo?: string;
+  consumerRuntime?: ConsumerNodeRuntimeReadinessInput;
 }): ConsumerReadinessPlan {
-  const bunOk = Boolean(input.bunVersion && hasMinimumBun(input.bunVersion));
+  const nodeOk = satisfiesRequiredNode(input.nodeVersion, input.requiredNodeVersion);
   const mode =
     input.hasClaude && input.hasCodex
       ? "hybrid"
@@ -282,11 +401,23 @@ export function buildConsumerReadinessPlan(input: {
         : input.hasCodex
           ? "codex-only"
           : "standalone";
+  // check 名は評価の意味論と一致させる。bare version の `engines.node` は npm 意味論で
+  // 厳密一致なので `node>=x` と表示してはならない。
+  const nodeCheckName = input.requiredNodeVersion
+    ? `node@${input.requiredNodeVersion}`
+    : "node engines.node (missing)";
+  // `hasUtTddCli` is an observation only.  Readiness is granted exclusively
+  // by the consumer-local sealed runtime and its receipt chain.
+  const sealedRuntime = validateConsumerReadiness(input.consumerRuntime);
   const checks = [
     {
-      name: "bun>=1.3",
-      ok: bunOk,
-      message: bunOk ? `Bun ${input.bunVersion}` : "Install Bun 1.3 or newer before setup",
+      name: nodeCheckName,
+      ok: nodeOk,
+      message: nodeOk
+        ? `Node ${input.nodeVersion}`
+        : input.requiredNodeVersion
+          ? `Install a Node version satisfying ${input.requiredNodeVersion} before setup (observed ${input.nodeVersion ?? "none"})`
+          : "package.json engines.node is missing; cannot verify the Node runtime",
     },
     {
       name: "git",
@@ -302,17 +433,15 @@ export function buildConsumerReadinessPlan(input: {
     },
     {
       name: "ut-tdd-cli",
-      ok: input.hasUtTddCli ?? true,
-      message:
-        (input.hasUtTddCli ?? true)
-          ? "project-local UT-TDD wrapper, package bin, or source setup entrypoint is available for projected hooks"
-          : (input.utTddCliMessage ??
-            [
-              "Generated Claude/Codex hooks call `bun .ut-tdd/bin/ut-tdd.mjs ...` so each project can use its own pinned UT-TDD package.",
-              "Add UT-TDD as a project dependency before setup and verify `node_modules/.bin/ut-tdd --help` or `bun .ut-tdd/bin/ut-tdd.mjs --help` in the consumer repo.",
-              "Do not rely on a global `bun link` when multiple projects on one PC may pin different harness versions.",
-              "Bun itself must still resolve on the hook shell PATH.",
-            ].join(" ")),
+      ok: sealedRuntime.ok,
+      message: sealedRuntime.ok
+        ? "consumer-local sealed Node runtime is available for projected hooks"
+        : (input.utTddCliMessage ??
+          [
+            "Generated Claude/Codex hooks resolve only the consumer-local sealed Node runtime.",
+            `Runtime admission: ${sealedRuntime.reason ?? "consumer_runtime_absent"}.`,
+            "Source checkouts and TypeScript package paths are not fallback candidates.",
+          ].join(" ")),
     },
     {
       name: "runtime-cli",
@@ -327,7 +456,7 @@ export function buildConsumerReadinessPlan(input: {
   const tag = input.tag ?? "v0.1.0";
   const cleanRepo = input.cleanRepo ?? DEFAULT_PACK_REPO;
   return {
-    ok: bunOk && input.hasGit && (input.hasUtTddCli ?? true),
+    ok: nodeOk && input.hasGit && sealedRuntime.ok,
     checks,
     mode,
     workspace: {
@@ -340,10 +469,10 @@ export function buildConsumerReadinessPlan(input: {
       workflow: ".github/workflows/harness-check.yml",
       requires: [
         "actions/checkout@v4",
-        "oven-sh/setup-bun@v2",
-        "bun install --frozen-lockfile",
-        "bun run typecheck",
-        "bun run test",
+        "actions/setup-node@v4",
+        "npm ci --no-audit --no-fund",
+        "npm run typecheck",
+        "npm test",
       ],
       forkPullRequestSecrets: "not-required",
     },
@@ -355,8 +484,8 @@ export function buildConsumerReadinessPlan(input: {
       backupRequired: true,
       commands: [
         `git switch ${tag}`,
-        "bun .ut-tdd/bin/ut-tdd.mjs setup --dry-run",
-        "bun .ut-tdd/bin/ut-tdd.mjs setup --solo",
+        "node .ut-tdd/bin/ut-tdd.mjs setup --dry-run",
+        "node .ut-tdd/bin/ut-tdd.mjs setup --solo",
       ],
     },
     contracts: {
@@ -380,6 +509,7 @@ export function buildConsumerReadinessPlan(input: {
       "consumer CI -> harness-check green without repository secrets",
       "monorepo package root -> adapter paths remain repo-root scoped",
     ],
+    ...(sealedRuntime ? { consumerRuntime: sealedRuntime } : {}),
   };
 }
 
@@ -422,7 +552,7 @@ export function buildPackSyncPlan(input: {
       "missingRequired.length === 0",
       "git status --short shows only intended clean Pack files",
       "Pack CI passes before release publication",
-      "signature tarball and GitHub release publication remain separate human-approved operations",
+      "tarball and GitHub release publication remain separate human-approved operations",
     ],
     publishRequiresPoApproval: true,
     destructiveRemoteMutation: false,

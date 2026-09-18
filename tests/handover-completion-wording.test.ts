@@ -5,7 +5,7 @@ import {
   GENERATED_BY,
   type HandoverDeps,
   type HandoverPointer,
-} from "../src/handover/index";
+} from "../src/handover/index.ts";
 
 const NOW = "2026-06-12T00:00:00.000Z";
 const repoRoot = "/repo";

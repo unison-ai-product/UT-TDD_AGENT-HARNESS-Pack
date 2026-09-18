@@ -15,8 +15,8 @@ import {
   parseRoadmap,
   programCoverageMessages,
   type RoadmapRecord,
-} from "../src/lint/roadmap-registry";
-import { roadmapSchema, validateRoadmapStructure } from "../src/schema/roadmap";
+} from "../src/lint/roadmap-registry.ts";
+import { roadmapSchema, validateRoadmapStructure } from "../src/schema/roadmap.ts";
 
 /** test 用 RoadmapRecord factory (layer だけ可変、gates/spans は最小)。 */
 function record(planId: string, layer: string): RoadmapRecord {

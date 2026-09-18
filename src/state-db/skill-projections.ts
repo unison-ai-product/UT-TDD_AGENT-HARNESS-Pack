@@ -1,4 +1,9 @@
-import type { HarnessDb } from "./index";
+import {
+  type SkillLearningSignals,
+  scoreSkill as scoreSkillShared,
+  shouldScoreSkillAsset,
+} from "../skill-scoring/scoring.ts";
+import type { HarnessDb } from "./index.ts";
 
 // PLAN-L7-262: provenance 分離。
 // - rebuild 由来の間接推定行は session 不明を明示する (空文字での偽装をやめる)。
@@ -29,38 +34,42 @@ export interface SkillProjectionDeps {
   skillDriveModelForPlan: (planId: string) => string;
 }
 
-export const PLAN_SUCCESS_STATUSES = ["confirmed", "completed"] as const;
+export { PLAN_SUCCESS_STATUSES } from "../projection/domain/plan-status.ts";
 
-export function skillScore(
-  plan: SkillProjectedPlan,
-  asset: Record<string, unknown>,
-  deps: Pick<SkillProjectionDeps, "skillDriveModelForPlan">,
-): number {
-  const text = [
-    asset.asset_id,
-    asset.path,
-    asset.trigger,
-    asset.role,
-    asset.capability,
-    asset.skill_type,
-    asset.applies_layers,
-    asset.applies_drive_models,
-  ]
-    .join(" ")
-    .toLowerCase();
-  const appliesLayers = String(asset.applies_layers ?? "")
-    .split(",")
-    .filter(Boolean);
-  const appliesDriveModels = String(asset.applies_drive_models ?? "")
-    .split(",")
-    .filter(Boolean);
+import { PLAN_SUCCESS_STATUSES } from "../projection/domain/plan-status.ts";
+
+export function skillScore(input: {
+  plan: SkillProjectedPlan;
+  asset: Record<string, unknown>;
+  deps: Pick<SkillProjectionDeps, "skillDriveModelForPlan">;
+  learning?: SkillLearningSignals;
+}): number {
+  const { plan, asset, deps, learning } = input;
   const driveModel = deps.skillDriveModelForPlan(plan.planId);
-  let score = 0.2;
-  if (appliesLayers.includes(plan.layer)) score += 0.35;
-  if (appliesDriveModels.includes(driveModel)) score += 0.35;
-  if (text.includes(plan.drive.toLowerCase())) score += 0.1;
-  if (/review|checklist|quality|test|lint/.test(text)) score += 0.25;
-  return Math.min(1, Number(score.toFixed(2)));
+  return scoreSkillShared(
+    {
+      reference: plan.planId,
+      layer: plan.layer,
+      drive: plan.drive,
+      kind: plan.kind,
+      workflowMode: driveModel,
+    },
+    asset,
+    { learning },
+  );
+}
+
+function skillLearningSignals(db: HarnessDb, skillId: string): SkillLearningSignals | undefined {
+  const row = db.prepare("SELECT * FROM skill_evaluations WHERE skill_id = ?").get(skillId) as
+    | Record<string, unknown>
+    | undefined;
+  if (!row) return undefined;
+  return {
+    skillRating: Number(row.skill_rating ?? 0),
+    adoptionCount: Number(row.adoption_count ?? 0),
+    successCount: Number(row.success_count ?? 0),
+    unusedFlag: Number(row.unused_flag ?? 0),
+  };
 }
 
 export function projectSkillTelemetry(input: {
@@ -73,10 +82,21 @@ export function projectSkillTelemetry(input: {
   const assets = db
     .prepare("SELECT * FROM automation_assets WHERE asset_type = ? ORDER BY asset_id")
     .all("skill")
-    .filter((asset) => !String(asset.skill_type ?? "").startsWith("skill-map"));
+    .filter(shouldScoreSkillAsset);
   for (const plan of plans.values()) {
     const ranked = assets
-      .map((asset) => ({ asset, score: skillScore(plan, asset, deps) }))
+      .map((asset) => {
+        const skillId = String(asset.asset_id ?? "");
+        return {
+          asset,
+          score: skillScore({
+            plan,
+            asset,
+            deps,
+            learning: skillLearningSignals(db, skillId),
+          }),
+        };
+      })
       .filter((entry) => entry.score > 0)
       .sort(
         (a, b) =>
@@ -193,9 +213,10 @@ export function projectSkillEvaluations(input: {
               MAX(i.fired_at) AS last_fired_at
        FROM skill_invocations i
        WHERE i.accepted = 1
+         AND i.source LIKE ?
        GROUP BY i.skill_id`,
     )
-    .all();
+    .all(`${RUNTIME_SKILL_SOURCE_PREFIX}%`);
 
   if (adoptionRows.length === 0) return;
 
@@ -212,9 +233,12 @@ export function projectSkillEvaluations(input: {
          JOIN plan_registry p ON p.plan_id = i.plan_id
          WHERE i.skill_id = ?
            AND i.accepted = 1
+           AND i.source LIKE ?
            AND p.status IN (${successStatusPlaceholders})`,
       )
-      .get(skillId, ...PLAN_SUCCESS_STATUSES) as { success_count: number } | undefined;
+      .get(skillId, `${RUNTIME_SKILL_SOURCE_PREFIX}%`, ...PLAN_SUCCESS_STATUSES) as
+      | { success_count: number }
+      | undefined;
 
     const successCount = Number(successRow?.success_count ?? 0);
     const skillRating = adoptionCount === 0 ? 0 : Number((successCount / adoptionCount).toFixed(4));
@@ -223,9 +247,9 @@ export function projectSkillEvaluations(input: {
       .prepare(
         `SELECT COUNT(*) AS cnt
          FROM skill_invocations
-         WHERE skill_id = ? AND fired_at >= ?`,
+         WHERE skill_id = ? AND source LIKE ? AND fired_at >= ?`,
       )
-      .get(skillId, cutoff) as { cnt: number } | undefined;
+      .get(skillId, `${RUNTIME_SKILL_SOURCE_PREFIX}%`, cutoff) as { cnt: number } | undefined;
 
     const unusedFlag = Number(recentRow?.cnt ?? 0) === 0 ? 1 : 0;
 

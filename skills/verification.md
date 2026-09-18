@@ -22,6 +22,35 @@ applies_to:
     - Discovery
     - Scrum
     - Recovery
+decision_points:
+  - when: "`ut-tdd doctor` exits 0 at the end of a layer-group cycle"
+    choose: "still confirm design substance by reading the paired doc before declaring the layer complete"
+    over: "declaring the layer group complete on doctor's green exit alone"
+    because: "doctor checks structure (orphans, missing pairs, schema), not whether the design claim is substantiated in the body"
+  - when: "judging test quality for a layer"
+    choose: "verify Vitest describe/it scenario IDs match the L6 design doc"
+    over: "using assertion count as a proxy for test quality"
+    because: "a high assertion count can still miss the scenarios the design doc requires"
+  - when: "a PLAN has thorough unit tests at L7 but no L8 integration test-design doc"
+    choose: "require the L8 test-design doc as a separate paired artifact"
+    over: "skipping it because \"unit tests are sufficient\""
+    because: "V-model requires paired artifacts at every boundary, not substitution across boundaries"
+  - when: "a design doc exists but its paired test-design doc is missing"
+    choose: "treat the absence as a violation to be reported by ut-tdd vmodel lint"
+    over: "treating the missing pair as a neutral, unflagged state"
+    because: "absence-blindness is the documented root cause of descent gaps in this harness"
+  - when: "running the machine verification sequence (doctor, vmodel lint, plan lint, typecheck, lint, test)"
+    choose: "stop at the first failing command and fix it before continuing"
+    over: "running all commands regardless of earlier failures"
+    because: "later checks can mask or be invalidated by an earlier structural failure"
+  - when: "recording a verification result from a shell command on native Windows"
+    choose: "judge pass/fail from the explicit exit code (`$LASTEXITCODE` in PowerShell, `$?` in Bash) and run POSIX one-liners in the Bash tool, PowerShell cmdlets in PowerShell"
+    over: "judging from output text alone, or pasting a POSIX snippet into PowerShell because it 'looks close enough'"
+    because: "the two shells differ in escaping, null device, and env-var syntax; a dialect-mismatched command fails for shell reasons and falsely reads as a product regression"
+  - when: "inspecting output of any verification command"
+    choose: "read the full output"
+    over: "piping through `| tail`"
+    because: "truncation hides the root error that caused the failure"
 ---
 
 # verification
@@ -55,9 +84,9 @@ Run in order; stop at the first failure and fix before continuing:
 ut-tdd doctor              # structural governance: orphans, missing pairs, PLAN schema
 ut-tdd vmodel lint         # V-model layer obligations: absence-fail-close
 ut-tdd plan lint           # PLAN schema, dependency existence, schedule section
-bun run typecheck          # TypeScript: zero errors
-bun run lint               # Biome check: format + lint, zero violations
-bun run test               # Vitest: no skipped tests without rationale
+npm run typecheck          # TypeScript: zero errors
+npm run lint               # Biome check: format + lint, zero violations
+npm run test               # Vitest: no skipped tests without rationale
 ```
 
 Never pipe any of these through `| tail` — truncation hides the root error.

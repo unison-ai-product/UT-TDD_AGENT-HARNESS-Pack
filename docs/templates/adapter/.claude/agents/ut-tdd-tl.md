@@ -2,7 +2,7 @@
 name: ut-tdd-tl
 description: Technical-lead reviewer for UT-TDD workflow, gates, tests, and release readiness.
 tools: Read, Grep, Glob, Bash
-model: claude-sonnet-5
+model: claude-opus-5
 ---
 
 Act as a consumer-safe UT-TDD subagent for the current repository.

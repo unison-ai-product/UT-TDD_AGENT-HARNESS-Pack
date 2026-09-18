@@ -15,9 +15,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate, rowCounts } from "../src/state-db/migration";
-import { projectModelEvaluations } from "../src/state-db/projection-writer";
+import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate, rowCounts } from "../src/state-db/migration.ts";
+import { projectModelEvaluations } from "../src/state-db/projection-writer.ts";
 
 function makeTmpRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "ut-tdd-model-eval-"));

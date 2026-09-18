@@ -12,9 +12,10 @@
  * AC-FR-BR21-43-02 cold-start: 0 PoC PLANs => 0 rows
  */
 import { describe, expect, it } from "vitest";
-import { openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate, rowCounts } from "../src/state-db/migration";
-import { projectPocEvaluations } from "../src/state-db/projection-writer";
+import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate, rowCounts } from "../src/state-db/migration.ts";
+import { projectPocEvaluations } from "../src/state-db/projection-writer.ts";
+import { summarizePocEvaluations } from "../src/state-db/projections/poc-evaluations.ts";
 
 function seedPocPlan(
   db: ReturnType<typeof openHarnessDb>,
@@ -37,6 +38,35 @@ function seedPocPlan(
 }
 
 describe("U-FR-L1-43: projectPocEvaluations", () => {
+  it("U-DOMAIN-002: pure projector normalizes only permitted PoC decision outcomes", () => {
+    const event = summarizePocEvaluations(
+      [
+        { decision_outcome: "confirmed", cnt: 6 },
+        { decision_outcome: "rejected", cnt: 3 },
+        { decision_outcome: "pivot", cnt: 1 },
+        { decision_outcome: "unknown", cnt: 99 },
+      ],
+      "2026-07-13T00:00:00.000Z",
+    );
+
+    expect(event).toMatchObject({
+      table: "poc_evaluations",
+      id: "poc-evaluation:summary",
+      row: {
+        poc_evaluation_id: "poc-evaluation:summary",
+        evaluated_at: "2026-07-13T00:00:00.000Z",
+      },
+    });
+    expect(event?.row).toMatchObject({
+      confirmed_count: 6,
+      rejected_count: 3,
+      pivot_count: 1,
+      total_count: 10,
+      poc_success_rate: 0.6,
+    });
+    expect(summarizePocEvaluations([], "2026-07-13T00:00:00.000Z")).toBeUndefined();
+  });
+
   it("AC-FR-BR21-43-02 cold-start: zero PoC PLANs produces zero rows and does not throw", () => {
     // U-FR-L1-43 cold-start oracle
     const db = openHarnessDb(":memory:");

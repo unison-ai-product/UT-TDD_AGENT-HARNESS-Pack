@@ -27,7 +27,7 @@ L7 は V 字モデルの「谷」。左腕 (L6 まで) で凍結した ① 設�
 | 2 | **本体実装** | L6 関数 signature に従い `src/` に ② 実装コードを作成 | aim → se |
 | 3 | **3 点レビュー** | ① 設計 ⇔ ③ テスト設計 ⇔ ② 実装コードの三位一体確認 (詳細は §3 を参照) | aim セルフ + frontier-reviewer (G7 時) |
 | 4 | **テストパターン追加** | 3 点レビューで発見した不足テストケースを ④ に追加 (既存 ③ を書き換えず新規追加) | aim |
-| 5 | **テスト実施** | `bun run test` で Vitest full、`bun run test:fast` / `bun run test:db` / `bun run test:cli` で粒度別に実行する。`bun test` は CI 代替にしない | aim |
+| 5 | **テスト実施** | `npm run test` で Vitest full、`npm run test:fast` / `npm run test:db` / `npm run test:cli` で粒度別に実行する。`npm test` は CI 代替にしない | aim |
 | 6 | **修正** | テスト失敗があれば ② 実装コードを修正 (③ 設計に戻す差し戻しは tl エスカレーション) | aim |
 | 7 | **G7 実装凍結** | 4 artifact trace freeze (4 artifact 揃い + 必須 8 directed edge + coverage ≥ 80%) | tl (G7 判断) |
 

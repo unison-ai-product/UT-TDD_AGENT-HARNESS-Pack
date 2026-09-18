@@ -14,7 +14,7 @@
 
 | 軸 | 問い (一言) | 値の例 | 正本 |
 |----|-----------|--------|------|
-| **kind** | この PLAN は**何をする**のか | charter / design / impl / poc / reverse / add-design / add-impl / refactor / retrofit / recovery / troubleshoot / research (12 種) | requirements §1.3 |
+| **kind** | この PLAN は**何をする**のか | charter / design / impl / poc / reverse / add-design / add-impl / refactor / retrofit / recovery / troubleshoot / research / verify (13 種) | requirements §1.3 |
 | **layer** | V-model の**どの工程**か | L0-L14 (Forward 工程) / cross (横断駆動) (16 種) | requirements §1.4 |
 | **drive** | **どの専門職 (specialist) を招集する**のか | be / fe / fullstack / db / agent (5 種 = 専門職、V7 再設計済) | requirements §1.6 |
 | **workflow_phase** | 横断駆動の**局面** | S0-S4 (poc) / R0-R4 (reverse)。他 kind は持たない (10 種) | requirements §1.5 |
@@ -64,3 +64,7 @@ drive は「**その PLAN にどの専門職 (specialist) / 専門エージェ�
 ## §4 位置付け
 
 本 dir 全体は **正本化済** (PLAN-REVERSE-01、2026-06-04)。PLAN-DISCOVERY-04 (Discovery) dogfood 実績を経て、PLAN-REVERSE-01 終点で正本化した。規範変更は concept/requirements (上位正本) 先行 → 本 dir へ反映する。
+
+> **例外 (PLAN-L7-459 M6)**: `plan-asset-v2.md` / `design-detection-self-proof.md` は
+> ADR-008 (Proposed、未 accepted) に付随する `status: draft` であり、本 dir の正本化済
+> 宣言の対象外。ADR-008 が accepted になるまで確定仕様として扱わない。

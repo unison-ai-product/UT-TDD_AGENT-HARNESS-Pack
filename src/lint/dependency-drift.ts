@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import ts from "typescript";
-import { importedSourceModule, normalizePath, sourceModule } from "./shared";
+import { importedSourceModule, normalizePath, sourceModule } from "./shared.ts";
 
 export type DependencyDriftFindingCode =
   | "disallowed-module-dependency"

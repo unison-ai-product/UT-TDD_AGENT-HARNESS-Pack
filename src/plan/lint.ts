@@ -1,15 +1,17 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { analyzeG1Trace, g1TraceMessages, g1TraceOk, loadG1TraceDocs } from "../lint/g1-trace";
-import { analyzeG3Trace, g3TraceMessages, g3TraceOk, loadDocs } from "../lint/g3-trace";
-import { type Frontmatter, frontmatterSchema } from "../schema/frontmatter";
-import { routeSignalCandidates } from "../schema/route-map";
+import { analyzeG1Trace, g1TraceMessages, g1TraceOk, loadG1TraceDocs } from "../lint/g1-trace.ts";
+import { analyzeG3Trace, g3TraceMessages, g3TraceOk, loadDocs } from "../lint/g3-trace.ts";
+import { type Frontmatter, frontmatterSchema } from "../schema/frontmatter.ts";
+import { parsePlanIdIdentity } from "../schema/plan-id.ts";
+import { routeSignalCandidates } from "../schema/route-map.ts";
 import {
   DB_PROJECTION_BACKPROP_REQUIRED_GENERATES,
   DESIGN_LAYERS_REQUIRING_SUB_DOC,
   INTERNAL_ASSET_EXTENSION_PLAN_IDS,
   KIND_LAYER_ENFORCEMENT_DATE,
+  LEGACY_PLAN_ID_COLLISION_DEBT,
   MODE_PATTERN,
   READY_DEPENDENCY_STATUSES,
   REQUIRED_AGENT_ROLE_ENFORCEMENT_DATE,
@@ -18,15 +20,18 @@ import {
   REVERSE_R4_CLAIMED_ARTIFACT_ENFORCEMENT_DATE,
   REVERSE_R4_ROUTE_BACKPROP_ENFORCEMENT_DATE,
   REVIEW_PATTERN,
+  RIGHT_ARM_VERIFICATION_GATE_BY_LAYER,
   ROUTE_CERTIFICATE_ENFORCEMENT_DATE,
   ROUTE_MODE_ALLOWED_KINDS,
   ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS,
   ROUTE_MODE_KIND_LEGACY_LANDED_PLAN_IDS,
+  ROUTE_MODE_LAYER_BANDS,
   SERIAL_MODE_PATTERN,
   SERIAL_REASONS,
   VALID_REVERSE_FULLBACK_SCOPE_DECISIONS,
   VALID_SUB_DOCS,
-} from "./lint-policy";
+  VERSION_UP_PARKING_LEGACY_LANDED_PLAN_IDS,
+} from "./lint-policy.ts";
 import type {
   LintResult,
   PlanGovernanceDoc,
@@ -37,7 +42,8 @@ import type {
   PlanScheduleDoc,
   PlanScheduleResult,
   PlanScheduleViolation,
-} from "./lint-types";
+} from "./lint-types.ts";
+import { PARENT_DRIVE_MISMATCH_BASELINE } from "./parent-drive-mismatch-baseline.ts";
 
 export type {
   LintResult,
@@ -51,7 +57,7 @@ export type {
   PlanScheduleDoc,
   PlanScheduleResult,
   PlanScheduleViolation,
-} from "./lint-types";
+} from "./lint-types.ts";
 
 const ROUTE_MODE_KIND_DEBT_GUIDANCE =
   "see docs/governance/route-mode-kind-debt-audit-2026-07-02.md and docs/plans/PLAN-L7-263-route-mode-kind-certificate.md";
@@ -112,7 +118,7 @@ export function loadPlanScheduleDocs(
   target?: string,
 ): PlanScheduleDoc[] {
   if (target) {
-    const p = join(repoRoot, target);
+    const p = isAbsolute(target) ? target : join(repoRoot, target);
     return [{ file: target, content: readFileSync(p, "utf8") }];
   }
   const plansDir = join(repoRoot, "docs", "plans");
@@ -163,6 +169,18 @@ function normalizePlanRef(ref: string): string {
   const normalized = ref.replaceAll("\\", "/");
   const basename = normalized.split("/").at(-1) ?? normalized;
   return basename.endsWith(".md") ? basename.slice(0, -3) : basename;
+}
+
+function canonicalPlanPath(repoRoot: string | undefined, ref: string): string {
+  const absolute = isAbsolute(ref) ? resolve(ref) : resolve(repoRoot ?? process.cwd(), ref);
+  let canonical = absolute;
+  try {
+    canonical = realpathSync.native(absolute);
+  } catch {
+    // Synthetic test docs and missing targets still use normalized absolute identity.
+  }
+  const normalized = canonical.replaceAll("\\", "/");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function normalizeArtifactPath(ref: string): string {
@@ -226,6 +244,34 @@ function requiredAgentRoleViolations(raw: Record<string, unknown>): string[] {
   return missing;
 }
 
+/**
+ * 規定外起票ブロックゲート (plan_id taxonomy)。
+ *
+ * plan_id の prefix 語彙は閉じた集合であり、無断で新しい系列 (例: 2026-07-15 の
+ * PLAN-M-02 = 「M を master program として外挿」) を発明する起票を fail-close で
+ * 弾く。許可系列: PLAN-L<0..14>-<n>-<slug> / PLAN-REVERSE / PLAN-DISCOVERY /
+ * PLAN-RECOVERY。PLAN-M-* は cutover/migration 専用の凍結 legacy 2 件のみ。
+ * 新系列が必要な場合は governance で語彙を定義してから本 allowlist を更新する。
+ */
+const PLAN_ID_LEGACY_FROZEN = new Set(["PLAN-M-00-verify-cutover", "PLAN-M-01-cutover-backfill"]);
+
+export function planIdTaxonomyViolations(
+  planId: string,
+): { reason: "plan_id_taxonomy"; detail: string }[] {
+  if (PLAN_ID_LEGACY_FROZEN.has(planId)) return [];
+  const identity = parsePlanIdIdentity(planId);
+  if (identity && identity.token !== "M") {
+    const prefix = `PLAN-${identity.token}-${identity.ordinalText}`;
+    if (/^-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(planId.slice(prefix.length))) return [];
+  }
+  return [
+    {
+      reason: "plan_id_taxonomy",
+      detail: `${planId}: 未登録のplan_id系列。許可: PLAN-L<0..14>-<n>-<slug> / PLAN-REVERSE / PLAN-DISCOVERY / PLAN-RECOVERY (PLAN-M-*はlegacy凍結)。新系列はgovernanceで語彙定義後にallowlistへ`,
+    },
+  ];
+}
+
 function kindLayerViolations(raw: Record<string, unknown>): string[] {
   const status = stringField(raw.status);
   const updated = stringField(raw.updated) ?? stringField(raw.created) ?? "";
@@ -239,6 +285,7 @@ function kindLayerViolations(raw: Record<string, unknown>): string[] {
   const designLayers = new Set(["L1", "L2", "L3", "L4", "L5", "L6"]);
   const addDesignLayers = new Set(["L3", "L4", "L5", "L6"]);
   const researchLayers = new Set(["L1", "L2", "L3", "L4"]);
+  const verifyLayers = new Set(["L8", "L9", "L10", "L11", "L12", "L13", "L14"]);
   const l7Only = new Set(["impl", "add-impl", "refactor", "retrofit", "troubleshoot"]);
 
   if (kind === "design" && !designLayers.has(layer)) return [`design:${layer}:expected_L1-L6`];
@@ -249,18 +296,59 @@ function kindLayerViolations(raw: Record<string, unknown>): string[] {
   if (kind === "research" && !researchLayers.has(layer)) {
     return [`research:${layer}:expected_L1-L4`];
   }
+  if (kind === "verify" && !verifyLayers.has(layer)) {
+    return [`verify:${layer}:expected_L8-L14`];
+  }
   return [];
 }
 
-function versionRouteCertificateViolations(raw: Record<string, unknown>): {
+function versionRouteCertificateViolations(
+  raw: Record<string, unknown>,
+  planId: string,
+): {
   reason: "version_route_certificate_missing" | "version_route_certificate_mismatch";
   detail: string;
 }[] {
-  if (!stringField(raw.version_target)) return [];
-  if (stringField(raw.status) !== "draft") return [];
+  const target = stringField(raw.version_target);
+  const status = stringField(raw.status) ?? "";
+  const mode = stringField(raw.route_mode);
+  if (VERSION_UP_PARKING_LEGACY_LANDED_PLAN_IDS.has(planId)) {
+    const hasVersionTargetKey = Object.hasOwn(raw, "version_target");
+    const exactLegacyTuple =
+      mode === "version-up" &&
+      stringField(raw.kind) === "impl" &&
+      stringField(raw.layer) === "L7" &&
+      status === "confirmed" &&
+      !hasVersionTargetKey;
+    return exactLegacyTuple
+      ? []
+      : [
+          {
+            reason: "version_route_certificate_mismatch",
+            detail:
+              "ledgered version-up landed debt changed its immutable legacy tuple; see docs/governance/version-up-route-debt-2026-07-10.md",
+          },
+        ];
+  }
+  if (mode === "version-up" && !target) {
+    return [
+      {
+        reason: "version_route_certificate_missing",
+        detail: "route_mode=version-up is parked-only and requires status=draft + version_target",
+      },
+    ];
+  }
+  if (!target) return [];
+  if (status !== "draft") {
+    return [
+      {
+        reason: "version_route_certificate_mismatch",
+        detail: `version_target requires status=draft but status=${status}`,
+      },
+    ];
+  }
 
   const signal = stringField(raw.route_signal);
-  const mode = stringField(raw.route_mode);
   const violations: {
     reason: "version_route_certificate_missing" | "version_route_certificate_mismatch";
     detail: string;
@@ -361,7 +449,18 @@ function routeModeKindViolations(
     return [];
   }
   const allowedKinds = ROUTE_MODE_ALLOWED_KINDS[mode];
-  if (!allowedKinds) return [];
+  if (!allowedKinds) {
+    // PLAN-RECOVERY-10 Stage 1 P2: 未登録 route_mode を fail-open (return []) から fail-close へ。
+    // 全実在 mode (add-feature/reverse/recovery/refactor/version-up) は SSoT (L4 §3.1) から
+    // ROUTE_MODE_ALLOWED_KINDS へ登録済。未知 mode は「検査漏れの素通り」でなく違反として surface する
+    // (fail-open な検証 gate = false-confidence、無い gate より悪い)。
+    return [
+      {
+        reason: "route_mode_kind_mismatch",
+        detail: `unknown route_mode=${mode} not registered in ROUTE_MODE_ALLOWED_KINDS (fail-close; register from SSoT L4 §3.1; ${ROUTE_MODE_KIND_DEBT_GUIDANCE})`,
+      },
+    ];
+  }
 
   const kind = stringField(raw.kind) ?? "";
   if (allowedKinds.includes(kind)) return [];
@@ -379,6 +478,77 @@ function routeModeKindViolations(
       detail: `route_mode=${mode} allows kind=${allowedKinds.join("|")} but kind=${kind}${debtNote}`,
     },
   ];
+}
+
+function routeModeKindLayerViolations(
+  raw: Record<string, unknown>,
+  planId: string,
+): { reason: "route_mode_kind_layer_mismatch"; detail: string }[] {
+  if (stringField(raw.status) === "archived") return [];
+
+  const mode = stringField(raw.route_mode);
+  if (!mode) return [];
+
+  const allowedLayers = ROUTE_MODE_LAYER_BANDS[mode];
+  if (!allowedLayers) return [];
+
+  const layer = stringField(raw.layer) ?? "";
+  if (allowedLayers.includes(layer)) return [];
+
+  if (ROUTE_MODE_KIND_LEGACY_LANDED_PLAN_IDS.has(planId)) return [];
+  const status = stringField(raw.status) ?? "";
+  if (ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS.has(planId) && status === "draft") return [];
+
+  const debtNote = ROUTE_MODE_KIND_DRAFT_DEBT_PLAN_IDS.has(planId)
+    ? ` (debt plan must be promoted to add-impl + Reverse pairing before leaving draft; ${ROUTE_MODE_KIND_DEBT_GUIDANCE})`
+    : "";
+  return [
+    {
+      reason: "route_mode_kind_layer_mismatch",
+      detail: `route_mode=${mode} allows layer=${allowedLayers.join("|")} but layer=${layer}${debtNote}`,
+    },
+  ];
+}
+
+function verifyGateViolations(raw: Record<string, unknown>): {
+  reason: "verify_gate_missing" | "verify_gate_layer_mismatch";
+  detail: string;
+}[] {
+  if (stringField(raw.status) === "archived") return [];
+
+  const kind = stringField(raw.kind);
+  const gate = stringField(raw.verification_gate);
+  if (kind !== "verify") {
+    return gate
+      ? [
+          {
+            reason: "verify_gate_layer_mismatch",
+            detail: `verification_gate=${gate} is only valid for kind=verify`,
+          },
+        ]
+      : [];
+  }
+
+  const layer = stringField(raw.layer) ?? "";
+  const expectedGate = RIGHT_ARM_VERIFICATION_GATE_BY_LAYER[layer];
+  if (!expectedGate) return [];
+  if (!gate) {
+    return [
+      {
+        reason: "verify_gate_missing",
+        detail: `kind=verify layer=${layer} requires verification_gate=${expectedGate}`,
+      },
+    ];
+  }
+  if (gate !== expectedGate) {
+    return [
+      {
+        reason: "verify_gate_layer_mismatch",
+        detail: `kind=verify layer=${layer} requires verification_gate=${expectedGate} but got ${gate}`,
+      },
+    ];
+  }
+  return [];
 }
 
 const PLAN_CODE_LINE_REFERENCE_PATTERN = /\b([A-Za-z0-9_./\\-]+\.tsx?):(\d+)\b/g;
@@ -609,6 +779,7 @@ function schemaIssueSummary(issue: {
 export function analyzePlanGovernance(
   docs: PlanGovernanceDoc[],
   repoRoot?: string,
+  contextDocs: PlanGovernanceDoc[] = docs,
 ): PlanGovernanceResult {
   const violations: PlanGovernanceViolation[] = [];
   const parsed = new Map<
@@ -616,8 +787,14 @@ export function analyzePlanGovernance(
     { file: string; content: string; raw: Record<string, unknown>; parsed?: Frontmatter }
   >();
   const byPlanId = new Map<string, string[]>();
+  const byPlanIdentity = new Map<string, { file: string; planId: string }[]>();
 
-  for (const doc of docs) {
+  // A path-form lint evaluates only the requested PLAN, but cross-record
+  // references (parent/requires and duplicate identity checks) need the full
+  // PLAN corpus as lookup context.  Keep the evaluation scope separate from
+  // the context scope so a single-file lint neither reports false missing
+  // references nor leaks unrelated corpus violations to the caller.
+  for (const doc of contextDocs) {
     const raw = parsePlanFrontmatter(doc);
     if (!raw) {
       violations.push({ file: doc.file, reason: "missing_frontmatter" });
@@ -634,6 +811,11 @@ export function analyzePlanGovernance(
     const planId = stringField(raw.plan_id);
     if (planId) {
       byPlanId.set(planId, [...(byPlanId.get(planId) ?? []), doc.file]);
+      const identity = parsePlanIdIdentity(planId);
+      if (identity) {
+        const key = `${identity.namespace}:${identity.ordinal}`;
+        byPlanIdentity.set(key, [...(byPlanIdentity.get(key) ?? []), { file: doc.file, planId }]);
+      }
       parsed.set(doc.file, {
         file: doc.file,
         content: doc.content,
@@ -650,10 +832,27 @@ export function analyzePlanGovernance(
     }
   }
 
+  for (const [key, entries] of byPlanIdentity) {
+    if (entries.length < 2) continue;
+    const actual = [...new Set(entries.map((entry) => entry.planId))].sort();
+    const legacy = [...(LEGACY_PLAN_ID_COLLISION_DEBT[key] ?? [])].sort();
+    if (
+      actual.length === legacy.length &&
+      actual.every((planId, index) => planId === legacy[index])
+    ) {
+      continue;
+    }
+    const detail = `${key}: ${actual.join(", ")}`;
+    for (const entry of entries) {
+      violations.push({ file: entry.file, reason: "duplicate_plan_identity", detail });
+    }
+  }
+
   const byRef = new Map<
     string,
     { file: string; content: string; raw: Record<string, unknown>; parsed?: Frontmatter }
   >();
+  const parentDriveMismatchBaselineMatches = new Set<string>();
   for (const entry of parsed.values()) {
     const planId = stringField(entry.raw.plan_id);
     if (planId) byRef.set(planId, entry);
@@ -679,6 +878,11 @@ export function analyzePlanGovernance(
         detail: missingRoles.join(", "),
       });
     }
+    if (stringField(raw.plan_id)) {
+      for (const violation of planIdTaxonomyViolations(planId)) {
+        violations.push({ file: entry.file, ...violation });
+      }
+    }
     const invalidKindLayers = kindLayerViolations(raw);
     if (invalidKindLayers.length > 0) {
       violations.push({
@@ -687,13 +891,19 @@ export function analyzePlanGovernance(
         detail: invalidKindLayers.join(", "),
       });
     }
-    for (const violation of versionRouteCertificateViolations(raw)) {
+    for (const violation of versionRouteCertificateViolations(raw, planId)) {
       violations.push({ file: entry.file, ...violation });
     }
     for (const violation of routeCertificateViolations(raw)) {
       violations.push({ file: entry.file, ...violation });
     }
     for (const violation of routeModeKindViolations(raw, planId)) {
+      violations.push({ file: entry.file, ...violation });
+    }
+    for (const violation of routeModeKindLayerViolations(raw, planId)) {
+      violations.push({ file: entry.file, ...violation });
+    }
+    for (const violation of verifyGateViolations(raw)) {
       violations.push({ file: entry.file, ...violation });
     }
 
@@ -808,20 +1018,29 @@ export function analyzePlanGovernance(
     }
 
     const parent = stringField(deps.parent);
-    if ((kind === "add-design" || kind === "add-impl") && parent) {
-      const parentRecord = byRef.get(normalizePlanRef(parent));
-      if (!parentRecord) {
-        violations.push({ file: entry.file, reason: "parent_missing", detail: parent });
-      } else {
-        const parentDrive = stringField(parentRecord.raw.drive);
-        const drive = stringField(raw.drive);
-        if (drive && parentDrive && drive !== parentDrive && parentDrive !== "fullstack") {
-          violations.push({
-            file: entry.file,
-            reason: "parent_drive_mismatch",
-            detail: `${drive} != ${parentDrive}`,
-          });
+    if (parent) {
+      if (isPlanRef(parent)) {
+        const parentRecord = byRef.get(normalizePlanRef(parent));
+        if (!parentRecord) {
+          violations.push({ file: entry.file, reason: "parent_missing", detail: parent });
+        } else {
+          const parentDrive = stringField(parentRecord.raw.drive);
+          const drive = stringField(raw.drive);
+          if (drive && parentDrive && drive !== parentDrive && parentDrive !== "fullstack") {
+            const planId = stringField(raw.plan_id);
+            if (planId && PARENT_DRIVE_MISMATCH_BASELINE.has(planId)) {
+              parentDriveMismatchBaselineMatches.add(planId);
+            } else {
+              violations.push({
+                file: entry.file,
+                reason: "parent_drive_mismatch",
+                detail: `${drive} != ${parentDrive}`,
+              });
+            }
+          }
         }
+      } else if (!pathExists(repoRoot, parent)) {
+        violations.push({ file: entry.file, reason: "parent_missing", detail: parent });
       }
     }
 
@@ -861,7 +1080,43 @@ export function analyzePlanGovernance(
     }
   }
 
-  return { violations, checked: docs.length, ok: violations.length === 0 };
+  const staleParentDriveMismatchBaseline = [...PARENT_DRIVE_MISMATCH_BASELINE].filter(
+    (planId) => byRef.has(planId) && !parentDriveMismatchBaselineMatches.has(planId),
+  );
+  for (const planId of staleParentDriveMismatchBaseline) {
+    const files = byPlanId.get(planId) ?? [];
+    for (const file of files) {
+      violations.push({ file, reason: "parent_drive_mismatch_debt_stale", detail: planId });
+    }
+  }
+
+  const scopedViolations =
+    contextDocs === docs
+      ? violations
+      : (() => {
+          const targetFiles = new Set(docs.map((doc) => canonicalPlanPath(repoRoot, doc.file)));
+          const contextFiles = new Set(
+            contextDocs.map((doc) => canonicalPlanPath(repoRoot, doc.file)),
+          );
+          const selected = violations.filter((violation) =>
+            targetFiles.has(canonicalPlanPath(repoRoot, violation.file)),
+          );
+          for (const doc of docs) {
+            if (!contextFiles.has(canonicalPlanPath(repoRoot, doc.file))) {
+              selected.push({
+                file: doc.file,
+                reason: "target_context_missing",
+                detail: "target PLAN is outside the loaded governance context",
+              });
+            }
+          }
+          return selected;
+        })();
+  return {
+    violations: scopedViolations,
+    checked: docs.length,
+    ok: scopedViolations.length === 0,
+  };
 }
 
 export function planGovernanceMessages(result: PlanGovernanceResult): string[] {
@@ -896,15 +1151,35 @@ export function lintPlan(path?: string, repoRoot: string = process.cwd()): LintR
   return { ok: result.ok, messages: planScheduleMessages(result) };
 }
 
+/**
+ * The default CLI lint is the pre-push safety surface: schedule structure and
+ * PLAN frontmatter/cross-record governance must be checked together.  Keep
+ * `lintPlan` schedule-only for the doctor sub-gate, which exposes the two
+ * checks as separate named rows.
+ */
+export function lintPlanDefault(path?: string, repoRoot: string = process.cwd()): LintResult {
+  const docs = loadPlanScheduleDocs(repoRoot, path);
+  const schedule = analyzePlanSchedule(docs);
+  const governanceContext = path ? loadPlanScheduleDocs(repoRoot) : docs;
+  const governance = analyzePlanGovernance(docs, repoRoot, governanceContext);
+  return {
+    ok: schedule.ok && governance.ok,
+    messages: [...planScheduleMessages(schedule), ...planGovernanceMessages(governance)],
+  };
+}
+
 export function lintPlanGate(
   gate: string | undefined,
   path?: string,
   repoRoot: string = process.cwd(),
 ): LintResult {
-  if (!gate || gate === "schedule") return lintPlan(path, repoRoot);
+  if (!gate) return lintPlanDefault(path, repoRoot);
+  if (gate === "schedule") return lintPlan(path, repoRoot);
 
   if (gate === "governance" || gate === "frontmatter") {
-    const result = analyzePlanGovernance(loadPlanGovernanceDocs(repoRoot, path), repoRoot);
+    const docs = loadPlanGovernanceDocs(repoRoot, path);
+    const context = path ? loadPlanGovernanceDocs(repoRoot) : docs;
+    const result = analyzePlanGovernance(docs, repoRoot, context);
     return { ok: result.ok, messages: planGovernanceMessages(result) };
   }
 

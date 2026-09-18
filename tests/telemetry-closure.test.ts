@@ -3,7 +3,7 @@ import {
   analyzeTelemetryClosure,
   loadTelemetryClosureDocs,
   telemetryClosureMessages,
-} from "../src/lint/telemetry-closure";
+} from "../src/lint/telemetry-closure.ts";
 
 const compliant = `# A-TEST
 

@@ -22,7 +22,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseBacklogEntries } from "./improvement-backlog";
+import { parseBacklogEntries } from "./improvement-backlog.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");

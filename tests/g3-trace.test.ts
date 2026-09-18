@@ -13,7 +13,7 @@ import {
   extractL3FrIds,
   extractL3NfrIds,
   loadDocs,
-} from "../src/lint/g3-trace";
+} from "../src/lint/g3-trace.ts";
 
 describe("G3-trace coverage (機能一覧 + ドメイン整合の機械検証)", () => {
   const docs = loadDocs();

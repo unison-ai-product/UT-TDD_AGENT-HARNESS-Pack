@@ -6,8 +6,8 @@ import {
   evaluateAttemptEscalation,
   renderEscalationSignals,
   selectPrecedingSessionFile,
-} from "../src/runtime/attempt-escalation";
-import type { SessionEvent } from "../src/runtime/session-log";
+} from "../src/runtime/attempt-escalation.ts";
+import type { SessionEvent } from "../src/runtime/session-log.ts";
 
 function toolEvent(target: string, outcome: "ok" | "error", ts = "1"): SessionEvent {
   return {
@@ -188,6 +188,37 @@ describe("attempt escalation (PLAN-RECOVERY-05) — Iron Law 3-attempt stop", ()
       expect(block).toContain("STOP");
       expect(block).toContain("root cause");
       expect(block).toContain("Bash (vitest)");
+    });
+
+    it("caps displayed escalation signals and leaves a breadcrumb", () => {
+      const block = renderEscalationSignals(
+        [
+          { escalate: true, subject: "a", failureCount: 5, message: "x" },
+          { escalate: true, subject: "b", failureCount: 4, message: "x" },
+          { escalate: true, subject: "c", failureCount: 3, message: "x" },
+        ],
+        { maxSignals: 2 },
+      );
+
+      expect(block).toContain("a: 5 consecutive failures");
+      expect(block).toContain("b: 4 consecutive failures");
+      expect(block).not.toContain("c: 3 consecutive failures");
+      expect(block).toContain("+1 more escalation signals");
+    });
+
+    it("keeps all escalation signals when maxSignals is zero", () => {
+      const block = renderEscalationSignals(
+        [
+          { escalate: true, subject: "a", failureCount: 5, message: "x" },
+          { escalate: true, subject: "b", failureCount: 4, message: "x" },
+        ],
+        { maxSignals: 0 },
+      );
+
+      expect(block).toContain("直前 session で 2 件");
+      expect(block).toContain("a: 5 consecutive failures");
+      expect(block).toContain("b: 4 consecutive failures");
+      expect(block).not.toContain("more escalation signals");
     });
   });
 });

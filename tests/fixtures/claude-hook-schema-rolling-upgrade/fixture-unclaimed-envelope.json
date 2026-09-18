@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "ut-tdd.claude-inbox/v3",
+  "purpose": "memory",
+  "memoryId": "memory:fixture:claude-hook-schema-unclaimed-v1",
+  "operationId": "fixture-unclaimed-consume-v1",
+  "originRuntime": "codex",
+  "sessionId": "fixture-claude-session-v1",
+  "body": "fixture identity does not copy production payload"
+}

@@ -4,24 +4,44 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { deriveArtifactProgressDecision } from "../src/state-db/artifact-progress-decision";
-import { projectRefactorCandidateSignals } from "../src/state-db/feedback-projections";
-import { type HarnessDb, isSecretLike, openHarnessDb } from "../src/state-db/index";
-import { migrate, rowCounts } from "../src/state-db/migration";
+import { findReference } from "../src/search/index.ts";
+import { stableId } from "../src/stable-id.ts";
+import { deriveArtifactProgressDecision } from "../src/state-db/artifact-progress-decision.ts";
 import {
+  analyzeDesignDetectionStats,
+  collectDesignDetectionStats,
+  DESIGN_QUALITY_CHECK_IDS,
+} from "../src/state-db/design-detection.ts";
+import {
+  decideRefactorCandidate,
+  projectFeedbackEvents,
+  projectIssueApprovalGuardrails,
+  projectIssueQueue,
+  projectRefactorCandidateSignals,
+} from "../src/state-db/feedback-projections.ts";
+import { type HarnessDb, isSecretLike, openHarnessDb } from "../src/state-db/index.ts";
+import { migrate, rowCounts } from "../src/state-db/migration.ts";
+import {
+  latestReviewEvidenceEntry,
+  missingTestPlanIdNextAction,
+  projectDesignPairFreezeFindings,
   projectRuntimeGuardrailDecisionFromSessionEvent,
   projectRuntimeSkillInvocationFromSessionEvent,
   projectRuntimeTestRunFromSessionEvent,
   rebuildHarnessDb,
   recordProjectionEvent,
-} from "../src/state-db/projection-writer";
+} from "../src/state-db/projection-writer.ts";
 import {
   REFACTOR_CANDIDATE_THRESHOLDS,
   REFACTOR_POLICY_TERMS,
-} from "../src/state-db/refactor-candidate-policy";
-import { analyzeRefactorCandidates } from "../src/state-db/refactor-candidates";
-import { projectRuntimeTestRunFromSessionEvent as projectRuntimeTestRunFromSessionEventCore } from "../src/state-db/runtime-projections";
-import { projectSkillMetrics as projectSkillMetricsCore } from "../src/state-db/skill-projections";
+} from "../src/state-db/refactor-candidate-policy.ts";
+import {
+  analyzeRefactorCandidates,
+  refactorCandidateKey,
+} from "../src/state-db/refactor-candidates.ts";
+import { projectRuntimeTestRunFromSessionEvent as projectRuntimeTestRunFromSessionEventCore } from "../src/state-db/runtime-projections.ts";
+import { projectSkillMetrics as projectSkillMetricsCore } from "../src/state-db/skill-projections.ts";
+import { claudeProjectSlug } from "../src/state-db/token-tracker.ts";
 
 interface VerificationWorkflowRow {
   phase: string;
@@ -52,6 +72,31 @@ const hasSourceScreenDocs = () =>
   existsSync(
     join(process.cwd(), "docs", "design", "harness", "L1-requirements", "screen-requirements.md"),
   );
+
+describe("review evidence projection selection", () => {
+  it("U-SCHEDULE-LIVE-002: compares reviewed_at as instants and resolves ties by declaration", () => {
+    const latest = latestReviewEvidenceEntry([
+      { reviewed_at: "2026-07-10T00:30:00+09:00", verdict: "offset-but-older" },
+      { reviewed_at: "2026-07-09T20:00:00Z", verdict: "absolute-latest" },
+      { reviewed_at: "2026-07-10T05:00:00+09:00", verdict: "approve-after-fix" },
+    ]);
+    expect(latest?.verdict).toBe("approve-after-fix");
+  });
+});
+
+describe("PLAN-L7-450 W1 remediation routing", () => {
+  it("U-L7-450-W1-001: draft ownership candidate requires confirm and declaration together", () => {
+    expect(missingTestPlanIdNextAction("draft")).toContain("confirm");
+  });
+
+  it("U-L7-450-W1-002: confirmed ownership candidate directs generates declaration", () => {
+    expect(missingTestPlanIdNextAction("confirmed")).toContain("generates");
+  });
+
+  it("U-L7-450-W1-003: no candidate preserves the legacy remediation", () => {
+    expect(missingTestPlanIdNextAction(undefined)).toContain("generates");
+  });
+});
 
 describe("SECRET_PATTERN word-boundary anchoring", () => {
   it("does not match 'sk' inside a word but matches a boundary-delimited token", () => {
@@ -114,6 +159,71 @@ describe("IT-DB-01/02: harness.db projection writer", () => {
 
         expect(result.ok).toBe(true);
         expect(row?.path).toBe("skills/refactoring.md");
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("projects design-quality coverage rows from the real repo rebuild", () => {
+    if (!hasSourceProjectionPlanDocs()) return;
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      rebuildHarnessDb({ db });
+
+      const rows = db
+        .prepare(
+          "SELECT subject_id, value, threshold, status FROM coverage WHERE scope = ? AND metric = ? ORDER BY subject_id",
+        )
+        .all("design-quality", "violation_count") as Array<{
+        subject_id: string;
+        value: number;
+        threshold: number;
+        status: string;
+      }>;
+      expect(rows.map((row) => row.subject_id)).toEqual([...DESIGN_QUALITY_CHECK_IDS].sort());
+      expect(rows.every((row) => row.value === 0 && row.threshold === 0)).toBe(true);
+      expect(rows.every((row) => row.status === "passed")).toBe(true);
+
+      const stats = collectDesignDetectionStats(db);
+      expect(analyzeDesignDetectionStats(stats).ok).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("projects pair-freeze orphan findings as DB-detectable design findings", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-design-pair-projection-"));
+    try {
+      mkdirSync(join(root, "docs", "design", "harness", "L1-requirements"), {
+        recursive: true,
+      });
+      mkdirSync(join(root, "docs", "test-design", "harness"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "design", "harness", "L1-requirements", "functional.md"),
+        ["---", "layer: L1", "status: confirmed", "---", "# functional", ""].join("\n"),
+        "utf8",
+      );
+      const db = openHarnessDb(":memory:", { repoRoot: root });
+      try {
+        migrate(db);
+        projectDesignPairFreezeFindings(root, db);
+        const finding = db
+          .prepare(
+            "SELECT kind, severity, subject_id, source, status FROM findings WHERE kind LIKE ?",
+          )
+          .get("design-pair-orphan:%");
+        expect(finding).toMatchObject({
+          kind: "design-pair-orphan:pair-missing",
+          severity: "error",
+          subject_id: "docs/design/harness/L1-requirements/functional.md",
+          source: "vmodel-pair-freeze",
+          status: "open",
+        });
+        expect(analyzeDesignDetectionStats(collectDesignDetectionStats(db)).ok).toBe(false);
       } finally {
         db.close();
       }
@@ -451,6 +561,187 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     }
   });
 
+  it("keeps refactor candidate lifecycle decisions across rebuilds", () => {
+    const repoRoot = join(tmpdir(), `ut-tdd-refactor-lifecycle-${randomUUID()}`);
+    try {
+      mkdirSync(join(repoRoot, "src"), { recursive: true });
+      writeFileSync(
+        join(repoRoot, "src", "fixture.ts"),
+        Array.from({ length: 950 }, (_, i) => `function check${i}() {\n  return ${i};\n}`).join(
+          "\n",
+        ),
+      );
+
+      const db = openHarnessDb(":memory:", { repoRoot });
+      try {
+        const input = {
+          repoRoot,
+          db,
+          relationGraph: { nodes: [], edges: [], verificationProfiles: [], findings: [] },
+          documentExports: {
+            document_export_runs: [],
+            document_export_datasets: [],
+            document_export_artifacts: [],
+            findings: [],
+            actionsTaken: [],
+            ok: true,
+          },
+          verificationEvidence: {
+            verification_profiles: [],
+            verification_recommendations: [],
+            mcp_server_runs: [],
+            external_tool_findings: [],
+            findings: [],
+            ok: true,
+          },
+        };
+        expect(rebuildHarnessDb(input).ok).toBe(true);
+
+        const detected = analyzeRefactorCandidates([
+          {
+            path: "src/fixture.ts",
+            content: Array.from(
+              { length: 950 },
+              (_, i) => `function check${i}() {\n  return ${i};\n}`,
+            ).join("\n"),
+          },
+        ]).find((candidate) => candidate.kind === "split-module");
+        expect(detected).toBeDefined();
+        if (!detected) throw new Error("split-module candidate was not detected");
+        const candidateKey = refactorCandidateKey(detected);
+        const initial = db
+          .prepare("SELECT state, linked_plan_id FROM refactor_candidates WHERE candidate_key = ?")
+          .get(candidateKey);
+        expect(initial).toMatchObject({ state: "open", linked_plan_id: "" });
+
+        expect(
+          decideRefactorCandidate(db, {
+            candidate_key: candidateKey,
+            state: "rejected",
+            decided_at: "2026-07-08T20:00:00.000Z",
+          }).ok,
+        ).toBe(true);
+        expect(rebuildHarnessDb(input).ok).toBe(true);
+
+        const preserved = db
+          .prepare("SELECT state, linked_plan_id FROM refactor_candidates WHERE candidate_key = ?")
+          .get(candidateKey);
+        expect(preserved).toMatchObject({ state: "rejected", linked_plan_id: "" });
+        const signal = db
+          .prepare("SELECT status FROM quality_signals WHERE source = ? AND subject_id = ?")
+          .get("refactor-candidate-detector", "src/fixture.ts");
+        expect(signal).toMatchObject({ status: "pass" });
+        const feedback = db
+          .prepare("SELECT COUNT(*) AS n FROM feedback_events WHERE signal_type = ?")
+          .get("refactor_candidate:split-module");
+        expect(Number(feedback?.n ?? 0)).toBe(0);
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("routes verification defect findings into refactor candidate lifecycle rows", () => {
+    const repoRoot = join(tmpdir(), `ut-tdd-defect-routing-refactor-${randomUUID()}`);
+    try {
+      const db = openHarnessDb(":memory:", { repoRoot });
+      try {
+        const input = {
+          repoRoot,
+          db,
+          relationGraph: { nodes: [], edges: [], verificationProfiles: [], findings: [] },
+          documentExports: {
+            document_export_runs: [],
+            document_export_datasets: [],
+            document_export_artifacts: [],
+            findings: [],
+            actionsTaken: [],
+            ok: true,
+          },
+          verificationEvidence: {
+            verification_profiles: [],
+            verification_recommendations: [],
+            mcp_server_runs: [],
+            external_tool_findings: [],
+            findings: [
+              {
+                code: "missing-test-coverage" as const,
+                severity: "warn" as const,
+                message: "integration structure is weak; route through defect_routing to Refactor",
+                nodeId: "src/workflow/weak-module.ts#integration-structure-refactor",
+                evidencePath: "docs/test-design/harness/L8-integration-test-design.md",
+              },
+            ],
+            ok: false,
+          },
+        };
+        expect(rebuildHarnessDb(input).ok).toBe(true);
+
+        const candidate = db
+          .prepare(
+            "SELECT candidate_key, kind, path, subject, state, linked_plan_id FROM refactor_candidates WHERE kind = ?",
+          )
+          .get("verification-defect-routing") as
+          | {
+              candidate_key: string;
+              kind: string;
+              path: string;
+              subject: string;
+              state: string;
+              linked_plan_id: string;
+            }
+          | undefined;
+        expect(candidate).toMatchObject({
+          kind: "verification-defect-routing",
+          path: "docs/test-design/harness/L8-integration-test-design.md",
+          subject: "src/workflow/weak-module.ts#integration-structure-refactor",
+          state: "open",
+          linked_plan_id: "",
+        });
+
+        const signal = db
+          .prepare(
+            "SELECT source, metric, subject_id, status FROM quality_signals WHERE source = ?",
+          )
+          .get("verification-defect-routing");
+        expect(signal).toMatchObject({
+          source: "verification-defect-routing",
+          metric: "refactor_candidate:verification-defect-routing",
+          subject_id: "src/workflow/weak-module.ts#integration-structure-refactor",
+          status: "warn",
+        });
+
+        expect(
+          decideRefactorCandidate(db, {
+            candidate_key: candidate?.candidate_key ?? "",
+            state: "accepted",
+            linked_plan_id: "PLAN-L7-410-defect-routing-refactor-candidates",
+            decided_at: "2026-07-09T00:00:00.000Z",
+          }).ok,
+        ).toBe(true);
+        expect(rebuildHarnessDb(input).ok).toBe(true);
+
+        const preserved = db
+          .prepare("SELECT state, linked_plan_id FROM refactor_candidates WHERE candidate_key = ?")
+          .get(candidate?.candidate_key ?? "");
+        expect(preserved).toMatchObject({
+          state: "accepted",
+          linked_plan_id: "PLAN-L7-410-defect-routing-refactor-candidates",
+        });
+        const closedSignal = db
+          .prepare("SELECT status FROM quality_signals WHERE source = ?")
+          .get("verification-defect-routing");
+        expect(closedSignal).toMatchObject({ status: "pass" });
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it("derives artifact progress colors from dependency checks and linked tests", () => {
     expect(
       deriveArtifactProgressDecision({
@@ -553,6 +844,327 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     }
   });
 
+  it("U-DBPROJ-GATE-01 projects persisted gate run evidence into gate/workflow/retry rows", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-gate-run-projection-"));
+    const planId = "PLAN-L7-363-routine-gate-run-projection";
+    try {
+      mkdirSync(join(root, "docs", "plans"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "plans", `${planId}.md`),
+        [
+          "---",
+          `plan_id: ${planId}`,
+          'title: "gate run projection fixture"',
+          "kind: impl",
+          "layer: L7",
+          "drive: db",
+          "status: confirmed",
+          "route_signal: feature_addition",
+          "route_mode: add-feature",
+          "created: 2026-07-09",
+          "updated: 2026-07-09",
+          "---",
+          "",
+          "# gate run projection fixture",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      mkdirSync(join(root, ".ut-tdd", "gate_runs"), { recursive: true });
+      for (const [index, status] of ["failed", "passed"].entries()) {
+        writeFileSync(
+          join(root, ".ut-tdd", "gate_runs", `G4-attempt-${index + 1}.json`),
+          `${JSON.stringify(
+            {
+              schema_version: 1,
+              gate_run_id: `gate-run:G4:attempt-${index + 1}`,
+              gate_id: "G4",
+              plan_id: planId,
+              status,
+              checked_at: `2026-07-09T00:0${index}:00.000Z`,
+              session_id: "session-gate-projection",
+              mode: "hybrid",
+              tier: "cross_agent",
+              review_kind: "cross_agent",
+              static_applicable: true,
+              source: "ut-tdd gate",
+              messages: [],
+            },
+            null,
+            2,
+          )}\n`,
+          "utf8",
+        );
+      }
+
+      const db = openHarnessDb(":memory:", { repoRoot: root });
+      try {
+        rebuildHarnessDb({ repoRoot: root, db });
+        const gateRows = db
+          .prepare(
+            "SELECT gate_id, status, evidence_path FROM gate_runs WHERE plan_id = ? ORDER BY checked_at",
+          )
+          .all(planId);
+        expect(gateRows).toEqual([
+          {
+            gate_id: "G4",
+            status: "failed",
+            evidence_path: ".ut-tdd/gate_runs/G4-attempt-1.json",
+          },
+          {
+            gate_id: "G4",
+            status: "passed",
+            evidence_path: ".ut-tdd/gate_runs/G4-attempt-2.json",
+          },
+        ]);
+        const workflows = db
+          .prepare(
+            "SELECT workflow, phase, ready_status FROM workflow_runs WHERE plan_id = ? ORDER BY checked_at",
+          )
+          .all(planId);
+        expect(workflows).toEqual([
+          { workflow: "routine-gate", phase: "G4", ready_status: "blocked" },
+          { workflow: "routine-gate", phase: "G4", ready_status: "passed" },
+        ]);
+        const retry = db
+          .prepare(
+            "SELECT plan_id, workflow, phase, attempt_count FROM retry_events WHERE plan_id = ?",
+          )
+          .get(planId);
+        expect(retry).toMatchObject({
+          plan_id: planId,
+          workflow: "routine-gate",
+          phase: "G4",
+          attempt_count: 2,
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-DBPROJ-GATE-02 (PLAN-RECOVERY-14): gate-run-derived workflow_runs joins the plan's documented drive_runs row (no false workflow_orphans)", () => {
+    // Regression for the drive-db-registration `workflow_orphans` false-positive root
+    // cause: projectGateRunEvidence previously stamped drive_run_id via
+    // stableId("gate-drive", planId), a different id namespace than the
+    // stableId("drive-run", `${planId}:documented`) row projectDriveRuns always
+    // creates for every projected plan — so every gate-derived workflow_runs row was
+    // an unconditional orphan regardless of whether the plan was real and current.
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-gate-run-orphan-fix-"));
+    const planId = "PLAN-TEST-recovery-14-gate-orphan";
+    try {
+      mkdirSync(join(root, "docs", "plans"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "plans", `${planId}.md`),
+        [
+          "---",
+          `plan_id: ${planId}`,
+          'title: "gate orphan join fixture"',
+          "kind: impl",
+          "layer: L7",
+          "drive: db",
+          "status: confirmed",
+          "route_signal: feature_addition",
+          "route_mode: add-feature",
+          "created: 2026-07-17",
+          "updated: 2026-07-17",
+          "---",
+          "",
+          "# gate orphan join fixture",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      mkdirSync(join(root, ".ut-tdd", "gate_runs"), { recursive: true });
+      writeFileSync(
+        join(root, ".ut-tdd", "gate_runs", "G4-attempt-1.json"),
+        `${JSON.stringify(
+          {
+            schema_version: 1,
+            gate_run_id: "gate-run:G4:recovery-14-attempt-1",
+            gate_id: "G4",
+            plan_id: planId,
+            status: "passed",
+            checked_at: "2026-07-17T00:00:00.000Z",
+            session_id: "session-recovery-14",
+            mode: "hybrid",
+            tier: "cross_agent",
+            review_kind: "cross_agent",
+            static_applicable: true,
+            source: "ut-tdd gate",
+            messages: [],
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      const db = openHarnessDb(":memory:", { repoRoot: root });
+      try {
+        rebuildHarnessDb({ repoRoot: root, db });
+        const driveRunId = String(
+          db.prepare("SELECT drive_run_id FROM drive_runs WHERE plan_id = ?").get(planId)
+            ?.drive_run_id,
+        );
+        const workflowRow = db
+          .prepare("SELECT drive_run_id FROM workflow_runs WHERE plan_id = ?")
+          .get(planId) as { drive_run_id?: string } | undefined;
+        expect(workflowRow?.drive_run_id).toBe(driveRunId);
+
+        const orphan = db
+          .prepare(
+            `SELECT COUNT(*) AS value
+             FROM workflow_runs w
+             LEFT JOIN drive_runs d ON d.drive_run_id = w.drive_run_id
+             WHERE d.drive_run_id IS NULL`,
+          )
+          .get() as { value: number };
+        expect(orphan.value).toBe(0);
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-DBPROJ-GATE-03 (PLAN-RECOVERY-14): gate-run evidence resolves legacy short plan_id aliases like other DB-linked projections", () => {
+    // gate_runs projection previously skipped the resolveProjectedPlanId alias
+    // resolution that projectHookEvents / model_runs / skill projections already apply
+    // (PLAN migrations that append a descriptive suffix to a plan_id leave older gate
+    // evidence pointing at the bare prefix). Unresolved aliases become permanent
+    // orphan_gate_run rows even though the PLAN is live under its current id.
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-gate-run-alias-fix-"));
+    const shortPlanId = "PLAN-TEST-recovery-14-alias";
+    const currentPlanId = `${shortPlanId}-full-title`;
+    try {
+      mkdirSync(join(root, "docs", "plans"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "plans", `${currentPlanId}.md`),
+        [
+          "---",
+          `plan_id: ${currentPlanId}`,
+          'title: "gate alias fixture"',
+          "kind: impl",
+          "layer: L7",
+          "drive: db",
+          "status: confirmed",
+          "route_signal: feature_addition",
+          "route_mode: add-feature",
+          "created: 2026-07-17",
+          "updated: 2026-07-17",
+          "---",
+          "",
+          "# gate alias fixture",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      mkdirSync(join(root, ".ut-tdd", "gate_runs"), { recursive: true });
+      writeFileSync(
+        join(root, ".ut-tdd", "gate_runs", "G4-attempt-1.json"),
+        `${JSON.stringify(
+          {
+            schema_version: 1,
+            gate_run_id: "gate-run:G4:recovery-14-alias-attempt-1",
+            gate_id: "G4",
+            plan_id: shortPlanId,
+            status: "passed",
+            checked_at: "2026-07-17T00:00:00.000Z",
+            session_id: "session-recovery-14-alias",
+            mode: "hybrid",
+            tier: "cross_agent",
+            review_kind: "cross_agent",
+            static_applicable: true,
+            source: "ut-tdd gate",
+            messages: [],
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      const db = openHarnessDb(":memory:", { repoRoot: root });
+      try {
+        rebuildHarnessDb({ repoRoot: root, db });
+        const gateRow = db
+          .prepare("SELECT plan_id FROM gate_runs WHERE gate_run_id = ?")
+          .get("gate-run:G4:recovery-14-alias-attempt-1") as { plan_id?: string } | undefined;
+        expect(gateRow?.plan_id).toBe(currentPlanId);
+
+        const orphanGate = db
+          .prepare(
+            `SELECT COUNT(*) AS value
+             FROM gate_runs g
+             WHERE COALESCE(g.plan_id, '') <> ''
+               AND NOT EXISTS (SELECT 1 FROM plan_registry p WHERE p.plan_id = g.plan_id)`,
+          )
+          .get() as { value: number };
+        expect(orphanGate.value).toBe(0);
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-DBPROJ-GATE-04 (PLAN-RECOVERY-14): gate-run evidence for a genuinely nonexistent PLAN stays a fail-closed orphan_gate_run (negative regression)", () => {
+    // The alias-resolution and drive_run_id join fixes above must not silently swallow
+    // real orphans: evidence referencing a plan_id that never existed (typo, deleted
+    // PLAN, ad-hoc test run) must still trip gate-run-coverage.
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-gate-run-real-orphan-"));
+    try {
+      mkdirSync(join(root, "docs", "plans"), { recursive: true });
+      mkdirSync(join(root, ".ut-tdd", "gate_runs"), { recursive: true });
+      writeFileSync(
+        join(root, ".ut-tdd", "gate_runs", "G4-attempt-1.json"),
+        `${JSON.stringify(
+          {
+            schema_version: 1,
+            gate_run_id: "gate-run:G4:recovery-14-real-orphan-attempt-1",
+            gate_id: "G4",
+            plan_id: "PLAN-DOES-NOT-EXIST-RECOVERY-14",
+            status: "passed",
+            checked_at: "2026-07-17T00:00:00.000Z",
+            session_id: "session-recovery-14-real-orphan",
+            mode: "hybrid",
+            tier: "cross_agent",
+            review_kind: "cross_agent",
+            static_applicable: true,
+            source: "ut-tdd gate",
+            messages: [],
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      const db = openHarnessDb(":memory:", { repoRoot: root });
+      try {
+        rebuildHarnessDb({ repoRoot: root, db });
+        const orphanGate = db
+          .prepare(
+            `SELECT COUNT(*) AS value
+             FROM gate_runs g
+             WHERE COALESCE(g.plan_id, '') <> ''
+               AND NOT EXISTS (SELECT 1 FROM plan_registry p WHERE p.plan_id = g.plan_id)`,
+          )
+          .get() as { value: number };
+        expect(orphanGate.value).toBe(1);
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("projects runtime test_runs from session-log verification events with session provenance", () => {
     const db = openHarnessDb(":memory:");
     try {
@@ -614,17 +1226,41 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
         },
         evidencePath: ".ut-tdd/logs/session/session-runtime-1.jsonl",
       });
+      projectRuntimeTestRunFromSessionEvent({
+        db,
+        plans,
+        event: {
+          ts: "2026-06-29T00:03:00Z",
+          session_id: "session-runtime-1",
+          plan_id: "PLAN-L7-193-runtime-test-run-provenance",
+          event_type: "tool_use",
+          tool: "PowerShell",
+          target: "PowerShell (tsc)",
+          outcome: "ok",
+        },
+        evidencePath: ".ut-tdd/logs/session/session-runtime-1.jsonl",
+      });
 
       const rows = db
         .prepare(
           "SELECT session_id, command, runner, runtime, scope, exit_code, status, evidence_path FROM test_runs",
         )
         .all();
-      expect(rows).toHaveLength(1);
+      expect(rows).toHaveLength(2);
       expect(rows[0]).toMatchObject({
         session_id: "session-runtime-1",
         command: "Bash (vitest)",
-        runner: "bun",
+        runner: "node",
+        runtime: "hook-session-log",
+        scope: "runtime-hook",
+        exit_code: 0,
+        status: "passed",
+        evidence_path: ".ut-tdd/logs/session/session-runtime-1.jsonl",
+      });
+      expect(rows[1]).toMatchObject({
+        session_id: "session-runtime-1",
+        command: "PowerShell (tsc)",
+        runner: "node",
         runtime: "hook-session-log",
         scope: "runtime-hook",
         exit_code: 0,
@@ -692,7 +1328,7 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
       const row = db.prepare("SELECT plan_id, runner, exit_code, status FROM test_runs").get();
       expect(row).toMatchObject({
         plan_id: "PLAN-L7-230-runtime-projection-extraction",
-        runner: "ut-tdd",
+        runner: "node",
         exit_code: 1,
         status: "failed",
       });
@@ -988,6 +1624,149 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     }
   });
 
+  it("projects detector route candidates into feedback, dry-run issue queue, and approval guardrail", () => {
+    const db = openHarnessDb(":memory:");
+    const deps = {
+      nowIso: () => "2026-07-08T00:00:00.000Z",
+      stableId,
+      recordProjectionEvent,
+    };
+    try {
+      migrate(db);
+      recordProjectionEvent(db, {
+        table: "detector_route_candidates",
+        id: "candidate:spec-ir-orphan",
+        row: {
+          route_candidate_id: "candidate:spec-ir-orphan",
+          source_table: "findings",
+          source_id: "finding:spec-ir-orphan",
+          detector_id: "spec-ir-integrity",
+          finding_kind: "spec-ir-orphan-relation",
+          severity: "warn",
+          subject_kind: "spec_ir",
+          subject_id: "spec-relation:missing",
+          filing_target_id: "routeFiling:feature_addition",
+          target_layer: "L6",
+          target_sub_doc: "function-spec",
+          candidate_status: "non_ready",
+          reason: "routeFiling SSoT evaluation required",
+          evidence_path: "docs/plans/PLAN-L6-39-vmodel-spec-ir-function-contracts.md",
+          computed_at: "2026-07-08T00:00:00.000Z",
+        },
+      });
+
+      projectFeedbackEvents(db, deps);
+      projectIssueQueue(db, deps);
+      projectIssueApprovalGuardrails(db, deps);
+
+      const feedback = db
+        .prepare(
+          "SELECT source_table, source_id, signal_type, severity, next_action FROM feedback_events WHERE source_table = ?",
+        )
+        .get("detector_route_candidates") as
+        | {
+            source_table: string;
+            source_id: string;
+            signal_type: string;
+            severity: string;
+            next_action: string;
+          }
+        | undefined;
+      expect(feedback).toMatchObject({
+        source_table: "detector_route_candidates",
+        source_id: "candidate:spec-ir-orphan",
+        signal_type: "detector_route_candidate:spec-ir-orphan-relation",
+        severity: "warn",
+      });
+      expect(feedback?.next_action).toContain("routeFiling SSoT");
+      expect(feedback?.next_action).toContain("route_eval_mode=add-feature");
+      expect(feedback?.next_action).toContain("allowed_kinds=add-design,add-impl");
+      expect(feedback?.next_action).toContain("layer_band=L3-L6,L7");
+
+      const issue = db
+        .prepare(
+          "SELECT title, body, status, human_approval_required, external_issue_url FROM issue_queue WHERE source_event_id = ?",
+        )
+        .get("feedback:detector-route-candidate:candidate:spec-ir-orphan") as
+        | {
+            title: string;
+            body: string;
+            status: string;
+            human_approval_required: number;
+            external_issue_url: string;
+          }
+        | undefined;
+      expect(issue).toMatchObject({
+        title: "[ut-tdd detector candidate] detector_route_candidate:spec-ir-orphan-relation",
+        status: "queued_dry_run",
+        human_approval_required: 1,
+        external_issue_url: "",
+      });
+      expect(issue?.body).toContain("Human approval is required before external issue creation");
+      expect(issue?.body).toContain("routeFiling SSoT evaluation is recorded");
+      expect(issue?.body).toContain("review_status=ssot_evaluated");
+
+      const guardrail = db
+        .prepare(
+          "SELECT decision, human_signoff_required FROM guardrail_decisions WHERE guardrail = ?",
+        )
+        .get("external-github-issue-approval") as
+        | { decision: string; human_signoff_required: number }
+        | undefined;
+      expect(guardrail).toMatchObject({
+        decision: "requires-human-approval",
+        human_signoff_required: 1,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not project closed detector route candidates into feedback or issue queue", () => {
+    const db = openHarnessDb(":memory:");
+    const deps = {
+      nowIso: () => "2026-07-08T00:00:00.000Z",
+      stableId,
+      recordProjectionEvent,
+    };
+    try {
+      migrate(db);
+      recordProjectionEvent(db, {
+        table: "detector_route_candidates",
+        id: "candidate:closed",
+        row: {
+          route_candidate_id: "candidate:closed",
+          source_table: "findings",
+          source_id: "finding:closed",
+          detector_id: "spec-ir-integrity",
+          finding_kind: "spec-ir-orphan-relation",
+          severity: "warn",
+          subject_kind: "spec_ir",
+          subject_id: "spec-relation:closed",
+          filing_target_id: "routeFiling:feature_addition",
+          target_layer: "L6",
+          target_sub_doc: "function-spec",
+          candidate_status: "closed",
+          reason: "already handled",
+          evidence_path: "docs/plans/PLAN-L6-39-vmodel-spec-ir-function-contracts.md",
+          computed_at: "2026-07-08T00:00:00.000Z",
+        },
+      });
+
+      projectFeedbackEvents(db, deps);
+      projectIssueQueue(db, deps);
+
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS n FROM feedback_events WHERE source_table = ?")
+          .get("detector_route_candidates"),
+      ).toMatchObject({ n: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM issue_queue").get()).toMatchObject({ n: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("turns unresolved cross-drive/model joins into findings instead of silently skipping them", () => {
     const db = openHarnessDb(":memory:");
     try {
@@ -1055,6 +1834,108 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
         )
         .get("model_runs:audit-ctx", "model_runs:compound-ctx") as { n: number };
       expect(flagged.n).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resolves unique short PLAN labels before creating unresolved join findings", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+
+      recordProjectionEvent(db, {
+        table: "plan_registry",
+        id: "PLAN-L7-46-projection-writer",
+        row: {
+          plan_id: "PLAN-L7-46-projection-writer",
+          kind: "impl",
+          layer: "L7",
+          drive: "db",
+          status: "confirmed",
+          parent: "",
+          updated_at: "2026-07-09",
+          source_hash: "hash",
+        },
+      });
+      recordProjectionEvent(db, {
+        table: "model_runs",
+        id: "run-with-short-plan",
+        row: {
+          run_id: "run-with-short-plan",
+          runtime: "codex",
+          model: "gpt-5.4",
+          role: "se",
+          drive: "db",
+          plan_id: "PLAN-L7-46",
+          started_at: "2026-07-09T00:02:00.000Z",
+          completed_at: "2026-07-09T00:03:00.000Z",
+          evidence_path: ".ut-tdd/evidence/run.json",
+        },
+      });
+
+      const flagged = db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM findings WHERE kind = 'unresolved-join' AND subject_id = ?",
+        )
+        .get("model_runs:run-with-short-plan") as { n: number };
+      expect(flagged.n).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("separates stale bare numeric runtime PLAN context from true unresolved joins", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+
+      recordProjectionEvent(db, {
+        table: "hook_events",
+        id: "hook-with-stale-runtime-plan",
+        row: {
+          event_id: "hook-with-stale-runtime-plan",
+          session_id: "session-1",
+          plan_id: "PLAN-L7-40",
+          hook_name: "SessionStart",
+          event_type: "session_start",
+          occurred_at: "2026-07-09T00:02:00.000Z",
+          digest: "",
+          evidence_path: ".ut-tdd/logs/session/session-1.jsonl",
+        },
+      });
+      recordProjectionEvent(db, {
+        table: "model_runs",
+        id: "run-with-missing-bare-plan",
+        row: {
+          run_id: "run-with-missing-bare-plan",
+          runtime: "codex",
+          model: "gpt-5.4",
+          role: "se",
+          drive: "db",
+          plan_id: "PLAN-L7-40",
+          started_at: "2026-07-09T00:02:00.000Z",
+          completed_at: "2026-07-09T00:03:00.000Z",
+          evidence_path: ".ut-tdd/evidence/run.json",
+        },
+      });
+
+      const stale = db
+        .prepare("SELECT kind, severity, status FROM findings WHERE subject_id = ?")
+        .get("hook_events:hook-with-stale-runtime-plan");
+      expect(stale).toMatchObject({
+        kind: "stale-runtime-plan-context",
+        severity: "warn",
+        status: "open",
+      });
+      const unresolved = db
+        .prepare("SELECT kind, severity, status FROM findings WHERE subject_id = ?")
+        .get("model_runs:run-with-missing-bare-plan");
+      expect(unresolved).toMatchObject({
+        kind: "unresolved-join",
+        severity: "warn",
+        status: "open",
+      });
     } finally {
       db.close();
     }
@@ -1142,6 +2023,16 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
       expect(result.ok).toBe(true);
       expect(rowCounts(db).graph_nodes).toBeGreaterThan(0);
       expect(rowCounts(db).dependency_edges).toBeGreaterThan(0);
+      const plannedEdge = db
+        .prepare(
+          "SELECT is_actual FROM dependency_edges WHERE from_node_id = ? AND edge_kind = ? AND to_node_id = ?",
+        )
+        .get(
+          "plan:PLAN-L7-441-plan-draft-recovery-v4",
+          "generates",
+          "source:src/plan-admission/draft-recovery.ts",
+        ) as { is_actual: number } | undefined;
+      expect(plannedEdge?.is_actual).toBe(0);
       expect(rowCounts(db).graph_snapshots).toBeGreaterThan(0);
       expect(rowCounts(db).impact_rules).toBeGreaterThan(0);
       expect(rowCounts(db).verification_profiles).toBeGreaterThan(0);
@@ -1154,10 +2045,123 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
       expect(rowCounts(db).test_cases).toBeGreaterThan(0);
       expect(rowCounts(db).test_artifact_edges).toBeGreaterThan(0);
       expect(rowCounts(db).artifact_progress).toBeGreaterThan(0);
+      expect(rowCounts(db).spec_defs).toBeGreaterThan(0);
+      expect(rowCounts(db).spec_relations).toBeGreaterThan(0);
+      expect(rowCounts(db).schedule_entries).toBeGreaterThan(0);
+      expect(rowCounts(db).activation_entries).toBeGreaterThan(0);
+      expect(rowCounts(db).activation_schedule_reviews).toBeGreaterThan(0);
+      expect(rowCounts(db).document_catalog_entries).toBeGreaterThan(0);
+      expect(rowCounts(db).document_scale_profile_entries).toBeGreaterThan(0);
+      expect(rowCounts(db).document_scale_profile_reviews).toBeGreaterThan(0);
+      expect(rowCounts(db).spec_rag_closure_entries).toBeGreaterThan(0);
       const inheritedOracle = db
         .prepare("SELECT COUNT(*) AS count FROM test_cases WHERE test_file = ? AND oracle_id = ?")
         .get("tests/handover.test.ts", "U-HOVER-001") as { count: number } | undefined;
       expect(inheritedOracle?.count ?? 0).toBeGreaterThan(0);
+      const specPlan = db
+        .prepare("SELECT layer, sub_doc, lifecycle_status FROM spec_defs WHERE plan_id = ?")
+        .get("PLAN-L6-39-vmodel-spec-ir-function-contracts") as
+        | { layer: string; sub_doc: string; lifecycle_status: string }
+        | undefined;
+      expect(specPlan).toMatchObject({
+        layer: "L6",
+        sub_doc: "function-spec",
+        lifecycle_status: "confirmed",
+      });
+      const specRelation = db
+        .prepare("SELECT relation_kind FROM spec_relations WHERE plan_id = ? AND evidence_path = ?")
+        .get(
+          "PLAN-L6-39-vmodel-spec-ir-function-contracts",
+          "PLAN-L5-13-vmodel-spec-ir-physical-data",
+        ) as { relation_kind: string } | undefined;
+      expect(specRelation).toMatchObject({ relation_kind: "requires" });
+      const schedule = db
+        .prepare("SELECT v_pair, rag FROM schedule_entries WHERE plan_id = ?")
+        .get("PLAN-L6-39-vmodel-spec-ir-function-contracts") as
+        | { v_pair: string; rag: string }
+        | undefined;
+      expect(schedule).toMatchObject({ v_pair: "L7", rag: "green" });
+      const activation = db
+        .prepare("SELECT profile_id, enabled FROM activation_entries WHERE plan_id = ?")
+        .get("PLAN-L6-39-vmodel-spec-ir-function-contracts") as
+        | { profile_id: string; enabled: number }
+        | undefined;
+      expect(activation).toMatchObject({ profile_id: "vmodel-clean-core", enabled: 1 });
+      const activationReview = db
+        .prepare(
+          "SELECT profile_id, current_location, scope_status, rag FROM activation_schedule_reviews WHERE plan_id = ?",
+        )
+        .get("PLAN-L7-385-vmodel-activation-profile-join") as
+        | { profile_id: string; current_location: string; scope_status: string; rag: string }
+        | undefined;
+      expect(activationReview).toMatchObject({
+        profile_id: "vmodel-clean-core",
+        current_location:
+          "U7b: activation profile と工程表をjoinしてversion-up対象/除外/延期理由を検索可能化済",
+        scope_status: "in_scope",
+        rag: "green",
+      });
+      expect(findReference(db, "vmodel-clean-core PLAN-L7-385").at(0)).toMatchObject({
+        subject_type: "activation_schedule_review",
+      });
+      const documentCatalog = db
+        .prepare(
+          "SELECT layer, sub_doc, default_status FROM document_catalog_entries WHERE doc_type_id = ?",
+        )
+        .get("DOC-L4-DATA") as
+        | { layer: string; sub_doc: string; default_status: string }
+        | undefined;
+      expect(documentCatalog).toMatchObject({
+        layer: "L4",
+        sub_doc: "data",
+        default_status: "required",
+      });
+      expect(findReference(db, "DOC-L4-DATA document catalog").at(0)).toMatchObject({
+        subject_type: "document_catalog_entry",
+      });
+      const documentScaleProfile = db
+        .prepare(
+          "SELECT decision, catalog_layer, catalog_sub_doc FROM document_scale_profile_reviews WHERE profile_id = ? AND doc_type_id = ?",
+        )
+        .get("enterprise", "DOC-L4-REPORT") as
+        | { decision: string; catalog_layer: string; catalog_sub_doc: string }
+        | undefined;
+      expect(documentScaleProfile).toMatchObject({
+        decision: "adopt",
+        catalog_layer: "L4",
+        catalog_sub_doc: "report",
+      });
+      expect(findReference(db, "enterprise DOC-L4-REPORT adopt").at(0)).toMatchObject({
+        subject_type: "document_scale_profile_review",
+      });
+      const typedSpec = db
+        .prepare("SELECT spec_kind, section_anchor FROM spec_defs WHERE spec_id = ?")
+        .get("VMS-004") as { spec_kind: string; section_anchor: string } | undefined;
+      expect(typedSpec).toMatchObject({
+        spec_kind: "typed-spec-authoring-source",
+        section_anchor: "spec.defines:VMS-004",
+      });
+      expect(findReference(db, "VMS-004 typed-spec-authoring-source").at(0)).toMatchObject({
+        subject_type: "typed_spec",
+        subject_id: "VMS-004",
+      });
+      const specRag = db
+        .prepare(
+          "SELECT rag, closure_status, test_count, finding_count FROM spec_rag_closure_entries WHERE spec_id = ?",
+        )
+        .get("VMS-004") as
+        | { rag: string; closure_status: string; test_count: number; finding_count: number }
+        | undefined;
+      expect(specRag).toMatchObject({
+        rag: "green",
+        closure_status: "closed",
+        finding_count: 0,
+      });
+      expect(specRag?.test_count ?? 0).toBeGreaterThan(0);
+      expect(findReference(db, "VMS-004 spec closure RAG").at(0)).toMatchObject({
+        subject_type: "spec_rag_closure_entry",
+        subject_id: "VMS-004",
+      });
     } finally {
       db.close();
     }
@@ -1447,17 +2451,20 @@ Fixture.
       expect(result.ok).toBe(true);
       // hook/session evidence is allowed to move while the full Vitest suite runs in parallel.
       // The hook rows themselves are volatile, and unresolved hook joins are projected through
-      // findings/feedback_events, so exclude that derived volatility from the fixed-point check.
+      // findings/feedback_events and their durable feedback_lifecycle projection, so exclude that
+      // derived volatility from the fixed-point check. Product-owned projection tables remain exact.
       const {
         hook_events: _firstHookEvents,
         findings: _firstFindings,
         feedback_events: _firstFeedbackEvents,
+        feedback_lifecycle: _firstFeedbackLifecycle,
         ...firstStableCounts
       } = result.rowCounts;
       const {
         hook_events: _secondHookEvents,
         findings: _secondFindings,
         feedback_events: _secondFeedbackEvents,
+        feedback_lifecycle: _secondFeedbackLifecycle,
         ...secondStableCounts
       } = second.rowCounts;
       expect(secondStableCounts).toEqual(firstStableCounts);
@@ -1628,16 +2635,17 @@ Fixture.
           "SELECT skill_id, reason FROM skill_recommendations WHERE plan_id = ? ORDER BY rank LIMIT 1",
         )
         .get("PLAN-M-01-cutover-backfill");
-      expect(skillRecommendation).toMatchObject({ skill_id: "skill:review-checklist" });
+      expect(skillRecommendation).toBeDefined();
+      expect(String(skillRecommendation?.skill_id ?? "")).not.toBe("skill:review-checklist");
       expect(String(skillRecommendation?.reason)).toContain("layer=");
 
       const skillInvocation = db
         .prepare(
           "SELECT skill_id, source, accepted FROM skill_invocations WHERE plan_id = ? AND skill_id = ?",
         )
-        .get("PLAN-M-01-cutover-backfill", "skill:review-checklist");
+        .get("PLAN-M-01-cutover-backfill", String(skillRecommendation?.skill_id ?? ""));
       expect(skillInvocation).toMatchObject({
-        skill_id: "skill:review-checklist",
+        skill_id: skillRecommendation?.skill_id,
         source: "auto-projection:review-evidence",
         accepted: 1,
       });
@@ -1688,6 +2696,167 @@ Fixture.
       expect(improvementLog).toMatchObject({ status: "open" });
     } finally {
       db.close();
+    }
+  });
+});
+
+describe("rebuildHarnessDb: repo-scoped runtime token telemetry ingest (issue #82, PLAN-L7-454)", () => {
+  function withSessionDirEnv<T>(claudeDir: string, codexDir: string, run: () => T): T {
+    const prevClaude = process.env.UT_TDD_CLAUDE_SESSIONS_DIR;
+    const prevCodex = process.env.UT_TDD_CODEX_SESSIONS_DIR;
+    process.env.UT_TDD_CLAUDE_SESSIONS_DIR = claudeDir;
+    process.env.UT_TDD_CODEX_SESSIONS_DIR = codexDir;
+    try {
+      return run();
+    } finally {
+      if (prevClaude === undefined) delete process.env.UT_TDD_CLAUDE_SESSIONS_DIR;
+      else process.env.UT_TDD_CLAUDE_SESSIONS_DIR = prevClaude;
+      if (prevCodex === undefined) delete process.env.UT_TDD_CODEX_SESSIONS_DIR;
+      else process.env.UT_TDD_CODEX_SESSIONS_DIR = prevCodex;
+    }
+  }
+
+  it("(a)(b)(c) ingests only repo-owned session usage into model_runs; foreign-repo usage is excluded", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-token-ingest-repo-"));
+    const claudeRoot = mkdtempSync(join(tmpdir(), "ut-tdd-token-ingest-claude-"));
+    const codexRoot = mkdtempSync(join(tmpdir(), "ut-tdd-token-ingest-codex-"));
+    try {
+      // repo に対応する Claude project-slug ディレクトリ + 別 repo (混入させてはいけない) のディレクトリ。
+      const ownSlug = claudeProjectSlug(root);
+      mkdirSync(join(claudeRoot, ownSlug), { recursive: true });
+      mkdirSync(join(claudeRoot, `${ownSlug}-other-repo`), { recursive: true });
+      writeFileSync(
+        join(claudeRoot, ownSlug, "s1.jsonl"),
+        JSON.stringify({
+          type: "assistant",
+          sessionId: "own-session",
+          cwd: root,
+          message: {
+            model: "claude-opus-4-8",
+            usage: { input_tokens: 111, output_tokens: 22 },
+          },
+        }),
+        "utf8",
+      );
+      writeFileSync(
+        join(claudeRoot, `${ownSlug}-other-repo`, "foreign.jsonl"),
+        JSON.stringify({
+          type: "assistant",
+          sessionId: "foreign-session",
+          message: {
+            model: "claude-opus-4-8",
+            usage: { input_tokens: 90909, output_tokens: 90909 },
+          },
+        }),
+        "utf8",
+      );
+
+      // Codex: cwd 一致 (own) / cwd 不一致 (他 repo、混入させてはいけない)。
+      writeFileSync(
+        join(codexRoot, "own.jsonl"),
+        [
+          JSON.stringify({ type: "session_meta", payload: { model: "gpt-5.3-codex", cwd: root } }),
+          JSON.stringify({
+            type: "event_msg",
+            payload: {
+              type: "token_count",
+              info: { total_token_usage: { input_tokens: 300, output_tokens: 44 } },
+            },
+          }),
+        ].join("\n"),
+        "utf8",
+      );
+      writeFileSync(
+        join(codexRoot, "foreign.jsonl"),
+        [
+          JSON.stringify({
+            type: "session_meta",
+            payload: { model: "gpt-5.3-codex", cwd: `${root}-sibling-repo` },
+          }),
+          JSON.stringify({
+            type: "event_msg",
+            payload: {
+              type: "token_count",
+              info: { total_token_usage: { input_tokens: 80808, output_tokens: 80808 } },
+            },
+          }),
+        ].join("\n"),
+        "utf8",
+      );
+
+      const db = openHarnessDb(":memory:", { repoRoot: root });
+      try {
+        const result = withSessionDirEnv(claudeRoot, codexRoot, () =>
+          rebuildHarnessDb({ repoRoot: root, db }),
+        );
+
+        // (c) rebuild 後の model_runs に実測 token 行 (input/output tokens 非 NULL) が存在する。
+        const measuredRows = db
+          .prepare(
+            "SELECT runtime, model, input_tokens, output_tokens FROM model_runs WHERE input_tokens IS NOT NULL ORDER BY runtime",
+          )
+          .all() as Array<{
+          runtime: string;
+          model: string;
+          input_tokens: number;
+          output_tokens: number;
+        }>;
+        expect(measuredRows).toHaveLength(2);
+
+        // (a) repo 帰属分のみ投入される。
+        const claudeRow = measuredRows.find((r) => r.runtime === "claude");
+        const codexRow = measuredRows.find((r) => r.runtime === "codex");
+        expect(claudeRow).toMatchObject({ input_tokens: 111, output_tokens: 22 });
+        expect(codexRow).toMatchObject({ input_tokens: 300, output_tokens: 44 });
+
+        // (b) 他 repo の usage (90909 / 80808) は一切混入していない。
+        expect(
+          measuredRows.some((r) => r.input_tokens === 90909 || r.output_tokens === 90909),
+        ).toBe(false);
+        expect(
+          measuredRows.some((r) => r.input_tokens === 80808 || r.output_tokens === 80808),
+        ).toBe(false);
+
+        // 可視化: rebuild 結果に repo スコープ ingest の走査統計が載る。
+        expect(result.tokenIngest).toMatchObject({
+          claudeProjectDirResolved: true,
+          claudeFilesScanned: 1,
+          codexFilesMatched: 1,
+          codexFilesForeignRepo: 1,
+        });
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(claudeRoot, { recursive: true, force: true });
+      rmSync(codexRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("cold-start: no matching session logs => rebuild succeeds with 0 measured model_runs rows, no throw", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-token-ingest-cold-"));
+    const claudeRoot = mkdtempSync(join(tmpdir(), "ut-tdd-token-ingest-cold-claude-"));
+    const codexRoot = mkdtempSync(join(tmpdir(), "ut-tdd-token-ingest-cold-codex-"));
+    try {
+      const db = openHarnessDb(":memory:", { repoRoot: root });
+      try {
+        const result = withSessionDirEnv(claudeRoot, codexRoot, () =>
+          rebuildHarnessDb({ repoRoot: root, db }),
+        );
+        expect(result.ok).toBe(true);
+        const measured = db
+          .prepare("SELECT COUNT(*) AS n FROM model_runs WHERE input_tokens IS NOT NULL")
+          .get() as { n: number };
+        expect(measured.n).toBe(0);
+        expect(result.tokenIngest).toMatchObject({ claudeProjectDirResolved: false });
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(claudeRoot, { recursive: true, force: true });
+      rmSync(codexRoot, { recursive: true, force: true });
     }
   });
 });

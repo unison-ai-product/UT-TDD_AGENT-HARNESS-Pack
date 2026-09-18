@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeQualityText, renderQualityAudit } from "../src/audit/quality";
+import { analyzeQualityText, renderQualityAudit } from "../src/audit/quality.ts";
 
 describe("quality audit", () => {
   it("classifies security gate, actionable hardcode, and telemetry debt markers", () => {
