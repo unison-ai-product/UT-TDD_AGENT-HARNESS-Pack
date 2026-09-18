@@ -168,26 +168,21 @@ git clone https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git
 cd UT-TDD_AGENT-HARNESS-Pack
 npm ci
 node src/cli.ts setup --solo
-node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke   # 期待値: OK (checked=22, failed=0)
+node src/cli.ts doctor --setup-smoke   # 期待値: OK (failed=0)
 ```
 
-生成される Claude/Codex hook は `node .ut-tdd/bin/ut-tdd.mjs ...` を呼びます。
-この wrapper は `ut-tdd setup` によって各 consumer リポジトリへ投影され、
-対象リポジトリの `node_modules/.bin/ut-tdd`、リポジトリ直下のハーネス source
-(`src/cli.ts`、CI runner でも有効)、setup を実行した Pack checkout、global `ut-tdd`
-の順に解決します。これにより、1 台の PC に複数プロジェクトが同居しても global
-harness version の取り合いにならず、clone した Pack checkout から consumer repo を
-bootstrap できます。setup 済みと判定する前に、Claude/Codex hook
-が実際に動く shell で次を確認してください:
+> [!WARNING]
+> **v0.2.0-canary 系の既知制約**: 生成される Claude/Codex hook は `node .ut-tdd/bin/ut-tdd.mjs ...` を呼びますが、
+> この launcher は **sealed consumer runtime の activation pointer (`.ut-tdd/runtime/activation/active.json`) だけ**を
+> 解決源とし、それが無い間は `consumer_runtime_absent` (exit 78) で fail-close します。runtime を封印・有効化する
+> release materializer は未提供 (#418 / #420) のため、**canary では生成 hook による guard は動作しません**。
+> canary の評価は Pack checkout 上で `node src/cli.ts <command>` を直接実行して行ってください。
+> consumer runtime の実行可能性は #418 の clean 環境 smoke 受入で検証し、それまで canary は stable へ promotion しません。
+
+launcher が fail-close していることは次で確認できます (期待値: stderr に `consumer_runtime_absent`、exit 78):
 
 ```sh
 node .ut-tdd/bin/ut-tdd.mjs --help
-```
-
-Windows では `scripts/ut-tdd.ps1` も同じ thin wrapper として使えます。hook shell から Node 本体を解決できることを確認します:
-
-```powershell
-node .ut-tdd\bin\ut-tdd.mjs --help
 ```
 
 ## ⚙️ セットアップ
@@ -217,7 +212,7 @@ git fetch --tags
 git checkout v0.1.4          # 追従運用なら: git pull origin main
 npm ci
 node src/cli.ts setup --solo  # 冪等再実行 (既存ファイルは保護、managed block のみ更新)
-node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+node src/cli.ts doctor --setup-smoke
 ```
 
 setup の再実行は**非破壊**です: あなたが所有するファイルは上書きされず (対話シェルでは
@@ -298,7 +293,7 @@ scripts/setup-branch-protection.sh
 ```
 
 setup の経路には組み込みテンプレートがあるため、対象プロジェクトにこのリポジトリの `docs/templates/github` ツリーが存在する前でも実行できます。
-setup 直後の導通確認は `node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke` を使います。
+setup 直後の導通確認は、対象プロジェクトのディレクトリで `<pack-checkout>/scripts/ut-tdd doctor --setup-smoke` (Windows は `<pack-checkout>\scripts\ut-tdd.ps1 doctor --setup-smoke`) を使います (canary では生成 launcher が fail-close するため。クイックスタートの既知制約を参照)。
 full `doctor` は、対象リポジトリに UT-TDD の設計 doc / PLAN / test-design が降下した後の
 ガバナンス検証です。ハーネス Pack そのものや、まだ設計文書を持たない consumer repo の
 初期導入判定には使いません。

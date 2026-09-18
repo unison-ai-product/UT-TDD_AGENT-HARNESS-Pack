@@ -164,6 +164,7 @@ const PACK_REQUIRED_STEPS = [
   { label: "pack tests", any: ["npm run test:pack"] },
   { label: "lint", any: ["npm run lint"] },
   { label: "setup projection", any: ["node src/cli.ts setup --solo"] },
+  { label: "source setup smoke doctor", any: ["node src/cli.ts doctor --setup-smoke"] },
   { label: "setup smoke doctor", any: ["node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke"] },
 ] as const;
 

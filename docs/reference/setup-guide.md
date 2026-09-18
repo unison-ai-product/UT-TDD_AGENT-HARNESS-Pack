@@ -29,12 +29,18 @@ git clone https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git
 cd UT-TDD_AGENT-HARNESS-Pack
 npm ci
 node src/cli.ts setup --solo
-node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+node src/cli.ts doctor --setup-smoke
 ```
+
+> **v0.2.0-canary 系の既知制約**: 生成 launcher `.ut-tdd/bin/ut-tdd.mjs` は sealed consumer runtime の
+> activation pointer (`.ut-tdd/runtime/activation/active.json`) だけを解決源とし、それが無い間は
+> `consumer_runtime_absent` (exit 78) で fail-close します。runtime を封印・有効化する release materializer は
+> 未提供 (#418 / #420) のため、canary では launcher 経由のコマンドと生成 hook による guard は動作しません。
+> canary の評価は Pack checkout 上の `node src/cli.ts <command>` で行ってください。
 
 `setup --solo` が生成するもの:
 
-- `.ut-tdd/bin/ut-tdd.mjs` — 以後の入口になる wrapper
+- `.ut-tdd/bin/ut-tdd.mjs` — 以後の入口になる launcher (runtime 有効化後に動作。上記の既知制約を参照)
 - `.claude/settings.json` / `.codex/hooks.json` — Claude / Codex のガード hook 配線
 - `.claude/agents/` / `.claude/commands/` — サブエージェント / スキルコマンド定義
 - `.github/workflows/` ほか CI・テンプレート (既存ファイルは上書きしません)
@@ -56,7 +62,7 @@ tar -xzf v0.1.4.tar.gz -C <導入先ディレクトリ>
 cd <your-project>
 <pack-checkout>/scripts/ut-tdd setup --dry-run   # まず書き込み内容を確認
 <pack-checkout>/scripts/ut-tdd setup --solo
-node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+<pack-checkout>/scripts/ut-tdd doctor --setup-smoke
 ```
 
 Windows PowerShell では `<pack-checkout>\scripts\ut-tdd.ps1 setup --solo`。
@@ -67,12 +73,14 @@ Windows PowerShell では `<pack-checkout>\scripts\ut-tdd.ps1 setup --solo`。
 ## 3. 動作確認チェックリスト
 
 導入直後に上から順に実行し、期待値と一致することを確認してください。
+#2 / #3 は対象プロジェクトのディレクトリから Pack checkout の wrapper を呼びます
+(Windows は `<pack-checkout>\scripts\ut-tdd.ps1`)。
 
 | # | コマンド | 期待値 |
 |---|---|---|
-| 1 | `node .ut-tdd/bin/ut-tdd.mjs --help` | usage が表示される (wrapper 導通) |
-| 2 | `node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke` | `setup-smoke - OK (checked=22, failed=0)` |
-| 3 | `node .ut-tdd/bin/ut-tdd.mjs status` | mode (`standalone` / `claude-only` / `codex-only` / `hybrid`) が表示される |
+| 1 | `node .ut-tdd/bin/ut-tdd.mjs --help` | canary では stderr に `consumer_runtime_absent`、exit 78 (launcher の fail-close。runtime 有効化後は usage が表示される) |
+| 2 | `<pack-checkout>/scripts/ut-tdd doctor --setup-smoke` | `setup-smoke - OK (failed=0)` |
+| 3 | `<pack-checkout>/scripts/ut-tdd status` | mode (`standalone` / `claude-only` / `codex-only` / `hybrid`) が表示される |
 | 4 | `npm run typecheck` | exit 0 |
 | 5 | `npm run test` | 全 green (配布安全 smoke suite) |
 
@@ -100,7 +108,7 @@ git fetch --tags
 git checkout v0.1.4          # 追従運用なら: git pull origin main
 npm ci
 node src/cli.ts setup --solo  # 冪等再実行
-node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+node src/cli.ts doctor --setup-smoke
 ```
 
 更新時の setup 再実行は**非破壊**です:
@@ -120,14 +128,13 @@ node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
 |---|---|
 | full `doctor` が exit 1 | 正常 (§3 参照)。consumer 判定は `doctor --setup-smoke` |
 | setup が既存ファイルで止まっているように見える | 対話シェルの上書き確認 (`[y/N]`) 待ちです。Enter (=N) で既存保護のまま進みます |
-| `node .ut-tdd/bin/ut-tdd.mjs ...` が exit 1 で `'ut-tdd' is not recognized` | wrapper がどの解決先も見つけられない状態。ハーネス checkout 直下 (`src/cli.ts` と `src/setup/index.ts` がある場所) で実行しているか、`npm ci` 済みかを確認 |
+| `node .ut-tdd/bin/ut-tdd.mjs ...` が exit 78 で `consumer_runtime_absent` | canary では想定どおり (sealed consumer runtime が未有効化)。Pack checkout 上の `node src/cli.ts <command>` を使ってください (#418 / #420) |
 | Windows で hook が Node を見つけられない | §0 の PATH 注記を参照 |
 | doctor が「harness.db が古い」系で失敗 | `node src/cli.ts db rebuild --json` で再投影してから再実行 |
 
-wrapper (`.ut-tdd/bin/ut-tdd.mjs`) の解決順: ① 対象リポジトリの `node_modules/.bin/ut-tdd`
-② リポジトリ直下のハーネス source (`src/cli.ts`、CI runner でも有効) ③ setup を実行した
-Pack checkout の絶対パス ④ global `ut-tdd`。CI 上でも②により setup 実行マシンのパスに
-依存しません。
+launcher (`.ut-tdd/bin/ut-tdd.mjs`) の解決源は consumer-local の activation pointer
+(`.ut-tdd/runtime/activation/active.json`) ただ 1 つです。`node_modules`、source、global `ut-tdd` への fallback は
+持ちません。pointer が無い、または bundle の digest が一致しない場合は fail-close します。
 
 ## 6. 次の一歩
 

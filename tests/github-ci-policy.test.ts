@@ -131,6 +131,7 @@ jobs:
       - run: npm run test:pack
       - run: npm run lint
       - run: node src/cli.ts setup --solo
+      - run: node src/cli.ts doctor --setup-smoke
       - run: node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
 `;
 
@@ -949,6 +950,20 @@ describe("github-ci-policy lint", () => {
       reason: "forbidden_full_doctor",
       detail:
         "Pack CI must use doctor --setup-smoke because Pack excludes source-only governance docs",
+    });
+  });
+
+  it("requires Pack CI to run setup-smoke through the source CLI before the launcher fail-close probe", () => {
+    const pack = PACK_WORKFLOW.replace("      - run: node src/cli.ts doctor --setup-smoke\n", "");
+    expect(pack).not.toBe(PACK_WORKFLOW);
+    const result = analyzeGithubCiPolicy(docs(SOURCE_WORKFLOW, pack));
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContainEqual({
+      file: "docs/templates/github/common/pack-harness-check.yml",
+      profile: "pack",
+      reason: "missing_step",
+      detail: "source setup smoke doctor",
     });
   });
 

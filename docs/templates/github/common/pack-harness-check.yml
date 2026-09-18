@@ -45,7 +45,25 @@ jobs:
       - name: lint (biome)
         run: npm run lint
 
-      - name: setup smoke
+      # setup 投影と setup-smoke は Pack checkout の source CLI で検証する。
+      # 生成 launcher (.ut-tdd/bin/ut-tdd.mjs) は sealed consumer runtime の activation pointer
+      # だけを解決源とし、release materializer (#418 / #420) が runtime を封印・有効化するまでは
+      # consumer_runtime_absent で fail-close する。本 CI は consumer runtime の実行可能性を検証しない
+      # (それは #418 の clean 環境 smoke 受入の責務であり、完了まで release の promotion は不可)。
+      - name: setup smoke (source CLI)
         run: |
           node src/cli.ts setup --solo
-          node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+          node src/cli.ts doctor --setup-smoke
+
+      - name: consumer launcher fail-close (runtime not activated)
+        run: |
+          test ! -e .ut-tdd/runtime/activation/active.json
+          set +e
+          node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke >launcher.out 2>launcher.err
+          code=$?
+          set -e
+          cat launcher.err
+          test "$code" -eq 78
+          test ! -s launcher.out
+          test "$(cat launcher.err)" = "consumer_runtime_absent"
+          test ! -e .ut-tdd/runtime/activation/active.json
