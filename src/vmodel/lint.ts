@@ -12,8 +12,8 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { fmValue } from "../lint/shared";
-import type { LintResult } from "../plan/lint";
+import { fmValue } from "../lint/shared.ts";
+import type { LintResult } from "../plan/lint.ts";
 
 export interface PairDoc {
   /** repo 相対 path (forward slash 正規化)。 */
@@ -23,9 +23,18 @@ export interface PairDoc {
   pairArtifact: string | null;
   /** frontmatter status (confirmed/draft/placeholder 等)。null = 欠落。検証発火の freeze 判定に使う。 */
   status: string | null;
+  /** additive revision は既存base freezeとは別frontierとして集計する。 */
+  revisionTrack?: string | null;
+  revisionBaseArtifact?: string | null;
+  nextPairFreeze?: string | null;
+  content?: string;
 }
 
-export type PairOrphanReason = "pair-missing" | "ref-unresolved" | "trace-orphan";
+export type PairOrphanReason =
+  | "pair-missing"
+  | "ref-unresolved"
+  | "trace-orphan"
+  | "revision-base-invalid";
 
 export interface PairOrphan {
   path: string;
@@ -35,7 +44,7 @@ export interface PairOrphan {
 
 export interface PairFreezeResult {
   orphans: PairOrphan[];
-  /** 双方向成立した pair 数 (self-pair / L2 group 含む)。 */
+  /** 双方向成立した pair 数。 */
   pairs: number;
   ok: boolean;
 }
@@ -43,7 +52,7 @@ export interface PairFreezeResult {
 /** 検査対象外の index/living doc (basename 固定リスト、vmodel-pair-freeze.md §3)。 */
 const EXCLUDED_BASENAMES = new Set(["README.md", "roadmap.md"]);
 
-/** frontmatter 値の inline コメント (`  # ...`) を除去 (`self  # wireframe...` → `self`)。 */
+/** frontmatter 値の inline コメント (`  # ...`) を除去 (`<path>  # L2↔L10 pair` → `<path>`)。 */
 export function stripInlineComment(value: string): string {
   return value.replace(/\s+#.*$/, "").trim();
 }
@@ -74,7 +83,26 @@ export function parsePairDoc(path: string, content: string): PairDoc {
     layer: fmValue(content, "layer") ?? null,
     pairArtifact: raw != null ? stripInlineComment(raw) : null,
     status: fmValue(content, "status") ?? null,
+    revisionTrack: fmValue(content, "revision_track") ?? null,
+    revisionBaseArtifact: fmValue(content, "revision_base_artifact") ?? null,
+    nextPairFreeze: fmValue(content, "next_pair_freeze") ?? null,
+    content,
   };
+}
+
+function isValidAdditiveRevision(doc: PairDoc, docsByPath: Map<string, PairDoc>): boolean {
+  if (doc.revisionTrack !== "additive" || !doc.revisionBaseArtifact) return false;
+  const base = docsByPath.get(doc.revisionBaseArtifact);
+  const sameFamily = base
+    ? doc.path.startsWith("docs/design/") === base.path.startsWith("docs/design/")
+    : false;
+  return Boolean(
+    base &&
+      base.revisionTrack !== "additive" &&
+      (base.status === "confirmed" || base.status === "completed") &&
+      base.layer === doc.layer &&
+      sameFamily,
+  );
 }
 
 /**
@@ -84,20 +112,30 @@ export function parsePairDoc(path: string, content: string): PairDoc {
 export function analyzePairFreeze(docs: PairDoc[]): PairFreezeResult {
   const byPath = new Map(docs.map((d) => [d.path, d]));
   const orphans: PairOrphan[] = [];
+  const invalidRevisionPaths = new Set(
+    docs
+      .filter((doc) => doc.revisionTrack === "additive" && !isValidAdditiveRevision(doc, byPath))
+      .map((doc) => doc.path),
+  );
+  for (const path of invalidRevisionPaths) {
+    const doc = byPath.get(path);
+    if (!doc) continue;
+    orphans.push({
+      path,
+      reason: "revision-base-invalid",
+      detail: doc.revisionBaseArtifact ?? "missing revision_base_artifact",
+    });
+  }
   let pairs = 0;
 
   for (const d of docs) {
     if (!isDesignSubDoc(d)) continue;
+    if (invalidRevisionPaths.has(d.path)) continue;
     const pa = d.pairArtifact;
     // rule 1 pair-exists (frontmatter layer 欠落時は path から層を補完して表示)
     if (pa == null) {
       const layer = d.layer ?? designLayerFromPath(d.path);
       orphans.push({ path: d.path, reason: "pair-missing", detail: `layer ${layer}` });
-      continue;
-    }
-    // self-pair (wireframe mock 自体が③ペア、L2⇔L10)
-    if (pa === "self") {
-      pairs++;
       continue;
     }
     // rule 2 ref-resolves
@@ -106,13 +144,21 @@ export function analyzePairFreeze(docs: PairDoc[]): PairFreezeResult {
       orphans.push({ path: d.path, reason: "ref-unresolved", detail: pa });
       continue;
     }
+    if (invalidRevisionPaths.has(target.path)) {
+      orphans.push({
+        path: d.path,
+        reason: "revision-base-invalid",
+        detail: `${target.path} has an invalid revision base`,
+      });
+      continue;
+    }
     // rule 3 trace-bidir
     if (pa.startsWith("docs/test-design/")) {
       // test-design 側は design dir の集合参照。design の所在 dir を含めば双方向成立。
       const back = target.pairArtifact;
       const dir = dirOf(d.path);
       const normBack = back ? (back.endsWith("/") ? back : `${back}/`) : null;
-      if (normBack && dir.startsWith(normBack)) {
+      if (back === d.path || (normBack && dir.startsWith(normBack))) {
         pairs++;
       } else {
         orphans.push({
@@ -121,18 +167,8 @@ export function analyzePairFreeze(docs: PairDoc[]): PairFreezeResult {
           detail: `${pa} が ${dir} を逆参照しない`,
         });
       }
-    } else if (pa.startsWith("docs/design/")) {
-      // L2 group 参照 (→ wireframe.md)。hub が self-pair なら group 成立。
-      if (target.pairArtifact === "self") {
-        pairs++;
-      } else {
-        orphans.push({
-          path: d.path,
-          reason: "trace-orphan",
-          detail: `group hub ${pa} が self-pair でない`,
-        });
-      }
     } else {
+      // design→design 参照 (旧 L2 group hub) と self は非対応 (PLAN-RECOVERY-09 で self-pair 例外を撤去)。
       orphans.push({ path: d.path, reason: "ref-unresolved", detail: `未知の pair 形式: ${pa}` });
     }
   }
@@ -174,9 +210,15 @@ export function pairFreezeMessages(result: PairFreezeResult): string[] {
     "pair-missing": "pair 欠落",
     "ref-unresolved": "参照不実在",
     "trace-orphan": "逆参照なし",
+    "revision-base-invalid": "revision base 不正",
   };
   const msgs: string[] = [];
-  for (const reason of ["pair-missing", "ref-unresolved", "trace-orphan"] as PairOrphanReason[]) {
+  for (const reason of [
+    "pair-missing",
+    "ref-unresolved",
+    "trace-orphan",
+    "revision-base-invalid",
+  ] as PairOrphanReason[]) {
     const hits = result.orphans.filter((o) => o.reason === reason);
     if (hits.length === 0) continue;
     const list = hits.map((o) => `${o.path} (${o.detail})`).join(", ");
@@ -185,10 +227,368 @@ export function pairFreezeMessages(result: PairFreezeResult): string[] {
   return msgs;
 }
 
+export type ForwardFreezeContractViolationReason =
+  | "l2-doc-missing"
+  | "l2-status-not-confirmed"
+  | "l2-pair-mismatch"
+  | "l2-next-freeze-mismatch"
+  | "l2-prototype-evidence-missing"
+  | "l5-doc-missing"
+  | "l5-status-not-confirmed"
+  | "l5-pair-mismatch"
+  | "l5-next-freeze-mismatch"
+  | "l8-test-design-missing"
+  | "l8-test-design-not-confirmed"
+  | "l8-pair-mismatch"
+  | "l8-execution-layer-mismatch"
+  | "l8-coverage-missing"
+  | "l8-gwt-missing";
+
+export interface ForwardFreezeContractViolation {
+  path: string;
+  reason: ForwardFreezeContractViolationReason;
+  detail: string;
+}
+
+export interface ForwardFreezeContractResult {
+  ok: boolean;
+  checked: number;
+  l2Docs: number;
+  l5Docs: number;
+  violations: ForwardFreezeContractViolation[];
+}
+
+const REQUIRED_L2_PROTOTYPE_DOCS = [
+  "docs/design/harness/L2-screen/business-flow.md",
+  "docs/design/harness/L2-screen/screen-detail.md",
+  "docs/design/harness/L2-screen/screen-flow.md",
+  "docs/design/harness/L2-screen/screen-list.md",
+  "docs/design/harness/L2-screen/ui-element.md",
+  "docs/design/harness/L2-screen/wireframe.md",
+] as const;
+
+const REQUIRED_L5_VERIFICATION_DOCS = [
+  "docs/design/harness/L5-detailed-design/if-detail.md",
+  "docs/design/harness/L5-detailed-design/internal-processing.md",
+  "docs/design/harness/L5-detailed-design/module-decomposition.md",
+  "docs/design/harness/L5-detailed-design/physical-data.md",
+  "docs/design/harness/L5-detailed-design/ui-detail.md",
+] as const;
+
+const L2_TEST_DESIGN = "docs/test-design/harness/L10-ux-validation-test-design.md";
+const L5_TEST_DESIGN = "docs/test-design/harness/L8-integration-test-design.md";
+const L5_DESIGN_DIR = "docs/design/harness/L5-detailed-design/";
+
+function normalizedStatus(doc: PairDoc | undefined): string {
+  return stripInlineComment(doc?.status ?? "").toLowerCase();
+}
+
+function normalizedNextPairFreeze(doc: PairDoc | undefined): string {
+  return stripInlineComment(doc?.nextPairFreeze ?? "");
+}
+
+function hasL2PrototypeEvidence(doc: PairDoc): boolean {
+  const text = `${doc.status ?? ""}\n${doc.content ?? ""}`;
+  return /G2 freeze|PO|サインオフ|合意|確定|prototype|プロト/.test(text);
+}
+
+function hasGwtTable(doc: PairDoc | undefined): boolean {
+  const text = doc?.content ?? "";
+  return /\|\s*IT-ID\s*\|\s*Given\s*\|\s*When\s*\|\s*Then\s*\|/.test(text);
+}
+
+export function analyzeForwardFreezeContracts(docs: PairDoc[]): ForwardFreezeContractResult {
+  const byPath = new Map(docs.map((d) => [d.path, d]));
+  const violations: ForwardFreezeContractViolation[] = [];
+
+  for (const path of REQUIRED_L2_PROTOTYPE_DOCS) {
+    const doc = byPath.get(path);
+    if (!doc) {
+      violations.push({ path, reason: "l2-doc-missing", detail: "required L2 prototype doc" });
+      continue;
+    }
+    if (normalizedStatus(doc) !== "confirmed") {
+      violations.push({
+        path,
+        reason: "l2-status-not-confirmed",
+        detail: doc.status ?? "missing status",
+      });
+    }
+    if (doc.pairArtifact !== L2_TEST_DESIGN) {
+      violations.push({
+        path,
+        reason: "l2-pair-mismatch",
+        detail: doc.pairArtifact ?? "missing pair_artifact",
+      });
+    }
+    if (normalizedNextPairFreeze(doc) !== "L10") {
+      violations.push({
+        path,
+        reason: "l2-next-freeze-mismatch",
+        detail: doc.nextPairFreeze ?? "missing next_pair_freeze",
+      });
+    }
+    if (!hasL2PrototypeEvidence(doc)) {
+      violations.push({
+        path,
+        reason: "l2-prototype-evidence-missing",
+        detail: "G2/PO/prototype agreement marker is required",
+      });
+    }
+  }
+
+  for (const path of REQUIRED_L5_VERIFICATION_DOCS) {
+    const doc = byPath.get(path);
+    if (!doc) {
+      violations.push({ path, reason: "l5-doc-missing", detail: "required L5 detail doc" });
+      continue;
+    }
+    if (normalizedStatus(doc) !== "confirmed") {
+      violations.push({
+        path,
+        reason: "l5-status-not-confirmed",
+        detail: doc.status ?? "missing status",
+      });
+    }
+    if (doc.pairArtifact !== L5_TEST_DESIGN) {
+      violations.push({
+        path,
+        reason: "l5-pair-mismatch",
+        detail: doc.pairArtifact ?? "missing pair_artifact",
+      });
+    }
+    if (normalizedNextPairFreeze(doc) !== "L8") {
+      violations.push({
+        path,
+        reason: "l5-next-freeze-mismatch",
+        detail: doc.nextPairFreeze ?? "missing next_pair_freeze",
+      });
+    }
+  }
+
+  const l8 = byPath.get(L5_TEST_DESIGN);
+  if (!l8) {
+    violations.push({
+      path: L5_TEST_DESIGN,
+      reason: "l8-test-design-missing",
+      detail: "required L8 verification design",
+    });
+  } else {
+    if (normalizedStatus(l8) !== "confirmed") {
+      violations.push({
+        path: L5_TEST_DESIGN,
+        reason: "l8-test-design-not-confirmed",
+        detail: l8.status ?? "missing status",
+      });
+    }
+    if (l8.pairArtifact !== L5_DESIGN_DIR) {
+      violations.push({
+        path: L5_TEST_DESIGN,
+        reason: "l8-pair-mismatch",
+        detail: l8.pairArtifact ?? "missing pair_artifact",
+      });
+    }
+    if (fmValue(l8.content ?? "", "executed_at_layer") !== "L8") {
+      violations.push({
+        path: L5_TEST_DESIGN,
+        reason: "l8-execution-layer-mismatch",
+        detail: fmValue(l8.content ?? "", "executed_at_layer") ?? "missing executed_at_layer",
+      });
+    }
+    for (const path of REQUIRED_L5_VERIFICATION_DOCS) {
+      const name = basename(path);
+      if (!(l8.content ?? "").includes(name)) {
+        violations.push({
+          path: L5_TEST_DESIGN,
+          reason: "l8-coverage-missing",
+          detail: name,
+        });
+      }
+    }
+    if (!hasGwtTable(l8)) {
+      violations.push({
+        path: L5_TEST_DESIGN,
+        reason: "l8-gwt-missing",
+        detail: "confirmed IT cases must include Given/When/Then",
+      });
+    }
+  }
+
+  return {
+    ok: violations.length === 0,
+    checked: REQUIRED_L2_PROTOTYPE_DOCS.length + REQUIRED_L5_VERIFICATION_DOCS.length + 1,
+    l2Docs: REQUIRED_L2_PROTOTYPE_DOCS.length,
+    l5Docs: REQUIRED_L5_VERIFICATION_DOCS.length,
+    violations,
+  };
+}
+
+export function forwardFreezeContractMessages(result: ForwardFreezeContractResult): string[] {
+  if (result.ok) {
+    return [
+      `forward-freeze-contracts - OK (checked=${result.checked}, l2=${result.l2Docs}, l5=${result.l5Docs})`,
+    ];
+  }
+  return [
+    `forward-freeze-contracts - violation (checked=${result.checked}, findings=${result.violations.length})`,
+    ...result.violations
+      .slice(0, 10)
+      .map((v) => `forward-freeze-contracts - ${v.reason}: ${v.path} (${v.detail})`),
+  ];
+}
+
 /**
  * V-model pair-freeze lint (requirements §6.8.3 / §2 設計層)。
  * 設計層 ①⇔③ pair の双方向整合・孤児0 を検査する。G7 の 4 artifact 12 edge trace は別 (未実装、後続)。
  */
+export type RefactorQaReleaseContractViolationReason =
+  | "authoring-source-missing"
+  | "authoring-source-marker-missing"
+  | "refactor-process-marker-missing"
+  | "workflow-contract-marker-missing";
+
+export interface RefactorQaReleaseContractViolation {
+  path: string;
+  reason: RefactorQaReleaseContractViolationReason;
+  detail: string;
+}
+
+export interface RefactorQaReleaseContractInput {
+  authoringSource: string | null;
+  refactorProcess: string | null;
+  workflowContracts: string | null;
+}
+
+export interface RefactorQaReleaseContractResult {
+  ok: boolean;
+  checked: number;
+  violations: RefactorQaReleaseContractViolation[];
+}
+
+const REFACTOR_QA_AUTHORING_SOURCE = "docs/governance/vmodel-refactor-qa-release-gates.md";
+const REFACTOR_PROCESS_DOC = "docs/process/modes/refactor.md";
+const WORKFLOW_CONTRACTS_SOURCE = "src/workflow/contracts.ts";
+
+const REFACTOR_QA_AUTHORING_MARKERS = [
+  "VMS-012",
+  "VMS-013",
+  "循環的複雑度",
+  "関数あたり15超",
+  "重複コード率",
+  "5%超",
+  "単体10分超",
+  "直近3回中2回リグレッション",
+  "振る舞い不変",
+  "characterization test",
+  "切り戻し",
+  "ISO/IEC 25010",
+  "Go/No-Go",
+  "G01",
+  "G08",
+  "schedule --live",
+  "review --status",
+  "スモーク",
+  "No-Go",
+] as const;
+
+const REFACTOR_PROCESS_MARKERS = [
+  "behavior-invariant",
+  "assertRefactorInvariant",
+  "test IDs",
+  "Database-triggered Refactor",
+  "vmodel-refactor-qa-release-gates.md",
+] as const;
+
+const WORKFLOW_CONTRACT_MARKERS = [
+  "assertRefactorInvariant",
+  "input.before === input.after",
+  "refactor-test-id-missing",
+  "linked regression test ids",
+] as const;
+
+function missingMarkers(content: string | null, markers: readonly string[]): string[] {
+  const text = content ?? "";
+  return markers.filter((marker) => !text.includes(marker));
+}
+
+export function loadRefactorQaReleaseContractInput(
+  repoRoot: string = process.cwd(),
+): RefactorQaReleaseContractInput {
+  const read = (path: string): string | null => {
+    try {
+      return readFileSync(join(repoRoot, path), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  return {
+    authoringSource: read(REFACTOR_QA_AUTHORING_SOURCE),
+    refactorProcess: read(REFACTOR_PROCESS_DOC),
+    workflowContracts: read(WORKFLOW_CONTRACTS_SOURCE),
+  };
+}
+
+export function analyzeRefactorQaReleaseContracts(
+  input: RefactorQaReleaseContractInput,
+): RefactorQaReleaseContractResult {
+  const violations: RefactorQaReleaseContractViolation[] = [];
+
+  if (input.authoringSource == null) {
+    violations.push({
+      path: REFACTOR_QA_AUTHORING_SOURCE,
+      reason: "authoring-source-missing",
+      detail: "ZIP108/109 authoring source is required",
+    });
+  }
+
+  for (const marker of missingMarkers(input.authoringSource, REFACTOR_QA_AUTHORING_MARKERS)) {
+    violations.push({
+      path: REFACTOR_QA_AUTHORING_SOURCE,
+      reason: "authoring-source-marker-missing",
+      detail: marker,
+    });
+  }
+
+  for (const marker of missingMarkers(input.refactorProcess, REFACTOR_PROCESS_MARKERS)) {
+    violations.push({
+      path: REFACTOR_PROCESS_DOC,
+      reason: "refactor-process-marker-missing",
+      detail: marker,
+    });
+  }
+
+  for (const marker of missingMarkers(input.workflowContracts, WORKFLOW_CONTRACT_MARKERS)) {
+    violations.push({
+      path: WORKFLOW_CONTRACTS_SOURCE,
+      reason: "workflow-contract-marker-missing",
+      detail: marker,
+    });
+  }
+
+  return {
+    ok: violations.length === 0,
+    checked:
+      REFACTOR_QA_AUTHORING_MARKERS.length +
+      REFACTOR_PROCESS_MARKERS.length +
+      WORKFLOW_CONTRACT_MARKERS.length,
+    violations,
+  };
+}
+
+export function refactorQaReleaseContractMessages(
+  result: RefactorQaReleaseContractResult,
+): string[] {
+  if (result.ok) {
+    return [`refactor-qa-release-contracts - OK (checked=${result.checked})`];
+  }
+  return [
+    `refactor-qa-release-contracts - violation (checked=${result.checked}, findings=${result.violations.length})`,
+    ...result.violations
+      .slice(0, 10)
+      .map((v) => `refactor-qa-release-contracts - ${v.reason}: ${v.path} (${v.detail})`),
+  ];
+}
+
 export function lintVmodel(_path?: string): LintResult {
   const result = analyzePairFreeze(loadPairDocs());
   return { ok: result.ok, messages: pairFreezeMessages(result) };
@@ -262,6 +662,10 @@ export interface GroupReadiness {
   draft: number;
   placeholder: number;
   hasOrphan: boolean;
+  activeRevisionTotal: number;
+  activeRevisionConfirmed: number;
+  activeRevisionDraft: number;
+  activeRevisionHasOrphan: boolean;
   requiredPlanIds: string[];
   confirmedPlanIds: string[];
   missingPlanIds: string[];
@@ -329,12 +733,17 @@ export function analyzeVerificationGroups(
   planEvidence: VerificationPlanEvidenceMap = new Map<string, VerificationPlanEvidence>(),
 ): GroupReadiness[] {
   const orphanPaths = new Set(orphans.map((o) => o.path));
+  const docsByPath = new Map(docs.map((doc) => [doc.path, doc]));
   return VERIFICATION_GROUPS.map((g) => {
     const layerSet = new Set(g.layers);
-    const groupDocs = docs.filter((d) => {
+    const allGroupDocs = docs.filter((d) => {
       const layer = designLayerFromPath(d.path);
       return isDesignSubDoc(d) && layer != null && layerSet.has(layer);
     });
+    const groupDocs = allGroupDocs.filter((doc) => !isValidAdditiveRevision(doc, docsByPath));
+    const activeRevisionDocs = allGroupDocs.filter((doc) =>
+      isValidAdditiveRevision(doc, docsByPath),
+    );
     let confirmed = 0;
     let draft = 0;
     let placeholder = 0;
@@ -346,6 +755,11 @@ export function analyzeVerificationGroups(
       if (orphanPaths.has(d.path)) hasOrphan = true;
     }
     const total = groupDocs.length;
+    const activeRevisionConfirmed = activeRevisionDocs.filter(
+      (doc) => doc.status === "confirmed" || doc.status === "completed",
+    ).length;
+    const activeRevisionDraft = activeRevisionDocs.length - activeRevisionConfirmed;
+    const activeRevisionHasOrphan = activeRevisionDocs.some((doc) => orphanPaths.has(doc.path));
     const requiredPlanIds = g.requiredPlanIds ?? [];
     const confirmedPlanIds = requiredPlanIds.filter((id) => {
       const evidence = planEvidence.get(id);
@@ -374,6 +788,10 @@ export function analyzeVerificationGroups(
       draft,
       placeholder,
       hasOrphan,
+      activeRevisionTotal: activeRevisionDocs.length,
+      activeRevisionConfirmed,
+      activeRevisionDraft,
+      activeRevisionHasOrphan,
       requiredPlanIds,
       confirmedPlanIds,
       missingPlanIds,
@@ -408,7 +826,13 @@ export function verificationGroupMessages(groups: GroupReadiness[]): string[] {
         g.requiredPlanIds.length > 0
           ? `, L7 plans ${g.confirmedPlanIds.length}/${g.requiredPlanIds.length} confirmed, evidence ${g.evidenceReadyPlanIds.length}/${g.requiredPlanIds.length}`
           : "";
-      return `verification — ${head}: ✅ freeze 完了 (${g.confirmed}/${g.total} confirmed${park}${planEvidence}, 孤児0) → 検証サイクル発火可`;
+      const revision =
+        g.activeRevisionTotal === 0
+          ? ""
+          : g.activeRevisionDraft > 0 || g.activeRevisionHasOrphan
+            ? ` / active revisions IN-PROGRESS (${g.activeRevisionConfirmed}/${g.activeRevisionTotal} confirmed${g.activeRevisionHasOrphan ? ", pair 孤児あり" : ""})`
+            : ` / active revisions ${g.activeRevisionConfirmed}/${g.activeRevisionTotal} confirmed`;
+      return `verification — ${head}: ✅ base freeze 完了 (${g.confirmed}/${g.total} confirmed${park}${planEvidence}, 孤児0)${revision} → 検証サイクル発火可`;
     }
     const parts = [`${g.confirmed}/${g.total} confirmed`];
     if (g.draft > 0) parts.push(`draft ${g.draft}`);

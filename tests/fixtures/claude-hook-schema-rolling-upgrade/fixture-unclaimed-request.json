@@ -1,0 +1,10 @@
+{
+  "projectId": "fixture/claude-hook-schema-rolling-upgrade",
+  "memoryId": "memory:fixture:claude-hook-schema-unclaimed-v1",
+  "operationId": "fixture-unclaimed-consume-v1",
+  "producerProvider": "codex",
+  "consumerProvider": "claude",
+  "sessionId": "fixture-claude-session-v1",
+  "exactHead": "3333333333333333333333333333333333333333",
+  "reviewRevision": "rv1-4444444444444444444444444444444444444444444444444444444444444444"
+}

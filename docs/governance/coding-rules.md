@@ -4,6 +4,15 @@
 Requirements reference: `docs/governance/ut-tdd-agent-harness-requirements_v1.2.md` §7.6.1.
 実行ゲート: `src/lint/coding-rules.ts` を `ut-tdd doctor` から実行する。
 
+## 最小実装原則 (anti-over-engineering)
+
+要件を満たす最短・最小の実装を選ぶ。over-engineering (投機的なコード・機能の大量生産) は品質欠陥として扱う。
+
+- 新しい型・契約・層・registry・receipt・機能を足す前に、既存の型/関数/データで解けないかを先に問う (YAGNI)。将来の投機で契約や抽象を増やさない。
+- 同じ問題は「コード・機能を大量に作る」より「短く解く」方を優先する。行数・型数・分岐が増える解は、要件が実際に要求している場合だけ採る。
+- object-oriented DDD を採る理由は、ドメインを小さく凝集した型で表現して code 量と分散を減らすためであって、ceremony (wrapper / envelope / registry の積み増し) を増やすためではない。DDD が code を膨張させているなら設計を疑う。
+- 設計 review / freeze では各契約・型・層について「要件のどの falsifiable な必要から来るか」を問い、答えられない追加は削るか後続 revision へ送る。
+
 ## Workflow Placement / workflow 上の位置づけ
 
 coding-rule 文書は workflow step であり、事後の CI note ではない。
@@ -56,6 +65,36 @@ coding_rules:
       description: "機械向け CLI、doctor、lint、gate、JSON、env、status、oracle surface は安定した ASCII English decision token を使う。"
 ```
 
+## ドメイン・構造設計規約 (PLAN-L4-21)
+
+本節は ZIP 94/95 相当の L4 設計契約である。上の `coding_rules` YAML は現行 hard gate の正本であり、本節の
+追加 rule は L6/L7 実装 PLAN で analyzer と oracle を追加してから YAML の hard gate へ昇格する。
+
+### 値オブジェクト
+
+- VO は完全コンストラクタを持つ。必須値を後から setter で埋める初期化は禁止する。
+- VO は immutable とし、public mutable field / setter / mutable collection の外部公開を避ける。
+- user input 由来の `create` と persisted/projection 由来の `reconstruct` を分離する。
+- invalid input は `null` / `false` で潰さず、typed finding、zod issue、または explicit error state として返す。
+- VO 値域と正規化は呼び出し側へ散らさず、schema SSoT または VO module に置く。
+
+### クラス・メソッド構造
+
+| rule id | 設計閾値 | 目的 |
+|---|---|---|
+| `max-nesting-depth` | source function 内の制御ネストは原則 3 以下 | main path を浅くし、guard clause / helper 抽出を促す |
+| `max-function-lines` | source function / method は概ね 80 nonblank lines 以下 | 1 関数 1 責務を保つ |
+| `max-cyclomatic-complexity` | source function の分岐点は概ね 12 以下 | policy table / registry / strategy への外部化を促す |
+| `command-query-separation` | command は mutation、query は読み取りに分離 | 副作用と戻り値の混在による検証不能性を避ける |
+| `prefer-guard-clause` | 正常系を深い `else` に閉じ込めない | 変更時の局所性とレビュー容易性を上げる |
+
+hard gate 化の順序:
+
+1. 既存 repo の実測値を L7 実装 PLAN で記録する。
+2. false-positive が出やすい CQS / guard clause は限定 pattern から始める。
+3. 既存超過は silent grandfather にせず、refactor candidate または期限付き例外として記録する。
+4. analyzer 実装と L7 oracle が揃った rule だけ `coding_rules` YAML の hard gate へ昇格する。
+
 ## 機械 surface の言語
 
 機械読取・機械解析される surface は安定した ASCII English token を使う。
@@ -84,3 +123,4 @@ token 自体は ASCII のままにする。
 - fail-open は catch block が明示 state を返す/記録する、または fail-open intent をその場に文書化する場合だけ許可する。silent catch block と rethrow-only catch block は例外ではない。
 - boundary rules は v2 では意図的に最小とする。`lint` は pure、`runtime` は governance checks より下位、`schema` は feature modules より下位に置く。
 - 例外は inline comment で処理しない。先に policy PLAN を追加し、この SSoT と lint tests を同時に更新する。
+- **変動点外部化 (左肺設計義務、定義 = `docs/design/harness/L5-detailed-design/internal-processing.md` C.7)**: 設計 doc の変動点 (変更・追加が頻出する箇所 = project 差 / 増える集合 / 差し替え実装 / 閾値対応表) は設計時に外部化 (config/registry/policy) し、外部化設計 (何が変わる/機構/固定契約/未知キー fail-close) を doc に内包する。ハードコード→後日 retrofit の発生源を潰す。変動しない箇所の外部化は禁止 (過大外部化 = YAGNI)。他 layer 設計 author も本義務に従う。

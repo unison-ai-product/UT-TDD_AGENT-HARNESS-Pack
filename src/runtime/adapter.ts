@@ -14,8 +14,8 @@ import {
   OPTIONAL_SKILL_LABEL,
   REQUIRED_SKILL_LABEL,
   unavailableProviderMessage,
-} from "./adapter-policy";
-import type { ExecutionMode } from "./detect";
+} from "./adapter-policy.ts";
+import type { ExecutionMode } from "./detect.ts";
 
 export type AdapterProvider = "claude" | "codex";
 
@@ -289,9 +289,15 @@ export function normalizeProviderEffort(
   provider: AdapterProvider,
   effort: string | undefined,
 ): string | undefined {
-  if (provider !== "claude" || !effort) return effort;
-  if (effort === "middle") return "medium";
-  if (effort === "xhigh") return "high";
+  if (!effort) return effort;
+  if (provider === "claude") {
+    if (effort === "middle") return "medium";
+    if (effort === "xhigh") return "high";
+    return effort;
+  }
+  // codex: repo 語彙 "middle" を codex config 語彙 "medium" へ正規化
+  // (~/.codex/config.toml model_reasoning_effort の実キー、PLAN-L7-255 PY-2)。
+  if (provider === "codex" && effort === "middle") return "medium";
   return effort;
 }
 
@@ -334,6 +340,10 @@ export function buildAdapterPlan(intent: AdapterIntent, mode: ExecutionMode): Ad
     ? [
         CODEX_STDIN_ARGS[0],
         ...(intent.model ? [CODEX_MODEL_FLAG, intent.model] : []),
+        // effort を argv へ貫通 (A-183 PY-2 是正、実機裏取り 2026-07-16:
+        // codex-cli 0.144.1 で `-c model_reasoning_effort=low` および `=xhigh`
+        // (mini ladder base) の受理を確認)
+        ...(providerEffort ? ["-c", `model_reasoning_effort=${providerEffort}`] : []),
         CODEX_STDIN_ARGS[1],
       ]
     : [

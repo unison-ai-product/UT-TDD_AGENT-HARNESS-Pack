@@ -6,12 +6,13 @@
  */
 
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { planIdSchema } from "../src/schema/frontmatter";
+import { planIdSchema } from "../src/schema/frontmatter.ts";
 
-const plansDir = join(dirname(fileURLToPath(import.meta.url)), "..", "docs", "plans");
+import { headSnapshotRoot } from "./support/workspace-roots.ts";
+
+const plansDir = join(headSnapshotRoot(), "docs", "plans");
 
 function extract(content: string, key: string): string | undefined {
   const m = content.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));

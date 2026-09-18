@@ -11,7 +11,7 @@ import {
   checkScreenIdValidity,
   expandFrL1Refs,
   loadDocConsistencyDocs,
-} from "../src/lint/doc-consistency";
+} from "../src/lint/doc-consistency.ts";
 
 describe("doc consistency (doc 間整合の自動化)", () => {
   const docs = loadDocConsistencyDocs();

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { analyzeAssetDrift, assetDriftMessages, loadAssetDriftInput } from "../lint/asset-drift";
-import { analyzeBranchKind, branchKindMessages, loadBranchKindInput } from "../lint/branch-kind";
+import { analyzeAssetDrift, assetDriftMessages, loadAssetDriftInput } from "../lint/asset-drift.ts";
+import { analyzeBranchKind, branchKindMessages, loadBranchKindInput } from "../lint/branch-kind.ts";
 import {
   analyzeChangeImpact,
   analyzeChangeSetIntegrity,
@@ -8,8 +8,8 @@ import {
   changeSetIntegrityMessages,
   isGitRepository,
   loadChangedFiles,
-} from "../lint/change-impact";
-import { analyzeDependencyDrift, loadDependencyDriftInput } from "../lint/dependency-drift";
+} from "../lint/change-impact.ts";
+import { analyzeDependencyDrift, loadDependencyDriftInput } from "../lint/dependency-drift.ts";
 import {
   analyzeDescentObligations,
   descentObligationMessages,
@@ -18,19 +18,19 @@ import {
   loadDescentAdjacency,
   loadFrUnitCoverageOracles,
   loadTraceKeyedArtifacts,
-} from "../lint/descent-obligation";
-import { analyzeModuleDrift, loadModuleDocs, moduleDriftMessages } from "../lint/module-drift";
+} from "../lint/descent-obligation.ts";
+import { analyzeModuleDrift, loadModuleDocs, moduleDriftMessages } from "../lint/module-drift.ts";
 import {
   analyzeSkillAssignments,
   loadSkillAssignmentDocs,
   skillAssignmentMessages,
-} from "../lint/skill-assignment";
+} from "../lint/skill-assignment.ts";
 import {
   analyzeVerificationProfileGate,
   loadVerificationRecommendation,
   verificationProfileGateMessages,
-} from "../lint/verification-profile";
-import { SUBAGENT_ALLOWLIST } from "../runtime/agent-guard";
+} from "../lint/verification-profile.ts";
+import { SUBAGENT_ALLOWLIST } from "../runtime/agent-guard.ts";
 
 /**
  * architecture §3.1 設計 module 集合 ⊇ src/ 実在 module を検査 (IMP-075、hard)。

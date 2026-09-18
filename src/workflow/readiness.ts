@@ -1,5 +1,5 @@
-import type { HarnessDb } from "../state-db/index";
-import { upsertRow } from "../state-db/index";
+import type { HarnessDb } from "../state-db/index.ts";
+import { upsertRow } from "../state-db/index.ts";
 
 export interface AutomationReadinessRow {
   workflow_run_id: string;

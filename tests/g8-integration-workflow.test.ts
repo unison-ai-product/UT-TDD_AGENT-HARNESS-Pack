@@ -3,7 +3,7 @@ import {
   analyzeG8IntegrationWorkflow,
   g8IntegrationWorkflowMessages,
   loadG8IntegrationWorkflowInput,
-} from "../src/lint/g8-integration-workflow";
+} from "../src/lint/g8-integration-workflow.ts";
 
 const workflowBlock = [
   "## G8-WORKFLOW",

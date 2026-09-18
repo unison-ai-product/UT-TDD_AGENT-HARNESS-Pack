@@ -6,7 +6,7 @@ import {
   loadDocIndex,
   ROUTABLE_DOCS,
   suggestSections,
-} from "../src/context/doc-router";
+} from "../src/context/doc-router.ts";
 
 const SYNTHETIC = [
   "# UT-TDD 構想",

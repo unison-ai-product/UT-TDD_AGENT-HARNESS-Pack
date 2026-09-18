@@ -14,6 +14,27 @@ applies_to:
     - Refactor
     - Retrofit
     - Recovery
+decision_points:
+  - when: "A shortcut is taken during implementation (skipped test, @ts-ignore, missing design doc)"
+    choose: "Record it as a debt entry (dedicated PLAN or debt_items field) with a concrete ttl"
+    over: "Leaving a bare // TODO: fix later comment"
+    because: "A bare TODO has no TTL, no owner, and is invisible to ut-tdd doctor; only a debt entry is machine-tracked"
+  - when: "A provisional decision's TTL has passed"
+    choose: "Either discharge the debt (advance the Refactor/Retrofit PLAN to done) or extend the TTL with a recorded rationale in review_evidence"
+    over: "Silently extending the TTL without recording a reason"
+    because: "The TTL discipline explicitly states never silently extend a TTL — record the reason"
+  - when: "Setting a TTL for a provisional decision"
+    choose: "Set a concrete date tied to a stated finality condition (e.g. a metric threshold)"
+    over: "Setting ttl to a date years in the future"
+    because: "A far TTL without a stated finality condition is flagged as a red flag in review"
+  - when: "A Refactor/Retrofit PLAN discharges debt and there is also new FR-driven work to do in the same area"
+    choose: "Open a separate add-impl PLAN for the new functionality"
+    over: "Bundling the new feature work into the same debt-discharge PLAN"
+    because: "A Refactor PLAN must not add new FR-driven functionality — conflating discharge with feature work is an explicit anti-pattern"
+  - when: "Creating a standalone debt PLAN"
+    choose: "Link it in the creditor PLAN's dependencies field"
+    over: "Creating the debt PLAN without referencing it from the PLAN that incurred the debt"
+    because: "An unlinked debt PLAN is invisible to governance — this is listed as an anti-pattern"
 ---
 
 # debt register
@@ -98,7 +119,7 @@ Discharge steps for a standalone debt PLAN:
 1. [直列] Identify V-model gap: which layer doc or test is absent/broken
 2. [直列] Author or repair the missing artifact (design doc / test design)
 3. [並列] Implement fix in src/ — scoped to the debt_reason
-4. [並列] bun run typecheck && bun run lint && bun run test — green
+4. [並列] npm run typecheck && npm run lint && npm run test — green
 5. [直列] ut-tdd doctor — no new governance failures
 6. [直列] ut-tdd review --uncommitted — debt PLAN review_evidence populated
 7. [直列] Set status: done; ut-tdd handover if session boundary
@@ -111,7 +132,7 @@ caught by `ut-tdd doctor` or `ut-tdd plan lint`:
 
 - An `add-impl` PLAN with no Reverse back-fill PLAN in `dependencies`.
 - A `@ts-ignore` or `// biome-ignore` comment without a PLAN-linked rationale
-  in the same file (detectable by `bun run lint`).
+  in the same file (detectable by `npm run lint`).
 - A design doc path listed in a PLAN `generates` field that does not exist
   on disk.
 - A `trace-freeze` PLAN with `review_evidence: []`.

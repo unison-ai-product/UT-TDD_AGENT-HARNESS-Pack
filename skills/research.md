@@ -12,6 +12,31 @@ applies_to:
     - Scrum
     - Forward
     - Add-feature
+decision_points:
+  - when: "A URL was found via WebSearch and is a candidate citation"
+    choose: "WebFetch the body and confirm the claim actually appears before citing it"
+    over: "Citing the URL directly from the WebSearch snippet"
+    because: "The snippet can misrepresent the source; only the fetched body confirms publication date, version scope, and the actual claim"
+  - when: "A version or compatibility constraint needs to be asserted"
+    choose: "Confirm it from a WebFetch-verified primary source"
+    over: "Asserting it from a search snippet alone"
+    because: "This is explicitly prohibited: snippet-only version claims are unverified and can be stale or out of scope"
+  - when: "Selecting which source to use as decision evidence in an ADR or PLAN"
+    choose: "Use a primary source (vendor docs, standard spec, official repo) as the citation of record"
+    over: "Using a secondary source (aggregation/repost/summary) as the sole citation"
+    because: "Secondary sources lack original methodology and must not be a sole citation in an ADR or PLAN"
+  - when: "A previously cited URL now 404s or redirects"
+    choose: "Re-fetch it and re-confirm the claim before continuing to cite it"
+    over: "Keeping the old citation because it was valid at an earlier point"
+    because: "Content behind a URL can change; an unconfirmed stale citation is unverifiable evidence"
+  - when: "A multi-source research sweep is delegated to pmo-haiku"
+    choose: "Verify at least one returned source yourself before recording it as authoritative"
+    over: "Recording the delegated output directly as authoritative research"
+    because: "Delegated output is a claim, not evidence, until independently checked"
+  - when: "Recording a research finding"
+    choose: "Always include the retrieval date"
+    over: "Omitting the retrieval date when the claim itself seems stable"
+    because: "Without a retrieval date, staleness of the finding cannot be judged later"
 ---
 
 # research

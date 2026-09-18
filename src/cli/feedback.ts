@@ -1,17 +1,17 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import type { Command } from "commander";
-import { emitFeedbackEvents } from "../feedback/engine";
-import { renderFeedbackEventRows } from "../feedback/surface";
+import { emitFeedbackEvents } from "../feedback/engine.ts";
+import { renderFeedbackEventRows } from "../feedback/surface.ts";
 import {
   type ClassifyResult,
   emitClassifyRequest,
   type FeedbackCtx,
   pendingRecoveryProposals,
   recordFeedback,
-} from "../runtime/forced-stop";
-import { nodeDeps, resolveActivePlan } from "../runtime/session-log";
-import { defaultHarnessDbPath, openHarnessDb } from "../state-db/index";
+} from "../runtime/forced-stop.ts";
+import { nodeDeps, resolveActivePlan } from "../runtime/session-log.ts";
+import { defaultHarnessDbPath, openHarnessDb } from "../state-db/index.ts";
 
 function gitBranch(): string | null {
   try {
@@ -38,7 +38,9 @@ export function registerFeedbackCommands(program: Command): void {
 
   feedback
     .command("list")
-    .description("emit/list harness.db feedback events")
+    .description(
+      "emit/list harness.db feedback events from findings, quality signals, and detector route candidates",
+    )
     .option("--json", "JSON output")
     .option(
       "--emit",

@@ -136,6 +136,18 @@ Forward 降下は **二層**で回す (定義正本 = concept §10.2、PLAN-RECO
 
 詳細メカニクスは carry として残す (内容は消さない)。
 
+## 9. active version-up programのfrontier表示
+
+将来保全の`route_mode=version-up`と、現在実行する大規模upgrade programを混同しない。後者はForward/Add-featureの
+PLAN群として進め、専用工程表の`rag/status/current_location`をactive program frontierとして表示する。
+
+- base roadmapのband/spanが完了していても、active program工程にyellow/draftがあれば`frontier: なし`と表示しない。
+- active programの設計doc/test-designがdraftなら、過去revisionのpair freeze完了を現revisionのfreeze完了として表示しない。
+- 右腕engine PLANがdraftでL8-L14 verify PLANが不足する間、right-arm gateは`IN-PROGRESS`と不足layerを表示する。
+- active programのyellow/draftは正常な進行状態であり、直ちにCI failureにはしない。ただし表示を隠す、greenへ丸める、
+  base roadmap完了で代替することは禁止する。
+- active program PLANがconfirmed/completedを主張した後も不足artifact/layer/evidenceが残る場合はhard failureへ昇格する。
+
 ## MCP-VERIFICATION-PROFILE-WORKFLOW
 
 Forward work can recommend external MCP servers, plugins, and test foundations only through profile rules. They are verification aids, not authoring sources.

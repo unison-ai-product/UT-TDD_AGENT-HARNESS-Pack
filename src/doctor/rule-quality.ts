@@ -5,27 +5,57 @@ import {
   loadCodingRuleDocs,
   loadCodingRulePolicy,
   loadCodingWorkflowDocs,
-} from "../lint/coding-rules";
-import { analyzeDddTddRules, dddTddRulesMessages, loadDddTddInputs } from "../lint/ddd-tdd-rules";
+} from "../lint/coding-rules.ts";
+import {
+  analyzeDddTddRules,
+  dddTddRulesMessages,
+  loadDddTddInputs,
+} from "../lint/ddd-tdd-rules.ts";
 import {
   analyzeDesignLanguage,
   designLanguageMessages,
   loadDesignLanguageDocs,
-} from "../lint/design-language";
-import { analyzeGateConfirm, gateConfirmMessages, loadGateConfirmDocs } from "../lint/gate-confirm";
+} from "../lint/design-language.ts";
 import {
-  analyzeReadability,
+  analyzeGateConfirm,
+  gateConfirmMessages,
+  loadGateConfirmDocs,
+} from "../lint/gate-confirm.ts";
+import {
+  analyzeGateIdFormat,
+  gateIdFormatMessages,
+  loadGateIdFormatInput,
+} from "../lint/gate-id-format.ts";
+import {
+  analyzeModelIdDocDrift,
+  loadModelIdDocDriftTexts,
+  modelIdDocDriftMessages,
+} from "../lint/model-id-doc-drift.ts";
+import {
+  analyzeArtifacts,
   loadRuntimeArtifactReadabilityDocs,
   loadSystemReadabilityDocs,
   readabilityMessages,
   runtimeReadabilityMessages,
-} from "../lint/readability";
-import { analyzeRuleDrift, loadRuleAdapterDocs, ruleDriftMessages } from "../lint/rule-drift";
+} from "../lint/readability.ts";
+import {
+  analyzeHookParity,
+  analyzeRuleDrift,
+  hookParityMessages,
+  loadClaudeHookSettings,
+  loadRuleAdapterDocs,
+  ruleDriftMessages,
+} from "../lint/rule-drift.ts";
 import {
   analyzeRuntimePortability,
   loadRuntimePortabilityDocs,
   runtimePortabilityMessages,
-} from "../lint/runtime-portability";
+} from "../lint/runtime-portability.ts";
+import {
+  analyzeSecretScan,
+  loadSystemSecretScanArtifacts,
+  secretScanMessages,
+} from "../lint/secret-scan.ts";
 
 export function checkCodingRules(repoRoot: string): { messages: string[]; ok: boolean } {
   if (!existsSync(repoRoot)) {
@@ -75,10 +105,35 @@ export function checkRuleDrift(repoRoot: string): { messages: string[]; ok: bool
     return { messages: ["rule-drift - violation: repo root could not be read"], ok: false };
   }
   try {
-    const r = analyzeRuleDrift(loadRuleAdapterDocs(repoRoot));
-    return { messages: ruleDriftMessages(r), ok: r.ok };
+    const docs = loadRuleAdapterDocs(repoRoot);
+    const r = analyzeRuleDrift(docs);
+    // marker の有無だけでは「node と書いてあるが引数や event が実体と違う」drift を拾えない。
+    // hook 記載と settings.json の等価性そのものを doctor の判定へ含める (Issue #322)。
+    const parity = analyzeHookParity({
+      claudeRuntimeDoc: docs.claudeRuntime,
+      settingsJson: loadClaudeHookSettings(repoRoot),
+    });
+    return {
+      messages: [...ruleDriftMessages(r), ...hookParityMessages(parity)],
+      ok: r.ok && parity.ok,
+    };
   } catch {
     return { messages: ["rule-drift - violation: adapter rule docs could not be read"], ok: false };
+  }
+}
+
+export function checkModelIdDocDrift(repoRoot: string): { messages: string[]; ok: boolean } {
+  if (!existsSync(repoRoot)) {
+    return { messages: ["model-id-doc-drift - violation: repo root could not be read"], ok: false };
+  }
+  try {
+    const r = analyzeModelIdDocDrift(loadModelIdDocDriftTexts(repoRoot));
+    return { messages: modelIdDocDriftMessages(r), ok: r.ok };
+  } catch {
+    return {
+      messages: ["model-id-doc-drift - violation: L6 doc model-id scan could not run"],
+      ok: false,
+    };
   }
 }
 
@@ -115,12 +170,27 @@ export function checkGateConfirm(repoRoot: string): { messages: string[]; ok: bo
   }
 }
 
+export function checkGateIdFormat(repoRoot: string): { messages: string[]; ok: boolean } {
+  if (!existsSync(repoRoot)) {
+    return { messages: ["gate-id-format - violation: repo root could not be read"], ok: false };
+  }
+  try {
+    const r = analyzeGateIdFormat(loadGateIdFormatInput(repoRoot));
+    return { messages: gateIdFormatMessages(r), ok: r.ok };
+  } catch {
+    return {
+      messages: ["gate-id-format - violation: gate docs or evidence manifests could not be read"],
+      ok: false,
+    };
+  }
+}
+
 export function checkReadability(repoRoot: string): { messages: string[]; ok: boolean } {
   if (!existsSync(repoRoot)) {
     return { messages: ["readability - violation: repo root could not be read"], ok: false };
   }
   try {
-    const r = analyzeReadability(loadSystemReadabilityDocs(repoRoot));
+    const r = analyzeArtifacts(loadSystemReadabilityDocs(repoRoot));
     return { messages: readabilityMessages(r), ok: r.checked > 0 && r.ok };
   } catch {
     return { messages: ["readability — ⚠ prose docs を読めない"], ok: false };
@@ -143,9 +213,21 @@ export function checkRuntimeReadability(repoRoot: string): { messages: string[];
     };
   }
   try {
-    const r = analyzeReadability(loadRuntimeArtifactReadabilityDocs(repoRoot));
+    const r = analyzeArtifacts(loadRuntimeArtifactReadabilityDocs(repoRoot));
     return { messages: runtimeReadabilityMessages(r), ok: r.ok };
   } catch {
     return { messages: ["runtime-readability — ⚠ .ut-tdd artifacts を読めない"], ok: false };
+  }
+}
+
+export function checkSecretScan(repoRoot: string): { messages: string[]; ok: boolean } {
+  if (!existsSync(repoRoot)) {
+    return { messages: ["secret-scan - violation: repo root could not be read"], ok: false };
+  }
+  try {
+    const r = analyzeSecretScan(loadSystemSecretScanArtifacts(repoRoot));
+    return { messages: secretScanMessages(r), ok: r.checked > 0 && r.ok };
+  } catch {
+    return { messages: ["secret-scan — violation: secret scan artifacts を読めない"], ok: false };
   }
 }

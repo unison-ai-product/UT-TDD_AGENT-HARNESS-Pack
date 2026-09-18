@@ -18,13 +18,13 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseRequires } from "./backfill-pairing";
-import { loadRoadmaps } from "./roadmap-registry";
-import { parseLinks } from "./scrum-reverse";
-import { fmValue } from "./shared";
+import { parseRequires } from "./backfill-pairing.ts";
+import { loadRoadmaps } from "./roadmap-registry.ts";
+import { parseLinks } from "./scrum-reverse.ts";
+import { fmValue } from "./shared.ts";
 
 /** 本 analyzer が収束義務を判定する kind。poc/add-impl 等は別 SSoT が担うため対象外 (二重計上防止)。 */
-export const CONVERGENCE_SCOPE_KINDS = new Set<string>(["impl"]);
+export const CONVERGENCE_SCOPE_KINDS = new Set<string>(["impl", "verify"]);
 
 /** landed = 実装が着地した最終実態 (status 終端のうち実装側)。 */
 const LANDED_STATUSES = new Set<string>(["confirmed", "completed"]);

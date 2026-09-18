@@ -12,6 +12,31 @@ applies_to:
     - Discovery
     - Scrum
     - Add-feature
+decision_points:
+  - when: "A PLAN targets harness-internal (self-development) work with no outward-facing agent layer."
+    choose: "apply a single V-model pass"
+    over: "applying the full two-stage W-model"
+    because: "the file states the W-model applies specifically when the target system includes an AI agent layer; harness self-development is explicitly excluded from W-model treatment."
+  - when: "L4 sizing reveals the PLAN would add harness.db tables, `.ut-tdd/` YAML keys, or CLI state."
+    choose: "load the `db.md` skill in addition to this one"
+    over: "sizing the state surface using only this skill's checklist"
+    because: "the L4 sizing checklist flags state-surface changes as a trigger condition for the dedicated `db.md` skill, which covers schema/migration concerns this skill does not."
+  - when: "Sizing at L4 implies the work needs more than one PLAN boundary (different `layer` or `drive`)."
+    choose: "split the PLAN now, at sizing time"
+    over: "keeping it as one PLAN and splitting later if it becomes unwieldy"
+    because: "the file states this explicitly: split now rather than at trace-freeze, since discovering the split late means rework of trace-freeze evidence already gathered under the wrong PLAN boundary."
+  - when: "A PLAN's estimated complexity at L4 exceeds a two-sprint estimate."
+    choose: "treat this as a signal to split the PLAN and re-size each child, recording the rationale in the L4 doc"
+    over: "keeping the PLAN whole and just extending the timeline"
+    because: "the scoping rules name the two-sprint threshold as the explicit split signal, distinct from timeline extension which does not address the underlying complexity."
+  - when: "Comparing a small, structurally complete PLAN against a large PLAN with vague scope."
+    choose: "treat the small complete PLAN as correct and the large vague PLAN as a governance violation"
+    over: "treating PLAN size itself as something to minimize or optimize"
+    because: "the file states size is not a metric to optimise, it is a gate input — vagueness, not size, is the actual defect being screened for."
+  - when: "A PLAN spans more than one V-model layer pair (e.g. L4 design + L7 implementation) in a single PLAN."
+    choose: "require an explicit justification for the grouping in the PLAN `summary` field"
+    over: "allowing the multi-layer grouping without comment, since one PLAN per layer-pair crossing is the default"
+    because: "the scoping rules state one PLAN per layer-pair crossing is the default; deviating without justification hides which layer boundary the PLAN is actually accountable for."
 ---
 
 # system design sizing

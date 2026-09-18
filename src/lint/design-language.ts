@@ -110,6 +110,16 @@ function isFrontmatterLine(line: string, inFrontmatter: boolean): boolean {
   return /^[A-Za-z0-9_-]+:/.test(line.trim()) || /^\s+-\s+/.test(line);
 }
 
+function isMarkdownIdentifierRow(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return false;
+  const cells = trimmed
+    .slice(1, -1)
+    .split("|")
+    .map((cell) => cell.trim());
+  return cells.length > 0 && cells.every((cell) => /^[A-Za-z][A-Za-z0-9_-]*$/.test(cell));
+}
+
 function shouldIgnoreLine(line: string, inFrontmatter: boolean): boolean {
   const trimmed = line.trim();
   if (trimmed.length === 0) return true;
@@ -117,6 +127,7 @@ function shouldIgnoreLine(line: string, inFrontmatter: boolean): boolean {
   if (/^[-|: ]+$/.test(trimmed)) return true;
   if (/^```/.test(trimmed)) return true;
   if (/^<!--/.test(trimmed)) return true;
+  if (isMarkdownIdentifierRow(trimmed)) return true;
   if (!/[A-Za-z]/.test(trimmed)) return true;
   return JAPANESE_PATTERN.test(trimmed);
 }

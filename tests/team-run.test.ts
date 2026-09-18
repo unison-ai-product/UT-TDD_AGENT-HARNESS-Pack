@@ -2,20 +2,20 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadSlots, nodeAgentSlotsDeps } from "../src/runtime/agent-slots";
-import type { RuntimeDetection } from "../src/runtime/detect";
-import type { TeamDefinition } from "../src/schema/team";
-import { classifyProposalDocumentCoverage } from "../src/task/classify";
-import { routeTeamMembers } from "../src/task/tier-router";
-import { recommendTeamLaunch } from "../src/team/launch-policy";
-import { MODEL_IDS } from "../src/team/model-policy";
+import { loadSlots, nodeAgentSlotsDeps } from "../src/runtime/agent-slots.ts";
+import type { RuntimeDetection } from "../src/runtime/detect.ts";
+import { type TeamDefinition, teamMemberSchema } from "../src/schema/team.ts";
+import { classifyProposalDocumentCoverage } from "../src/task/classify.ts";
+import { routeTeamMembers } from "../src/task/tier-router.ts";
+import { recommendTeamLaunch } from "../src/team/launch-policy.ts";
+import { MODEL_IDS } from "../src/team/model-policy.ts";
 import {
   buildTeamRunPlan,
   executeTeamRunPlan,
   type MemberPlacement,
   providerFromEngine,
   validateTeamRun,
-} from "../src/team/run";
+} from "../src/team/run.ts";
 import {
   dependencyFailedMessage,
   duplicateRoleProviderMessage,
@@ -24,7 +24,7 @@ import {
   TEAM_MEMBER_PROMPT_HEADER,
   TEAM_RUN_REQUIRES_CROSS_PROVIDER_REVIEW_MESSAGE,
   TEAM_RUN_REQUIRES_HYBRID_MESSAGE,
-} from "../src/team/run-policy";
+} from "../src/team/run-policy.ts";
 
 const hybrid = (currentRuntime: "claude" | "codex"): RuntimeDetection => ({
   mode: "hybrid",
@@ -137,19 +137,61 @@ describe("team run validation", () => {
     expect(result.members.every((m) => m.prompt.includes(TEAM_MEMBER_PROMPT_HEADER))).toBe(true);
     expect(result.members[0].prompt).toContain("provider: codex");
     expect(result.members[1].prompt).toContain("provider: claude");
-    expect(result.members[0].model_selection.model).toBe(MODEL_IDS.codex.codex);
+    // 実装 intent は engine family (codex) より優先して luna に解決 (PLAN-L7-430)。
+    expect(result.members[0].model_selection.model).toBe(MODEL_IDS.codex.luna);
     expect(result.members[0].adapter).toMatchObject({
       command: "codex",
       dry_run: true,
-      model: MODEL_IDS.codex.codex,
+      model: MODEL_IDS.codex.luna,
     });
     expect(result.members[0].adapter?.args).toContain("-m");
-    expect(result.members[1].model_selection.model).toBe(MODEL_IDS.claude.sonnet);
+    expect(result.members[1].model_selection.model).toBe(MODEL_IDS.claude.opus);
     expect(result.members[1].adapter).toMatchObject({
       command: "claude",
       dry_run: true,
-      model: MODEL_IDS.claude.sonnet,
+      model: MODEL_IDS.claude.opus,
     });
+  });
+
+  it("routes structured intent from the team contract and rejects unknown member fields", () => {
+    const result = buildTeamRunPlan(
+      {
+        name: "typed-intent-team",
+        strategy: "sequential",
+        max_parallel: 1,
+        members: [
+          {
+            role: "qa",
+            engine: "codex-qa",
+            task: "generic task text",
+            intent: "implementation",
+          },
+        ],
+      },
+      "codex-only",
+    );
+
+    expect(result.members[0].model_selection).toMatchObject({
+      task_intent: "implementation",
+      model: MODEL_IDS.codex.luna,
+    });
+    expect(() =>
+      teamMemberSchema.parse({
+        role: "qa",
+        engine: "codex-qa",
+        task: "generic task text",
+        intent: "invalid",
+      }),
+    ).toThrow();
+    expect(() =>
+      teamMemberSchema.parse({
+        role: "qa",
+        engine: "codex-qa",
+        task: "generic task text",
+        intent: "implementation",
+        typo_intent: "test",
+      }),
+    ).toThrow();
   });
 
   it("honors explicit model policy overrides in the shared launch plan", () => {
@@ -164,7 +206,7 @@ describe("team run validation", () => {
             engine: "codex-se",
             task: "implement small docs change",
             difficulty: "critical",
-            model: "gpt-5.4",
+            model: MODEL_IDS.codex.worker,
             effort: "high",
           },
           { role: "tl", engine: "pmo-sonnet", task: "review slice A" },
@@ -177,7 +219,7 @@ describe("team run validation", () => {
     expect(result.members[0].model_selection).toMatchObject({
       difficulty: "critical",
       difficulty_source: "explicit",
-      model: "gpt-5.4",
+      model: MODEL_IDS.codex.worker,
       model_source: "explicit",
       reasoning_effort: "high",
       effort_source: "explicit",
@@ -198,9 +240,9 @@ describe("team run validation", () => {
     expect(recommendation.definition?.name).toBe("proposal-coverage-team");
     expect(recommendation.definition?.max_parallel).toBe(7);
     const members = recommendation.definition?.members ?? [];
-    expect(members.filter((member) => member.model === "gpt-5.4-mini")).toHaveLength(4);
-    expect(members.filter((member) => member.model === "gpt-5.3-codex-spark")).toHaveLength(3);
-    expect(members.some((member) => member.model === "gpt-5.5")).toBe(false);
+    expect(members.filter((member) => member.model === MODEL_IDS.codex.mini)).toHaveLength(4);
+    expect(members.filter((member) => member.model === MODEL_IDS.codex.spark)).toHaveLength(3);
+    expect(members.some((member) => member.model === MODEL_IDS.codex.frontier)).toBe(false);
     expect(members.every((member) => member.ownership)).toBe(true);
     expect(members.some((member) => member.engine === "pmo-sonnet")).toBe(true);
 
@@ -208,10 +250,10 @@ describe("team run validation", () => {
     expect(plan.ok).toBe(true);
     expect(plan.strategy).toBe("sequential");
     expect(
-      plan.members.filter((member) => member.model_selection.model === "gpt-5.4-mini"),
+      plan.members.filter((member) => member.model_selection.model === MODEL_IDS.codex.mini),
     ).toHaveLength(4);
     expect(
-      plan.members.filter((member) => member.model_selection.model === "gpt-5.3-codex-spark"),
+      plan.members.filter((member) => member.model_selection.model === MODEL_IDS.codex.spark),
     ).toHaveLength(3);
     expect(plan.members.some((member) => member.prompt.includes("ownership:"))).toBe(true);
   });
@@ -464,14 +506,15 @@ describe("team run validation", () => {
     expect(result.ok).toBe(true);
     const se = result.members.find((m) => m.role === "se");
     const qa = result.members.find((m) => m.role === "qa");
-    // ワーカー(se)=主(claude)/軽量 tier、検証(qa)=相手(codex)/フロンティアで明示的に別 provider。
-    expect(se?.provider).toBe("claude");
-    expect(se?.model_selection.model).toBe("claude-haiku-4-5");
-    expect(qa?.provider).toBe("codex");
-    expect(qa?.model_selection.model).toBe("gpt-5.5");
+    // 実装レーン (PO 指示 2026-07-08): 実装(se)=相手(codex) がクロス実行、
+    // 検証(qa)=実行側と別 provider (=主 claude、フロンティア) がクロスレビュー。
+    expect(se?.provider).toBe("codex");
+    expect(se?.model_selection.model).toBe("gpt-5.3-codex-spark");
+    expect(qa?.provider).toBe("claude");
+    expect(qa?.model_selection.model).toBe("claude-opus-5");
     expect(se?.provider).not.toBe(qa?.provider);
-    expect(se?.adapter?.command).toBe("claude");
-    expect(qa?.adapter?.command).toBe("codex");
+    expect(se?.adapter?.command).toBe("codex");
+    expect(qa?.adapter?.command).toBe("claude");
   });
 
   it("blocks a routed frontier reviewer without explicit permission (fail-close)", () => {
@@ -489,13 +532,13 @@ describe("team run validation", () => {
     const qa = result.members.find((m) => m.role === "qa");
     expect(qa?.executable).toBe(false);
     expect(qa?.adapter).toBeUndefined();
-    // ワーカーは明示許可不要で配置される (主=claude)。
+    // ワーカーは明示許可不要で配置される (実装レーン: 相手=codex がクロス実行)。
     const se = result.members.find((m) => m.role === "se");
-    expect(se?.provider).toBe("claude");
+    expect(se?.provider).toBe("codex");
     expect(se?.executable).toBe(true);
   });
 
-  it("flips the routed worker to the codex primary when codex hosts the session", () => {
+  it("flips the routed implementation worker to claude when codex hosts the session", () => {
     const team = baseTeam([
       { role: "se", engine: "pmo-sonnet", task: "rename a field" },
       { role: "tl", engine: "codex-tl", task: "review slice A", serialize_after: "se" },
@@ -509,10 +552,10 @@ describe("team run validation", () => {
     expect(result.ok).toBe(true);
     const se = result.members.find((m) => m.role === "se");
     const tl = result.members.find((m) => m.role === "tl");
-    // 主=codex なので worker(se)=codex、相談(tl)=相手(claude)=フロンティア(opus)。
-    expect(se?.provider).toBe("codex");
-    expect(se?.model_selection.model).toBe("gpt-5.3-codex-spark");
-    expect(tl?.provider).toBe("claude");
-    expect(tl?.model_selection.model).toBe("claude-opus-4-8");
+    // 主=codex の実装レーン: 実行(se)=相手(claude)、相談(tl)=主(codex)=フロンティア。
+    expect(se?.provider).toBe("claude");
+    expect(se?.model_selection.model).toBe(MODEL_IDS.claude.haiku);
+    expect(tl?.provider).toBe("codex");
+    expect(tl?.model_selection.model).toBe(MODEL_IDS.codex.frontier);
   });
 });

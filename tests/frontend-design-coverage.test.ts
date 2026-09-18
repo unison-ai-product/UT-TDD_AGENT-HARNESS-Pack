@@ -9,8 +9,8 @@ import {
   frontendDesignCoverageMessages,
   loadFrontendDesignCoverageInput,
   SECTION_MARKER,
-} from "../src/lint/frontend-design-coverage";
-import { VALID_SUB_DOCS } from "../src/schema/index";
+} from "../src/lint/frontend-design-coverage.ts";
+import { VALID_SUB_DOCS } from "../src/schema/index.ts";
 
 // FE_COVERAGE_MAP 全 slug を含み marker を持つ最小の正常 mapDocText。
 function okMapText(): string {

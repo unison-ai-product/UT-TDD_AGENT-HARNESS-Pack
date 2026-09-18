@@ -13,6 +13,31 @@ applies_to:
     - Reverse
     - Recovery
     - Incident
+decision_points:
+  - when: "a candidate new PLAN would duplicate more than 50% of an existing PLAN's `generates` artifacts"
+    choose: "extend the existing PLAN"
+    over: "create a new PLAN for the overlapping scope"
+    because: "duplicated generates targets between PLANs create ambiguous ownership and break per-requirement traceability"
+  - when: "scheduling parallel agent work across a program's PLAN graph"
+    choose: "mark only PLANs with no shared design-doc writes and no overlapping `generates` targets as `並列`-safe"
+    over: "parallelize all independent-looking PLANs to save time"
+    because: "shared design-doc writes or overlapping generates targets across concurrently-run PLANs produce write conflicts that are hard to detect after the fact"
+  - when: "populating the `carry` field in a milestone handover"
+    choose: "include only items verified against current PLAN status and `git log`"
+    over: "copy forward carry items from the previous handover unchanged"
+    because: "carrying forward an item already done in the PLAN registry misleads the next session into re-investigating solved work"
+  - when: "`ut-tdd graph export` output shows a PLAN that directly or transitively depends on itself"
+    choose: "extract the shared dependency into a new upstream PLAN"
+    over: "reorder dependencies within the existing PLANs to break the cycle informally"
+    because: "a dependency cycle is a hard block on advancement; the only structural fix is separating the shared concern into its own upstream PLAN"
+  - when: "declaring a milestone complete"
+    choose: "require `ut-tdd status` (no stalled PLANs), `ut-tdd doctor` exit 0, and a written `ut-tdd handover` before declaring it closed"
+    over: "declare the milestone done once the main feature work looks finished"
+    because: "a milestone with no recorded handover is not closed by definition — later sessions have no verified state snapshot to resume from"
+  - when: "advancing a parent PLAN's status to `done`"
+    choose: "confirm all child PLANs are also `done` first"
+    over: "mark the parent done once its own primary deliverable is complete"
+    because: "a parent marked done with open children is a false-green at program level that hides unfinished dependent work"
 ---
 
 # project management
@@ -50,7 +75,7 @@ ut-tdd handover             # generate .ut-tdd/handover/CURRENT.json
 ut-tdd metrics              # aggregate progress signals (layer coverage, etc.)
 ```
 
-Run `ut-tdd status` and `ut-tdd graph` together at the start of a program
+Run `ut-tdd status` and `ut-tdd graph export --format mermaid` together at the start of a program
 review. A PLAN that has been `active` for more than one sprint without a
 `trace-freeze` advancement is a stall signal.
 
@@ -68,7 +93,10 @@ rule (FR-L1-01):
 
 ## Dependency sequencing at program level
 
-`ut-tdd graph` renders the full PLAN dependency graph. Before scheduling
+`ut-tdd graph export --format mermaid` renders the cross-artifact relation
+graph (PLANs plus design / test-design / source / test nodes — not a
+PLAN-only view; `ut-tdd graph impact --changed <path...>` computes the impact
+set of changed files). Before scheduling
 parallel work across agents:
 
 1. Identify the critical path (longest chain of `直列` dependencies).
@@ -77,7 +105,7 @@ parallel work across agents:
 3. Record the parallel/serial grouping in the program milestone note in
    `.ut-tdd/handover/` — do not rely on memory alone.
 
-Cycles in `ut-tdd graph` are hard blocks: a PLAN that directly or
+Cycles in the exported graph are hard blocks: a PLAN that directly or
 transitively depends on itself cannot advance; resolve by extracting the
 shared dependency into a new upstream PLAN.
 

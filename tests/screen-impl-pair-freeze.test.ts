@@ -9,7 +9,7 @@ import {
   loadScreenImplPairFreezeInput,
   type ScreenImplPairFreezeInput,
   screenImplPairFreezeMessages,
-} from "../src/lint/screen-impl-pair-freeze";
+} from "../src/lint/screen-impl-pair-freeze.ts";
 
 describe("screen-impl-pair-freeze", () => {
   it("passes while screen implementation has not been declared", () => {

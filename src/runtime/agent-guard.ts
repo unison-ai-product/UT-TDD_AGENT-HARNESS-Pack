@@ -5,7 +5,14 @@
  * 1. Missing subagent_type is blocked.
  * 2. Non-allowlisted subagents are blocked.
  * 3. Missing model is blocked.
- * 4. Calls that override the model family declared in frontmatter are blocked.
+ * 4. Calls that request a model family *below* the one declared in frontmatter are
+ *    blocked (no quiet downgrade / cost-cutting). Requesting a family *at or above*
+ *    the declared floor is allowed (PLAN-L7-399): review-critical subagents
+ *    (blind-reviewer / code-reviewer / ut-tdd-tl / security-audit / qa-test) declare a sonnet floor,
+ *    but a higher-tier orchestrator (opus) must be able to escalate a review to its
+ *    own tier or above — pinning review strictly below the orchestrator inverts the
+ *    "review >= orchestrator" invariant the harness otherwise enforces via
+ *    src/task/tier-router-policy.ts's tierFor() (consult/verify roles always T0).
  *
  * This module is pure. The hook shim owns stdin and filesystem access.
  */
@@ -13,12 +20,30 @@
 import {
   AGENT_GUARD_BYPASS_HINT,
   AGENT_TOOL_NAMES,
+  CLAUDE_MODEL_FAMILY_CATALOG,
   SUBAGENT_ALLOWLIST,
-} from "./agent-guard-policy";
+} from "./agent-guard-policy.ts";
 
-export type ModelFamily = "haiku" | "sonnet" | "opus";
+export type ModelFamily = keyof typeof CLAUDE_MODEL_FAMILY_CATALOG;
 
-export { SUBAGENT_ALLOWLIST } from "./agent-guard-policy";
+/** Capability floor ordering. Higher rank = strictly more capable, never a valid "downgrade" target. */
+const FAMILY_RANK: Record<ModelFamily, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 3 };
+const MODEL_FAMILY_CATALOG = Object.entries(CLAUDE_MODEL_FAMILY_CATALOG) as Array<
+  [ModelFamily, string]
+>;
+const MODEL_FAMILIES = MODEL_FAMILY_CATALOG.map(([family]) => family);
+const MODEL_FAMILY_TEXT = MODEL_FAMILIES.join(" / ");
+
+// PLAN-L7-414: fable is an apex tier reserved for judgement gates, never worker consumption.
+const FABLE_QUALITY_CHECK_SUBAGENTS = new Set([
+  "blind-reviewer",
+  "code-reviewer",
+  "ut-tdd-tl",
+  "security-audit",
+  "qa-test",
+]);
+
+export { SUBAGENT_ALLOWLIST } from "./agent-guard-policy.ts";
 
 export interface AgentGuardInput {
   tool_name?: string;
@@ -49,11 +74,14 @@ export interface GuardDecision {
 /** Normalize model family names and Anthropic model ids. Ambiguous values fail closed. */
 export function normalizeModelFamily(raw: string | null | undefined): ModelFamily | null {
   if (!raw) return null;
-  const hits: ModelFamily[] = [];
-  if (/\bhaiku\b/i.test(raw)) hits.push("haiku");
-  if (/\bsonnet\b/i.test(raw)) hits.push("sonnet");
-  if (/\bopus\b/i.test(raw)) hits.push("opus");
-  return hits.length === 1 ? hits[0] : null;
+  const normalizedRaw = raw.toLowerCase();
+  const hits = new Set<ModelFamily>();
+  for (const [family, modelId] of MODEL_FAMILY_CATALOG) {
+    if (normalizedRaw === modelId.toLowerCase() || new RegExp(`\\b${family}\\b`, "i").test(raw)) {
+      hits.add(family);
+    }
+  }
+  return hits.size === 1 ? [...hits][0] : null;
 }
 
 const ALLOWLIST_TEXT = [...SUBAGENT_ALLOWLIST].join(" ");
@@ -102,7 +130,7 @@ export function evaluateAgentGuard(input: AgentGuardInput, ctx: AgentGuardContex
   if (family === "unknown") {
     return {
       code: 2,
-      message: `[ut-tdd-guard] BLOCK: ${subagentType} frontmatter does not declare haiku / sonnet / opus model family.`,
+      message: `[ut-tdd-guard] BLOCK: ${subagentType} frontmatter does not declare ${MODEL_FAMILY_TEXT} model family.`,
     };
   }
 
@@ -116,14 +144,20 @@ export function evaluateAgentGuard(input: AgentGuardInput, ctx: AgentGuardContex
   const requested = normalizeModelFamily(model);
   if (requested === null) {
     return blockOrBypass(
-      `[ut-tdd-guard] BLOCK: model=${model} cannot be normalized to haiku / sonnet / opus.`,
+      `[ut-tdd-guard] BLOCK: model=${model} cannot be normalized to ${MODEL_FAMILY_TEXT}.`,
     );
   }
-  if (requested !== family) {
+  if (requested === "fable" && !FABLE_QUALITY_CHECK_SUBAGENTS.has(subagentType)) {
     return blockOrBypass(
-      `[ut-tdd-guard] BLOCK: model override detected.\n` +
+      `[ut-tdd-guard] BLOCK: apex-tier policy reserves fable for quality-check subagents ` +
+        `(blind-reviewer / code-reviewer / ut-tdd-tl / security-audit / qa-test); ${subagentType} is not eligible.`,
+    );
+  }
+  if (FAMILY_RANK[requested] < FAMILY_RANK[family]) {
+    return blockOrBypass(
+      `[ut-tdd-guard] BLOCK: model downgrade detected.\n` +
         `  subagent_type: ${subagentType}\n` +
-        `  allowed family: ${family}\n` +
+        `  declared floor: ${family}\n` +
         `  requested model: ${model} (family: ${requested})\n${AGENT_GUARD_BYPASS_HINT}`,
     );
   }

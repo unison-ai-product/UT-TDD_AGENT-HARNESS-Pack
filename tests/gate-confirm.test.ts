@@ -5,7 +5,7 @@ import {
   gateConfirmMessages,
   layerToGate,
   parseGateStatuses,
-} from "../src/lint/gate-confirm";
+} from "../src/lint/gate-confirm.ts";
 
 const doc = (over: Partial<ConfirmDoc>): ConfirmDoc => ({
   file: "docs/design/harness/L5-detailed-design/x.md",

@@ -3,41 +3,47 @@ import {
   analyzeFrontendDesignCoverage,
   frontendDesignCoverageMessages,
   loadFrontendDesignCoverageInput,
-} from "../lint/frontend-design-coverage";
+} from "../lint/frontend-design-coverage.ts";
 import {
   analyzeG8IntegrationWorkflow,
   canLoadG8IntegrationWorkflowInput,
   g8IntegrationWorkflowMessages,
   loadG8IntegrationWorkflowInput,
-} from "../lint/g8-integration-workflow";
+} from "../lint/g8-integration-workflow.ts";
 import {
   analyzeG9SystemWorkflow,
   canLoadG9SystemWorkflowInput,
   g9SystemWorkflowMessages,
   loadG9SystemWorkflowInput,
-} from "../lint/g9-system-workflow";
+} from "../lint/g9-system-workflow.ts";
 import {
   analyzeG10UxWorkflow,
   canLoadG10UxWorkflowInput,
   g10UxWorkflowMessages,
   loadG10UxWorkflowInput,
-} from "../lint/g10-ux-workflow";
+} from "../lint/g10-ux-workflow.ts";
 import {
   analyzeImprovementBacklog,
   loadBacklog as loadImprovementBacklog,
-} from "../lint/improvement-backlog";
-import { analyzeLintWiring, lintWiringMessages, loadLintWiringInput } from "../lint/lint-wiring";
+} from "../lint/improvement-backlog.ts";
+import { analyzeLintWiring, lintWiringMessages, loadLintWiringInput } from "../lint/lint-wiring.ts";
 import {
   analyzeProposalDocumentCoverage,
   loadProposalDocumentCoverageLintInput,
   proposalDocumentCoverageMessages,
-} from "../lint/proposal-document-coverage";
+} from "../lint/proposal-document-coverage.ts";
 import {
   analyzeRightArmGatePlanning,
   loadRightArmGatePlanningInput,
   rightArmGatePlanningMessages,
-} from "../lint/right-arm-gate-planning";
-import { classifyProposalDocumentCoverage } from "../task/classify";
+} from "../lint/right-arm-gate-planning.ts";
+import {
+  analyzeRightLungDocGovernance,
+  canLoadRightLungDocGovernanceInput,
+  loadRightLungDocGovernanceInput,
+  rightLungDocGovernanceMessages,
+} from "../lint/right-lung-doc-governance.ts";
+import { classifyProposalDocumentCoverage } from "../task/classify.ts";
 
 /**
  * improvement-backlog lint を hard gate 検査 (PLAN-L7-95、要件 §1.10.G.12 の「構造健全性検証」配線)。
@@ -84,6 +90,29 @@ export function checkRightArmGatePlanning(repoRoot: string): { messages: string[
   } catch {
     return {
       messages: ["right-arm-gate-planning - violation: G8-G14 carry docs could not be read"],
+      ok: false,
+    };
+  }
+}
+
+export function checkRightLungDocGovernance(repoRoot: string): {
+  messages: string[];
+  ok: boolean;
+} {
+  if (!canLoadRightLungDocGovernanceInput(repoRoot)) {
+    return {
+      messages: [
+        "right-lung-doc-governance - violation: right-lung test-design docs could not be read",
+      ],
+      ok: false,
+    };
+  }
+  try {
+    const r = analyzeRightLungDocGovernance(loadRightLungDocGovernanceInput(repoRoot));
+    return { messages: rightLungDocGovernanceMessages(r), ok: r.ok };
+  } catch {
+    return {
+      messages: ["right-lung-doc-governance - violation: right-lung doc check could not run"],
       ok: false,
     };
   }

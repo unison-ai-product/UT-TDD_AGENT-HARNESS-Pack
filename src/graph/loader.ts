@@ -15,11 +15,11 @@
  * fail-open 原則: 各ディレクトリ不在 / parse 失敗は空集合として扱う (既存 loader と同一方針)。
  * sanitization invariant: raw MCP response / browser trace / secret / credential を行へ複製しない。
  */
-import { type Dirent, readdirSync, readFileSync, statSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { loadFrDocs, parseFrRows } from "../lint/fr-registry-audit";
-import { loadImplPlanTraceInput } from "../lint/impl-plan-trace";
+import { loadFrDocs, parseFrRows } from "../lint/fr-registry-audit.ts";
+import { loadImplPlanTraceInput } from "../lint/impl-plan-trace.ts";
 import type {
   DesignDocInput,
   PlanInput,
@@ -28,10 +28,10 @@ import type {
   SourceFileInput,
   TestDesignDocInput,
   TestFileInput,
-} from "../lint/relation-graph";
-import { loadReviewPlans } from "../lint/review-evidence";
-import { normalizePath } from "../lint/shared";
-import { loadPairDocs } from "../vmodel/lint";
+} from "../lint/relation-graph.ts";
+import { loadReviewPlans } from "../lint/review-evidence.ts";
+import { normalizePath } from "../shared/source-text.ts";
+import { loadPairDocs } from "../vmodel/lint.ts";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -201,6 +201,12 @@ const GOVERNANCE_DOCS = [
   "docs/governance/repository-structure.md",
 ] as const;
 const ROOT_CANONICAL_DOCS = ["README.md", "AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md"] as const;
+/**
+ * docs/ 直下に置かれ、どのサブディレクトリ walk (design/process/adr/governance/test-design/plans)
+ * にも入らない ledger doc (PLAN-L7-397)。未登録だと該当 doc 単独の変更で
+ * missing-projection (gate error) が毎回発生する (docs/improvement-backlog.md 実例)。
+ */
+const DOCS_ROOT_LEDGER_FILES = ["docs/feedback-log.md", "docs/improvement-backlog.md"] as const;
 const ROOT_CONFIG_DOCS = [
   ".claude/settings.json",
   ".codex/config.toml",
@@ -310,10 +316,18 @@ export function loadRelationGraphSourceSet(repoRoot: string): RelationGraphSourc
       // archived plan は live graph に edge/node を出さない (historical、generates が削除済 artifact を
       // 指して dangling 化するのを防ぐ)。status は frontmatter から判定 (PLAN-L7-142)。
       if (fm.status === "archived") continue;
-      // generates: src/*.ts artifact のみ抽出 (generates edge = plan→source)
-      const generatesSrc = (fm.generates ?? [])
-        .map((g) => g.artifact_path ?? "")
-        .filter((p) => p.startsWith("src/") && p.endsWith(".ts"));
+      const generatedPaths = (fm.generates ?? []).map((g) => g.artifact_path ?? "").filter(Boolean);
+      // source の宣言は存在有無にかかわらず保持する。draft の未実装 source は availability を
+      // planned とし、relation edgeのlifecycleで正規に追跡する。
+      const generatesSrc = generatedPaths.filter((p) => p.startsWith("src/") && p.endsWith(".ts"));
+      const availability =
+        fm.status === "draft"
+          ? Object.fromEntries(
+              generatesSrc
+                .filter((p) => !existsSync(join(repoRoot, p)))
+                .map((p) => [p, "planned"] as const),
+            )
+          : {};
       // requirements: frontmatter dependencies.requires の FR-L1-NN + 本文 FR refs
       const fmRequires = (fm.dependencies?.requires ?? []).filter((r) => /^FR-L\d+-\d+$/.test(r));
       const bodyRefs = extractFrRefs(content);
@@ -322,7 +336,9 @@ export function loadRelationGraphSourceSet(repoRoot: string): RelationGraphSourc
       plans.push({
         id: rp.plan_id,
         path: `docs/plans/${rp.file}`,
+        status: fm.status,
         generates: generatesSrc.length > 0 ? generatesSrc : undefined,
+        availability: Object.keys(availability).length > 0 ? availability : undefined,
         requirements: allRefs.length > 0 ? allRefs : undefined,
       });
     }
@@ -419,6 +435,15 @@ export function loadRelationGraphSourceSet(repoRoot: string): RelationGraphSourc
     addDesignDocIfAbsent(designDocs, path);
   }
 
+  // HARNESS memory は durable な統治入力であり、変更影響を無音で落とさない。
+  // 内容は session-start / DB projection の責務であるため、relation graph には
+  // secret-like 本文を複製せず path-only design node としてだけ登録する。
+  const memoryDocs: string[] = [];
+  walkMd(join(repoRoot, ".ut-tdd", "memory"), repoRoot, memoryDocs);
+  for (const path of memoryDocs) {
+    addDesignDocIfAbsent(designDocs, path);
+  }
+
   const evidenceDocs: string[] = [];
   walkJson(join(repoRoot, ".ut-tdd", "evidence"), repoRoot, evidenceDocs);
   for (const path of evidenceDocs) {
@@ -439,6 +464,15 @@ export function loadRelationGraphSourceSet(repoRoot: string): RelationGraphSourc
       addDesignDocIfAbsent(designDocs, path);
     } catch {
       // fail-open: optional root canonical docs may be absent in fixtures.
+    }
+  }
+
+  for (const path of DOCS_ROOT_LEDGER_FILES) {
+    try {
+      statSync(join(repoRoot, path));
+      addDesignDocIfAbsent(designDocs, path);
+    } catch {
+      // fail-open: optional docs/ root ledger may be absent in fixtures.
     }
   }
 

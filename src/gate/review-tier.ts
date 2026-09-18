@@ -1,14 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import type { ExecutionMode } from "../runtime/detect";
-import { checkCrossAgentModelPair, crossAgentModelIssueMessage } from "../schema";
+import type { ExecutionMode } from "../runtime/detect.ts";
+import { checkCrossAgentModelPair, crossAgentModelIssueMessage } from "../schema/index.ts";
 import {
   isNaiveSelfReviewKind,
   JUDGMENT_GATES,
   REQUIRED_CHECKLIST_IDS,
-} from "./review-tier-policy";
+} from "./review-tier-policy.ts";
 
-export { JUDGMENT_GATES, REQUIRED_CHECKLIST_IDS } from "./review-tier-policy";
+export { JUDGMENT_GATES, REQUIRED_CHECKLIST_IDS } from "./review-tier-policy.ts";
 
 export type ReviewKind = "cross_agent" | "intra_runtime_subagent" | "human";
 export type ChecklistStatus = "pass" | "fail" | "n-a";

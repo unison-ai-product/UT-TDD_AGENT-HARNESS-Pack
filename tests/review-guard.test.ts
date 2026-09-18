@@ -3,14 +3,26 @@ import {
   assessReviewSession,
   detectWorkingTreeMutation,
   isReadOnlyDelegationRole,
+  isReviewCustodyProjection,
   reviewGuardMessages,
   summarizeStagedReview,
-} from "../src/runtime/review-guard";
+} from "../src/runtime/review-guard.ts";
 
 describe("review-guard (IMP-137 / PLAN-L7-85)", () => {
   describe("isReadOnlyDelegationRole", () => {
     it("U-RGUARD-001: consult/verify (相談/検証) roles are read-only", () => {
-      for (const role of ["tl", "qa", "uiux", "reviewer", "review", "security", "audit"]) {
+      for (const role of [
+        "tl",
+        "qa",
+        "uiux",
+        "reviewer",
+        "review",
+        "security",
+        "audit",
+        "code-reviewer",
+        "blind-review",
+        "blind-reviewer",
+      ]) {
         expect(isReadOnlyDelegationRole(role)).toBe(true);
       }
     });
@@ -43,6 +55,24 @@ describe("review-guard (IMP-137 / PLAN-L7-85)", () => {
   });
 
   describe("assessReviewSession", () => {
+    it("U-RGUARD-013: delegation-owned review custody projection is not reviewer mutation", () => {
+      const a = assessReviewSession({
+        role: "blind-reviewer",
+        before: [],
+        after: [
+          ".ut-tdd/review/requests/request.json",
+          ".ut-tdd/review/receipts/receipt.json",
+          ".ut-tdd/review/verdicts/digest/attempts/attempt-1/verdict.txt",
+        ],
+      });
+      expect(a.mutatedPaths).toEqual([]);
+      expect(a.violation).toBe(false);
+      expect(isReviewCustodyProjection(".ut-tdd/review/receipts/x.json")).toBe(true);
+      expect(
+        isReviewCustodyProjection(".ut-tdd/review/verdicts/digest/attempts/attempt-1/verdict.txt"),
+      ).toBe(true);
+      expect(isReviewCustodyProjection(".ut-tdd/review/other/x.json")).toBe(false);
+    });
     it("U-RGUARD-006: read-only role that mutates the tree is a violation", () => {
       const a = assessReviewSession({
         role: "qa",
@@ -91,7 +121,12 @@ describe("review-guard (IMP-137 / PLAN-L7-85)", () => {
 
     it("U-RGUARD-010: no violation -> no messages", () => {
       expect(
-        reviewGuardMessages({ role: "se", readOnly: false, mutatedPaths: ["x"], violation: false }),
+        reviewGuardMessages({
+          role: "se",
+          readOnly: false,
+          mutatedPaths: ["x"],
+          violation: false,
+        }),
       ).toEqual([]);
     });
   });

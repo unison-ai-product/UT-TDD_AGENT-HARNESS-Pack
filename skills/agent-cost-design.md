@@ -12,6 +12,31 @@ applies_to:
     - Forward
     - Add-feature
     - Discovery
+decision_points:
+  - when: "a subtask is multi-source web research or doc summarisation with no repository-state judgement required"
+    choose: "delegate to pmo-haiku"
+    over: "running it on the primary session model"
+    because: "it is parallelisable, needs no repo-state judgement, and the cost saving outweighs verification overhead"
+  - when: "a subtask requires answering whether a PLAN or repository state is complete/correct"
+    choose: "keep it on the primary model, not a lightweight role"
+    over: "delegating repository-state judgement to pmo-haiku or another lightweight role"
+    because: "lightweight roles cannot reliably read .ut-tdd/ state — this is a named anti-pattern"
+  - when: "spawning any subagent via ut-tdd claude/codex/team run"
+    choose: "pass the model field explicitly"
+    over: "omitting model and letting it inherit the parent"
+    because: "an omitted model inherits the expensive parent model and silently burns budget"
+  - when: "delegated agent output will be recorded as authoritative or change a PLAN dependency/ADR"
+    choose: "spot-check at least one cited source and escalate to a full review gate"
+    over: "forwarding the delegated output to the PO as-is"
+    because: "delegated output is a claim, not evidence — forwarding raw output without a spot-check is a named anti-pattern"
+  - when: "a delegated agent reports a count or metric"
+    choose: "re-compute the count yourself"
+    over: "trusting the agent's narration of the number"
+    because: "verification requires confirming the reasoning chain and numbers, not accepting narration"
+  - when: "several independent research subtasks could be delegated"
+    choose: "structure them as one well-defined parallel split"
+    over: "issuing them as sequential delegations"
+    because: "sequential delegations where one parallel split would work are a named cost anti-pattern"
 ---
 
 # agent cost design

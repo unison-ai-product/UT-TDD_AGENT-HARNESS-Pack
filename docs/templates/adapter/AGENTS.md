@@ -14,8 +14,8 @@ This project uses UT-TDD Agent Harness commands as the local orchestration surfa
 
 ## GPT / Codex runtime defaults
 
-- Implementation lanes default to worker-class models (`gpt-5.4`); lightweight parallel lanes use spark-class (`gpt-5.3-codex-spark`) with no closing authority.
-- Frontier judgement (`gpt-5.5`) is gated: use it only for final review or high-risk decisions with explicit authorization.
+- Implementation lanes default to worker-class models (`gpt-5.6-terra`); lightweight parallel lanes use spark-class (`gpt-5.3-codex-spark`) with no closing authority.
+- Frontier judgement (`gpt-5.6-sol`) is gated: use it only for final review or high-risk decisions with explicit authorization.
 - Default reasoning effort is `middle`; raise to `high`/`xhigh` only for review or critical judgement.
 - State the full task, intent, and constraints up front in one turn; avoid drip-fed instructions.
 

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import type { DependencyDriftResult } from "./dependency-drift";
+import type { DependencyDriftResult } from "./dependency-drift.ts";
 
 export interface ChangeImpactInput {
   changedFiles: string[];

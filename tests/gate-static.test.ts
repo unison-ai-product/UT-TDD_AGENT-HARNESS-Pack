@@ -1,22 +1,20 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { analyzeLayerPairGate, evaluateStaticGate, readCoverageSummary } from "../src/gate/static";
-import type { PairDoc } from "../src/vmodel/lint";
+import {
+  analyzeLayerPairGate,
+  evaluateStaticGate,
+  readCoverageSummary,
+} from "../src/gate/static.ts";
+import type { PairDoc } from "../src/vmodel/lint.ts";
 
 const cliPath = join(process.cwd(), "src", "cli.ts");
 
-function runCli(args: string[]) {
-  if (process.platform === "win32") {
-    const cmdExe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
-    return spawnSync(cmdExe, ["/d", "/c", "bun", cliPath, ...args], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-    });
-  }
-  return spawnSync("bun", [cliPath, ...args], { cwd: process.cwd(), encoding: "utf8" });
+function runCli(args: string[], cwd = process.cwd()) {
+  // PLAN-L7-462 step 2: CLI 実発火 oracle は node 直 spawn (cmd.exe/bun 経由なし)。
+  return spawnSync("node", [cliPath, ...args], { cwd, encoding: "utf8", windowsHide: true });
 }
 
 const doc = (
@@ -62,13 +60,13 @@ describe("static gates", () => {
     expect(result.orphanPaths).toEqual(["docs/design/harness/L4-basic-design/function.md"]);
   });
 
-  it("fails G2 when the wireframe mock self-pair is missing", () => {
+  it("fails G2 when the wireframe mock lacks the L10 test-design pair wiring (RECOVERY-09)", () => {
     const result = analyzeLayerPairGate(
       [
         doc(
-          "docs/design/harness/L2-screen/screen-list.md",
-          "L2",
           "docs/design/harness/L2-screen/wireframe.md",
+          "L2",
+          "self", // 旧 self-pair 残骸は配線として認めない
           "placeholder",
         ),
       ],
@@ -122,23 +120,22 @@ describe("static gates", () => {
 
   it("U-GATE-006: reports invalid checklist YAML as a gate failure instead of crashing", () => {
     const dir = mkdtempSync(join(tmpdir(), "ut-tdd-checklist-"));
-    const checklist = join(dir, "bad-review-checklist.yaml");
-    writeFileSync(checklist, "items: [");
+    try {
+      const checklist = join(dir, "bad-review-checklist.yaml");
+      writeFileSync(checklist, "items: [");
 
-    const result = runCli([
-      "gate",
-      "G4",
-      "--mode",
-      "codex-only",
-      "--checklist",
-      checklist,
-      "--json",
-    ]);
+      const result = runCli(
+        ["gate", "G4", "--mode", "codex-only", "--checklist", checklist, "--json"],
+        dir,
+      );
 
-    expect(result.status).toBe(1);
-    expect(result.stdout).toContain("review checklist - violation");
-    expect(result.stdout).toContain('"passed": false');
-    expect(result.stderr).not.toContain("error: script");
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain("review checklist - violation");
+      expect(result.stdout).toContain('"passed": false');
+      expect(result.stderr).not.toContain("error: script");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("rejects coverage below the G7 threshold", () => {

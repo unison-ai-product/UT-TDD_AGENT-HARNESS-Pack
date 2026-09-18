@@ -1,5 +1,5 @@
-import type { HarnessDb } from "../state-db/index";
-import { isSecretLike, upsertRow } from "../state-db/index";
+import type { HarnessDb } from "../state-db/index.ts";
+import { isSecretLike, upsertRow } from "../state-db/index.ts";
 
 export interface SearchReferenceRow {
   subject_type: string;

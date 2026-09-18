@@ -15,8 +15,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { type CrossAgentModelIssue, checkCrossAgentModelPair } from "../schema";
-import { fmValue } from "./shared";
+import { type CrossAgentModelIssue, checkCrossAgentModelPair } from "../schema/index.ts";
+import { fmValue } from "./shared.ts";
 
 /**
  * review 前置 MUST の対象 kind (§1.8 / requirements §7.8.7)。
@@ -39,6 +39,11 @@ export interface ReviewEntry {
   green_commands?: GreenCommandEvidence[];
   worker_model?: string;
   reviewer_model?: string;
+  lane?: "claim-blind" | "spec-blind";
+  plan_revision?: string;
+  subject_head?: string;
+  attack_trials?: number;
+  citations?: string[];
 }
 
 export interface GreenCommandEvidence {
@@ -87,7 +92,7 @@ export interface ReviewEvidenceResult {
 }
 
 const GREEN_COMMAND_ENFORCEMENT_DATE = "2026-06-23";
-const GREEN_COMMAND_KINDS = new Set([
+export const GREEN_COMMAND_KINDS = new Set([
   "unit_test",
   "integration_test",
   "typecheck",
@@ -96,8 +101,12 @@ const GREEN_COMMAND_KINDS = new Set([
   "vmodel_lint",
   "smoke",
 ]);
-const GREEN_COMMAND_RUNNERS = new Set(["bun", "powershell", "bash", "ci"]);
-const GREEN_COMMAND_SCOPES = new Set(["full", "targeted", "changed-files", "gate"]);
+// node = Node 一本化 (PLAN-L7-462) 後の正規 runner (schema と同期、SSoT は frontmatter.ts)。
+export const GREEN_COMMAND_RUNNERS = new Set(["bun", "node", "powershell", "bash", "ci"]);
+export const GREEN_COMMAND_SCOPES = new Set(["full", "targeted", "changed-files", "gate"]);
+
+/** anchor_commit は short/full の git object name のみ。人間可読な別表記を anchor と認めない。 */
+const GREEN_COMMAND_ANCHOR_PATTERN = /^[0-9a-f]{7,40}$/i;
 
 function reviewViolationReason(issue: CrossAgentModelIssue | undefined): string {
   if (issue === "same_provider") return "same_provider";
@@ -105,17 +114,46 @@ function reviewViolationReason(issue: CrossAgentModelIssue | undefined): string 
   return "same_model_or_missing";
 }
 
+/** frontmatter ブロック (最初の `---\n...\n---`) があればその中身、無ければ content 全体を返す。 */
+function frontmatterBlock(content: string): string {
+  const m = content.match(/^---\n([\s\S]*?)\n---/);
+  return m ? m[1] : content;
+}
+
 /**
- * frontmatter に `review_evidence:` ブロックが存在し ≥1 entry (`- reviewer:`) を持つか判定。
- * presence 検出のみ (shape 検証は zod frontmatterSchema が担う)。
+ * YAML mapping として解析した `review_evidence` が、`reviewer` キー (非空文字列) を持つ entry を
+ * ≥1 件含む配列か判定 (presence 検出のみ、shape 検証は zod frontmatterSchema が担う)。
+ *
+ * 解析対象: content が frontmatter ブロック (`^---\n...\n---`) を持てばその中身、無ければ
+ * content 全体を YAML として解析する (bare frontmatter text を渡すテストとの互換のため)。
+ * コメント行・空行・entry 内のキー順・flow style (`[{...}]`) のいずれにも依存しない —
+ * 正規表現ではなく `parseYaml` の結果を検査するため、`extractReviewEntries` と presence 判定が
+ * 一致する (issue #503: 旧実装は `- reviewer:` の行順序に依存する正規表現で、コメント行や
+ * キー順違いのある正当な YAML を false 判定していた)。
+ * YAML parse 失敗・非 mapping・`review_evidence` 欠落・空配列・非配列は false。
  */
 export function hasReviewEvidence(content: string): boolean {
-  return /^review_evidence:\s*\n\s+-\s+reviewer:/m.test(content);
+  let doc: unknown;
+  try {
+    doc = parseYaml(frontmatterBlock(content));
+  } catch {
+    return false;
+  }
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) return false;
+  const ev = (doc as { review_evidence?: unknown }).review_evidence;
+  if (!Array.isArray(ev) || ev.length === 0) return false;
+  return ev.some(
+    (e) =>
+      typeof e === "object" &&
+      e !== null &&
+      typeof (e as { reviewer?: unknown }).reviewer === "string" &&
+      (e as { reviewer: string }).reviewer.trim() !== "",
+  );
 }
 
 /**
  * frontmatter (最初の `---` ブロック) を yaml で解析し review_evidence entry を抽出 (IMP-076)。
- * presence 検出の正規表現とは別に、cross_agent distinctness 検査のため entry レベルで読む。
+ * presence 検出とは別に、cross_agent distinctness 検査のため entry レベルで読む。
  * parse 失敗 / review_evidence 不在は entry なしとして扱う。
  * 必須PLANの evidence 欠落は analyzeReviewEvidence 側で violation 化する。
  */
@@ -156,6 +194,14 @@ export function extractReviewEntries(content: string): ReviewEntry[] {
         }
         if (typeof e.worker_model === "string") entry.worker_model = e.worker_model;
         if (typeof e.reviewer_model === "string") entry.reviewer_model = e.reviewer_model;
+        if (e.lane === "claim-blind" || e.lane === "spec-blind") entry.lane = e.lane;
+        if (typeof e.plan_revision === "string") entry.plan_revision = e.plan_revision;
+        if (typeof e.subject_head === "string") entry.subject_head = e.subject_head;
+        if (typeof e.attack_trials === "number") entry.attack_trials = e.attack_trials;
+        if (Array.isArray(e.citations))
+          entry.citations = e.citations.filter(
+            (citation): citation is string => typeof citation === "string",
+          );
         return entry;
       });
   } catch {
@@ -202,6 +248,13 @@ function greenCommandViolationReason(entry: ReviewEntry): string | null {
     ) {
       return "completed_after_tests_green_at";
     }
+    // anchor 無し digest は working tree の現在値と比較されるため、無関係な PR が同じ evidence
+    // ファイルへ触れた瞬間に不一致になる (issue #191)。全 entry で必須にする — 「新規だけ必須」を
+    // `completed_at` で判定すると、その値が **書き手の自己申告** なので過去日時を書くだけで迂回
+    // できる (PR #361 Codex FLAG B-1)。
+    const anchor = command.anchor_commit?.trim();
+    if (!anchor) return "missing_anchor_commit";
+    if (!GREEN_COMMAND_ANCHOR_PATTERN.test(anchor)) return "invalid_anchor_commit";
   }
   return null;
 }
@@ -338,7 +391,7 @@ export function reviewEvidenceMessages(result: ReviewEvidenceResult): string[] {
   if (result.greenCommandViolations.length > 0) {
     const ids = result.greenCommandViolations.map((v) => `${v.plan_id}:${v.reason}`).join(", ");
     out.push(
-      `review-evidence — ⚠ green command evidence 欠落/不正 ${result.greenCommandViolations.length} 件 (${ids}): 2026-06-23 以降の confirmed review_evidence は green_commands に kind/command/runner/scope/exit_code/evidence_path/output_digest を記録 (IMP-108)`,
+      `review-evidence — ⚠ green command evidence 欠落/不正 ${result.greenCommandViolations.length} 件 (${ids}): 2026-06-23 以降の confirmed review_evidence は green_commands に kind/command/runner/scope/exit_code/evidence_path/output_digest を記録 (IMP-108)。全 entry で anchor_commit も必須 (anchor 無し digest は working tree と比較され、無関係な PR の merge で赤化する / issue #191)`,
     );
   }
   if (result.staleApprovalViolations.length > 0) {

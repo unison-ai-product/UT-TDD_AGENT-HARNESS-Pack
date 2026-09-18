@@ -9,6 +9,27 @@ domain_tags:
   - technical-writing
   - editing
 triggers: writing quality, clarity, prose editing, plain-language rewriting, doc readability
+decision_points:
+  - when: "writing instructions or describing current behavior"
+    choose: "active voice, present tense"
+    over: "passive voice or past-tense narration"
+    because: "passive constructions hide who does what and blur whether the behavior is current"
+  - when: "explaining a technical decision, error, or trade-off"
+    choose: "state the answer or recommendation in the first sentence"
+    over: "building up through background before the point"
+    because: "a reader must be able to state the main point after only the first sentence"
+  - when: "the audience is a domain expert who already knows the term"
+    choose: "skip the definition and use the term directly"
+    over: "defining it on first use as if for a novice"
+    because: "over-explaining to an expert buries the actionable content under redundant background"
+  - when: "the same entity is referenced more than once in a document"
+    choose: "one consistent name for that entity throughout"
+    over: "varying the name for stylistic variety (e.g. \"user\" vs \"account\")"
+    because: "synonym variety makes one concept read as two distinct entities"
+  - when: "describing what changed in a system"
+    choose: "name the specific file, command, or number"
+    over: "generic phrasing like \"various improvements\""
+    because: "concrete references are verifiable; abstract summaries are not"
 ---
 
 # technical writing

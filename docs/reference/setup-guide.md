@@ -10,7 +10,7 @@
 
 | 要件 | 確認コマンド | 備考 |
 |---|---|---|
-| **Bun ≥ 1.3** | `bun --version` | ランタイム兼テストランナー。必須 |
+| **Node.js 24.13.0 / npm 11.6.2** | `node --version` / `npm --version` | 実行ランタイム兼パッケージ管理。必須 |
 | **git** | `git --version` | 必須 |
 | Claude Code CLI | `claude --version` | 任意。Claude 委譲 / hook を使う場合 |
 | Codex CLI | `codex --version` | 任意。Codex 委譲 / hybrid クロスレビューを使う場合 |
@@ -18,18 +18,18 @@
 - OS は Windows / macOS / Linux いずれも可 (native Windows は第一級サポート、WSL 不要)。
 - provider の API キーをリポジトリや設定ファイルに書く必要は**ありません** (認証は各公式 CLI のログインが保持)。
 
-> **Windows で bun を npm shim 経由で入れている場合**: hook shell から実 Bun binary が
-> 解決できる必要があります。`bun .ut-tdd\bin\ut-tdd.mjs --help` が失敗するときは
-> `$env:PATH="$env:APPDATA\npm\node_modules\bun\bin;$env:PATH"` を追加してください。
+> **Windows**: Node.js と npm が PATH から解決できることを確認してください。
+> `node --version` と `npm --version` が失敗する場合は、Node.js の公式インストーラーで
+> PATH を有効にしてからシェルを再起動してください。
 
 ## 1. 新規導入 (Pack をそのまま開発基盤として使う)
 
 ```sh
 git clone https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git
 cd UT-TDD_AGENT-HARNESS-Pack
-bun install --frozen-lockfile
-bun src/cli.ts setup --solo
-bun .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+npm ci
+node src/cli.ts setup --solo
+node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
 ```
 
 `setup --solo` が生成するもの:
@@ -56,7 +56,7 @@ tar -xzf v0.1.4.tar.gz -C <導入先ディレクトリ>
 cd <your-project>
 <pack-checkout>/scripts/ut-tdd setup --dry-run   # まず書き込み内容を確認
 <pack-checkout>/scripts/ut-tdd setup --solo
-bun .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
 ```
 
 Windows PowerShell では `<pack-checkout>\scripts\ut-tdd.ps1 setup --solo`。
@@ -70,11 +70,11 @@ Windows PowerShell では `<pack-checkout>\scripts\ut-tdd.ps1 setup --solo`。
 
 | # | コマンド | 期待値 |
 |---|---|---|
-| 1 | `bun .ut-tdd/bin/ut-tdd.mjs --help` | usage が表示される (wrapper 導通) |
-| 2 | `bun .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke` | `setup-smoke - OK (checked=22, failed=0)` |
-| 3 | `bun .ut-tdd/bin/ut-tdd.mjs status` | mode (`standalone` / `claude-only` / `codex-only` / `hybrid`) が表示される |
-| 4 | `bun run typecheck` | exit 0 |
-| 5 | `bun run test` | 全 green (配布安全 smoke suite) |
+| 1 | `node .ut-tdd/bin/ut-tdd.mjs --help` | usage が表示される (wrapper 導通) |
+| 2 | `node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke` | `setup-smoke - OK (checked=22, failed=0)` |
+| 3 | `node .ut-tdd/bin/ut-tdd.mjs status` | mode (`standalone` / `claude-only` / `codex-only` / `hybrid`) が表示される |
+| 4 | `npm run typecheck` | exit 0 |
+| 5 | `npm run test` | 全 green (配布安全 smoke suite) |
 
 > **full `doctor` (フラグなし) はこの段階では赤になりますが正常です。**
 > full doctor は設計 doc / PLAN / test-design が降下した後のガバナンス一括検証で、
@@ -98,9 +98,9 @@ Pack はタグ付き release (`v0.1.x`) で更新されます。変更点は先�
 # Pack checkout で実行してください (consumer repo ではありません)
 git fetch --tags
 git checkout v0.1.4          # 追従運用なら: git pull origin main
-bun install --frozen-lockfile
-bun src/cli.ts setup --solo  # 冪等再実行
-bun .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+npm ci
+node src/cli.ts setup --solo  # 冪等再実行
+node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
 ```
 
 更新時の setup 再実行は**非破壊**です:
@@ -120,9 +120,9 @@ bun .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
 |---|---|
 | full `doctor` が exit 1 | 正常 (§3 参照)。consumer 判定は `doctor --setup-smoke` |
 | setup が既存ファイルで止まっているように見える | 対話シェルの上書き確認 (`[y/N]`) 待ちです。Enter (=N) で既存保護のまま進みます |
-| `bun .ut-tdd/bin/ut-tdd.mjs ...` が exit 1 で `'ut-tdd' is not recognized` | wrapper がどの解決先も見つけられない状態。ハーネス checkout 直下 (`src/cli.ts` と `src/setup/index.ts` がある場所) で実行しているか、`bun install` 済みかを確認 |
-| Windows で hook が bun を見つけられない | §0 の PATH 注記を参照 |
-| doctor が「harness.db が古い」系で失敗 | `bun src/cli.ts db rebuild --json` で再投影してから再実行 |
+| `node .ut-tdd/bin/ut-tdd.mjs ...` が exit 1 で `'ut-tdd' is not recognized` | wrapper がどの解決先も見つけられない状態。ハーネス checkout 直下 (`src/cli.ts` と `src/setup/index.ts` がある場所) で実行しているか、`npm ci` 済みかを確認 |
+| Windows で hook が Node を見つけられない | §0 の PATH 注記を参照 |
+| doctor が「harness.db が古い」系で失敗 | `node src/cli.ts db rebuild --json` で再投影してから再実行 |
 
 wrapper (`.ut-tdd/bin/ut-tdd.mjs`) の解決順: ① 対象リポジトリの `node_modules/.bin/ut-tdd`
 ② リポジトリ直下のハーネス source (`src/cli.ts`、CI runner でも有効) ③ setup を実行した

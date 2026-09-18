@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
-import { importedSourceModule, lineOf, normalizePath, sourceModule } from "./shared";
+import { importedSourceModule, lineOf, normalizePath, sourceModule } from "./shared.ts";
 
 export type DddTddDocScope = "source" | "test";
 

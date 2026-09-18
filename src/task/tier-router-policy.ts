@@ -1,5 +1,5 @@
-import { MODEL_IDS, type TaskDifficulty } from "../team/model-policy";
-import type { Archetype, Provider, RouterRole, Tier } from "./tier-router";
+import { MODEL_IDS, type TaskDifficulty } from "../team/model-policy.ts";
+import type { Archetype, Provider, RouterRole, Tier } from "./tier-router.ts";
 
 export const ROLE_ARCHETYPE: Record<RouterRole, Archetype> = {
   tl: "consult",
@@ -11,7 +11,8 @@ export const ROLE_ARCHETYPE: Record<RouterRole, Archetype> = {
 
 export const TIER_TABLE: Record<Tier, Record<Provider, string>> = {
   T0: { claude: MODEL_IDS.claude.opus, codex: MODEL_IDS.codex.frontier },
-  T1: { claude: MODEL_IDS.claude.sonnet, codex: MODEL_IDS.codex.worker },
+  // T1 実装帯 = luna (PO 2026-07-14)。terra はテスト実装専門 (MODEL_IDS.codex.worker) で intent 経路が使う。
+  T1: { claude: MODEL_IDS.claude.sonnet, codex: MODEL_IDS.codex.luna },
   T2: { claude: MODEL_IDS.claude.haiku, codex: MODEL_IDS.codex.spark },
 };
 
@@ -40,7 +41,7 @@ export function tierFor(role: RouterRole, difficulty: TaskDifficulty, riskFlags:
 export function resolveModel(role: RouterRole, tier: Tier, provider: Provider): string {
   if (ROLE_ARCHETYPE[role] === "worker" && tier === "T0") {
     throw new Error(
-      `invariant violation: worker role ${role} cannot resolve to T0 (frontier opus/gpt-5.5)`,
+      `invariant violation: worker role ${role} cannot resolve to T0 (frontier ${MODEL_IDS.claude.opus}/${MODEL_IDS.codex.frontier})`,
     );
   }
   return TIER_TABLE[tier][provider];

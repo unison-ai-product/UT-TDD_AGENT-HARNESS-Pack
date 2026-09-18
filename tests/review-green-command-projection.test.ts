@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { openHarnessDb } from "../src/state-db/index";
-import { rebuildHarnessDb } from "../src/state-db/projection-writer";
+import { openHarnessDb } from "../src/state-db/index.ts";
+import { rebuildHarnessDb } from "../src/state-db/projection-writer.ts";
 
 describe("review green command projection", () => {
   it("projects review_evidence.green_commands into test_runs", () => {

@@ -31,7 +31,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadReviewPlans } from "./review-evidence";
+import { loadReviewPlans } from "./review-evidence.ts";
 
 /** status がこれなら終端 = DoD 完了でも drift でない。これ以外で DoD 全消化 = status 前進忘れ。 */
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(["confirmed", "completed", "accepted"]);

@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# UT-TDD tracked pre-push hook (PLAN-L7-260 §4 pre-push 対象見直し、PO 採択案 A、2026-07-13、
+# blind review 指摘反映 2026-07-13)。
+#
+# 有効化: `git config core.hooksPath scripts/git-hooks`
+# (docs/plans/PLAN-L7-260-sensitive-scan-boundary.md の運用手順を参照。setup への
+# 自動組込みは別 slice)。
+#
+# 責務分離: 本スクリプトは「push される commit 群」と「各 commit で変更されたファイル」を
+# (sha, path) ペアとして列挙するだけで、検査本体 (credential + PII marker、各 commit 時点の
+# blob 読取り) は隣接の secret-scan-diff.ts (src/lint/secret-scan.ts の analyzeSecretScan を
+# 再利用) へ stdin 経由で委譲する。
+#
+# 【設計注記】途中 commit で追加され後続 commit で削除される secret は working tree では見えない
+# (working tree はクリーンなまま push できてしまう)。そのため本スクリプトは commit 単位で
+# (sha, path) を保持し、secret-scan-diff.ts 側で各 commit 時点の blob (`git show <sha>:<path>`)
+# を個別に読む。旧来の未追跡 `.git/hooks/pre-push` は
+# `*CLAUDE.md` / `*SKILL.md` / references 配下 `*.md` の 3 パターンへ限定して PII regex を
+# 直接 grep していたが、対象拡大 (docs/・.ut-tdd/audit/・.ut-tdd/logs/・.ut-tdd/memory) は
+# secret-scan-diff.ts 側の isWidenedScanSurface に一本化する。
+
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(git rev-parse --show-toplevel)"
+
+is_all_zero_sha() {
+  local sha="$1"
+  [[ "$sha" =~ ^0+$ ]]
+}
+
+# git pre-push は stdin に "<local ref> <local sha> <remote ref> <remote sha>" を渡す。
+# push されるすべての commit (削除 push・新規ブランチ push を含む) を重複なく列挙する。
+collect_commits() {
+  local local_ref="" local_sha="" remote_ref="" remote_sha=""
+
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    [[ -z "${local_sha:-}" ]] && continue
+    if is_all_zero_sha "$local_sha"; then
+      # ブランチ削除 push (local_sha が全ゼロ) — scan 対象なし。
+      continue
+    fi
+
+    if is_all_zero_sha "$remote_sha"; then
+      # 新規ブランチ push — remote 上のどの ref にも無い commit をすべて対象にする。
+      git rev-list "$local_sha" --not --remotes 2>/dev/null || true
+    else
+      git rev-list "${remote_sha}..${local_sha}" 2>/dev/null || true
+    fi
+  done | awk 'NF && !seen[$0]++'
+}
+
+# push される commit 群それぞれについて、その commit で変更された (Added/Copied/Modified/
+# Renamed) ファイルを "<sha>\t<path>" 行として出力する。同一 path が複数 commit で変更されて
+# いても commit ごとに別行を出す (secret-scan-diff.ts 側で各 commit 時点の blob を個別検査
+# するため。途中 commit の履歴漏れを塞ぐのが目的)。
+collect_pushed_entries() {
+  local commit=""
+  while IFS= read -r commit; do
+    [[ -z "$commit" ]] && continue
+    local file=""
+    while IFS= read -r file; do
+      [[ -z "$file" ]] && continue
+      printf '%s\t%s\n' "$commit" "$file"
+    done < <(git diff-tree --root --no-commit-id --name-only -r --diff-filter=ACMR "$commit")
+  done < <(collect_commits)
+}
+
+main() {
+  local entries=""
+  entries="$(collect_pushed_entries)"
+
+  if [[ -z "$entries" ]]; then
+    exit 0
+  fi
+
+  local status=0
+  (
+    cd "$repo_root"
+    printf '%s\n' "$entries" | node "${hook_dir}/secret-scan-diff.ts"
+  ) || status=$?
+
+  exit "$status"
+}
+
+main "$@"

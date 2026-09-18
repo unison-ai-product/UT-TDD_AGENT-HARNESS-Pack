@@ -6,7 +6,7 @@ import {
   loadCodingRuleDocs,
   loadCodingRulePolicy,
   loadCodingWorkflowDocs,
-} from "../src/lint/coding-rules";
+} from "../src/lint/coding-rules.ts";
 
 describe("U-CODE coding-rules lint", () => {
   it("detects source naming, explicit any, suppression comments, and >3 source params", () => {
@@ -122,6 +122,26 @@ export function rethrowOnly(): void {
     ]);
     expect(result.ok).toBe(false);
     expect(result.violations.filter((v) => v.rule === "structured-error-handling")).toHaveLength(2);
+  });
+
+  it("allows a catch block to convert a parser error into a domain integrity error", () => {
+    const result = analyzeCodingRules([
+      {
+        path: "src/execution/parser.ts",
+        scope: "source",
+        text: `
+export function parse(): never {
+  try {
+    JSON.parse("bad");
+    throw new Error("unreachable");
+  } catch {
+    throw new Error("journal-integrity-failure");
+  }
+}
+`,
+      },
+    ]);
+    expect(result.violations).toEqual([]);
   });
 
   it("detects source module boundary drift", () => {

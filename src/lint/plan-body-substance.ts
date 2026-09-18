@@ -16,7 +16,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadReviewPlans } from "./review-evidence";
+import { loadReviewPlans } from "./review-evidence.ts";
 
 export interface PlanBodyRow {
   planId: string;

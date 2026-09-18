@@ -1,4 +1,4 @@
-import type { RelationFinding, RelationFindingCode } from "./relation-graph-types";
+import type { RelationFinding, RelationFindingCode } from "./relation-graph-types.ts";
 
 // ---- PLAN-L7-36: collectVerificationEvidenceProjection (U-RELGRAPH-009..010) ---
 

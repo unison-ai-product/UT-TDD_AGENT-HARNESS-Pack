@@ -14,7 +14,7 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { normalizePath } from "./shared";
+import { normalizePath } from "./shared.ts";
 
 /** A-108 以前からの既存 untraced lint (known-debt)。段階 back-fill で縮小する。 */
 export const IMPL_PLAN_TRACE_BASELINE: ReadonlySet<string> = new Set([

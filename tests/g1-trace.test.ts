@@ -5,7 +5,7 @@ import {
   extractG1P0FrIds,
   extractG1ScreenIds,
   loadG1TraceDocs,
-} from "../src/lint/g1-trace";
+} from "../src/lint/g1-trace.ts";
 
 describe("G1-trace coverage (business/screen/functional)", () => {
   const docs = loadG1TraceDocs();

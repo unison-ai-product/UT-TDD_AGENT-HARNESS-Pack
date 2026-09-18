@@ -6,7 +6,7 @@ import {
   analyzeCycleP4Verification,
   cycleP4VerificationMessages,
   loadCycleP4VerificationDocs,
-} from "../src/lint/cycle-p4-verification";
+} from "../src/lint/cycle-p4-verification.ts";
 
 const legacyRuntimeName = ["HE", "LIX"].join("");
 

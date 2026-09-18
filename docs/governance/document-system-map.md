@@ -57,6 +57,7 @@ IPA 共通フレーム 2013 (SLCP-JCF) では次が**同義**として扱われ�
 | **UI 設計標準** | `ui-standard` | **② プロダクト選択 (UI 有時)** | Nablarch UI標準/部品カタログ / ISO 9241-110 | **再利用 FE 設計標準** (UI 設計標準 + UI 部品カタログ + design tokens=色)。`data` (DB 設計標準) の FE 対応物。L2 (画面棚卸し) と別物で、impl **前**に要る方式設計/開発標準。PLAN-L4-14 |
 | 業務処理 (機能) | `function` | ① 必須 | DDD / arc42 §5 | 機能の外部振る舞い |
 | 外部 IF | `external-if` | ② プロダクト選択 | C4 Container / DDD | 外部接続がある製品 |
+| **セキュリティ** | `security` | **① 必須 (認証・認可・秘密情報・配布を持つ製品)** | STRIDE / OWASP ASVS / DevSecOps | 認証境界、秘密情報、監査証跡、配布前検査。PLAN-L4-16 |
 | データ (ドメインモデル) | `data` | ① 必須 | DDD (Evans) | 集約/値オブジェクト |
 | **帳票** | `report` | **② プロダクト選択** | IPA 外部設計 (帳票設計) | 帳票出力がある製品 |
 | **バッチ** | `batch` | **② プロダクト選択** | IPA 外部設計 (バッチ設計) | バッチ処理がある製品 |
@@ -69,6 +70,24 @@ IPA 共通フレーム 2013 (SLCP-JCF) では次が**同義**として扱われ�
 > 要件 [§1.10.G.6.1](./ut-tdd-agent-harness-requirements_v1.2.md) で IPA 共通フレーム外部設計に grounding して
 > 確定し、`ut-tdd plan lint` (`sub-doc-section-structure` gate) が design PLAN に対し fail-close 検証する。
 > 例: 帳票 = §1 帳票一覧 / §2 レイアウト / §3 出力項目定義 / §4 出力条件・タイミング / §5 関連 doc。
+
+### §1b-1 L6 機能設計 sub_doc の粒度 (artifact 種別 bucket、PLAN-L7-245)
+
+L6 (機能設計) の `VALID_SUB_DOCS.L6` (`function-spec` / `class-design` / `edge-case` / `screen-spec`)
+は本節 §1b の L4 標準成果物カタログとは粒度が異なる。L4 §1b は「産出物の種類」を
+per-product-artifact で列挙する enumerable catalog (① 必須 / ② プロダクト選択の区分を伴う) だが、
+L6 は「関数仕様 doc という artifact **種別**」を表す coarse な bucket である。
+`docs/design/harness/L6-function-design/` 配下の各トピック doc (agent-slots / context / graph /
+memory / secret / skill-index 等、実装機構ごとに 1 file) はすべて `sub_doc: function-spec` を
+共有し、トピックの識別は **ファイル名 + 任意の `artifact_role: topic_<name>`**
+(L2 `business-flow.md` の `artifact_role: supplemental_business_flow` と同型の non-schema
+free-form メタデータ) が担う。
+
+新しい L6-function-design トピック doc を追加するときも `VALID_SUB_DOCS.L6` へ per-topic slug を
+追加しない。追加すると `sub-doc-catalog-drift` gate (schema ↔ 要件 v1.2 §G.1 mirror) が要件側
+未同期で fail-close する (2026-07-13 spec-ir triage cluster A、18 件の latent-defect と同じ経路を
+再発させないための明文化)。doc frontmatter ↔ schema (`VALID_SUB_DOCS`) ↔ 本ノートの 3 者整合は
+`sub-doc-schema-integrity` gate (`src/lint/sub-doc-schema-integrity.ts`) が機械検証する。
 
 ## §1c 各 L の FE/UI 設計ドキュメント定義 (フロント設計 doc coverage、PLAN-L4-14)
 
@@ -184,6 +203,38 @@ IPA 共通フレーム 2013 (SLCP-JCF) では次が**同義**として扱われ�
 | **E3** | arc42 §5 (Building Block L1/L2) → L4/L5 sub-doc のビューマッピング表を追加 | 🔵 L4 | IMP-025 |
 
 > 🟢 本 doc で確定済: §0 (基本設計=外部設計)、§1 (L0-L14 標準マップ)、§3 (配線図=DbC)。これらは concept §3 / §11 の grounding 正本となる。
+
+## §4.1 業界標準カタログ差分 — 未カバー設計書 slot + 規模プロファイル判定 (A-185)
+
+> 外部参照 `vmodel-docgen` (V-model 設計書 53 種の汎用ジェネレータ) との突き合わせ所見。正本 =
+> `.ut-tdd/audit/A-185-vmodel-docgen-reference-mining-2026-07-07.md`。各 gap は research 内部監査ワークフロー
+> (PLAN-L7-198) で route 済で、finding-route ledger `.ut-tdd/audit/A-156` の「A-185 Candidates」に集約
+> (全 feature-gap → Add-feature、auto_create=false、人間承認待ち)。本節はその一望表であり、着手は PO/TL 裁定。
+
+**未カバー / 部分カバー slot 一覧** (UT-TDD `VALID_SUB_DOCS` + §1b/§1c 対照、grep 裏取り済):
+
+| 設計書型 | 判定 | 区分 | 対応方針 | route 先 |
+|---|---|---|---|---|
+| セキュリティ設計 / STRIDE / 権限マトリクス / 対策 | covered | ① 必須 (認証・認可・秘密情報・配布を持つ製品) | `security` slot を PLAN-L4-16 で confirmed。docs 横断 secret-scan は PLAN-L6-62 へ降下 | Add-feature (L4-16) |
+| テスト計画書 (全体、層別 test-design の上位) | gap | ① 必須 | slot 新設。RECOVERY-10 右肺 (検証戦略の上位) と統合 | Add-feature |
+| データディクショナリ (field 単位網羅) | gap | ① 必須 (データを持つ製品) | L4 `data` の必須 § 追加 or 新 slot | Add-feature |
+| 表示名/ラベルカタログ・エラーメッセージ一覧 | gap | ② プロダクト選択 (UI 有時) | 新 slot or L4 `ui-standard`/`code-value` 拡張 | Add-feature |
+| 国際化 i18n 設計 | gap | ② プロダクト選択 (多言語時) | 新 slot。規模プロファイルで採否 | Add-feature |
+| 性能試験計画 / セキュリティテスト計画 | gap | ① 必須 (NFR 受入) | 右肺 test-design 群へ NFR 試験計画を追加 | Add-feature (一部 L4-16) |
+| 環境定義 / ネットワーク / サーバー・インフラ設計 | gap | ② プロダクト選択 (インフラ持つ製品) | 規模プロファイルで skip/採用 自動判定 | Add-feature |
+| 信頼性・DR・BCP / 変更管理 | gap | ② プロダクト選択 (本番運用製品) | 同上 (規模プロファイル) | Add-feature |
+| CI/CD 設計・イベント/メッセージスキーマ・KPI/計測・ログトレース設計 | partial | ② プロダクト選択 | 実装/概念はあるが専用設計 doc を slot 化 | Add-feature |
+
+**規模プロファイル判定 (未機構、A-185 §B③ = `vmodel-docgen cmd_profile` parity)**: 上表の「② プロダクト選択」は
+現状 `skip_sub_doc[].reason` の手動判定 (§1b)。参照は **PoC / Standard / Enterprise の規模プロファイル ×
+粒度 (詳細 / 標準 / 簡易)** で各設計書の採用 / skip / 粒度を自動設定する。UT-TDD にこの機構を新設すれば、
+④ 群 (infra/DR/i18n 等) の採否を製品規模から機械判定でき、meta-model の slot を持ちつつ小規模製品では
+自動 skip できる (slot 欠落と意図 skip を区別)。これも A-185 §D で Add-feature に route 済。
+
+> **原則の再確認**: 未カバー = 「meta-model (下流 SI 製品に課す doc 体系) の slot 欠落」であり、harness 自身が
+> CLI で当該成果物を持たないこと (§1b「② プロダクト選択」) とは別問題。slot は meta-model に持ち、harness 自身は
+> `skip_sub_doc[].reason` で明示 skip する ([[ut-tdd-agent-harness-concept_v3.1]] §自己適用境界)。規模を理由に
+> slot 自体を欠落させない (縮退させない)。
 
 ## §5 参照標準
 

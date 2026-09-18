@@ -17,7 +17,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadReviewPlans, type ParsedReviewPlan } from "./review-evidence";
+import { loadReviewPlans, type ParsedReviewPlan } from "./review-evidence.ts";
 
 export interface DigestMismatch {
   plan_id: string;
@@ -179,6 +179,8 @@ export function nodeDigestAuditDeps(repoRoot: string): DigestAuditDeps {
 
 /** digest-migrate の 1 件分の判定 (dry-run 出力単位)。 */
 export interface DigestMigrationCandidate {
+  /** docs/plans 配下の PLAN file name。 */
+  file: string;
   plan_id: string;
   evidence_path: string;
   claimed: string;
@@ -218,6 +220,7 @@ export function planDigestMigration(
         if (!path || !claimed) continue;
         if (cmd.anchor_commit?.trim()) {
           out.push({
+            file: plan.file,
             plan_id: plan.plan_id,
             evidence_path: path,
             claimed,
@@ -236,6 +239,7 @@ export function planDigestMigration(
           }
         }
         out.push({
+          file: plan.file,
           plan_id: plan.plan_id,
           evidence_path: path,
           claimed,
@@ -246,6 +250,104 @@ export function planDigestMigration(
     }
   }
   return out;
+}
+
+export interface DigestAnchorApplyResult {
+  content: string;
+  applied: number;
+  skippedAlreadyAnchored: number;
+}
+
+function unquoteYamlScalar(raw: string): string {
+  const trimmed = raw.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+/**
+ * PLAN frontmatter の green_commands へ anchor_commit だけを追記する。
+ *
+ * YAML frontmatter 全体を再 serialize すると既存監査証跡の整形差分が膨らむため、`output_digest`
+ * 行の直後に同じ indent で `anchor_commit` を差し込む。`output_digest` 値は変更しない。
+ */
+export function applyDigestAnchorCandidatesToContent(
+  content: string,
+  candidates: DigestMigrationCandidate[],
+): DigestAnchorApplyResult {
+  const anchors = new Map<string, string>();
+  for (const c of candidates) {
+    if (c.disposition !== "recoverable" || !c.anchor_candidate) continue;
+    anchors.set(`${c.evidence_path}\0${c.claimed.toLowerCase()}`, c.anchor_candidate);
+  }
+  if (anchors.size === 0) {
+    return { content, applied: 0, skippedAlreadyAnchored: 0 };
+  }
+
+  const lines = content.split(/\n/);
+  if (lines[0] !== "---") {
+    return { content, applied: 0, skippedAlreadyAnchored: 0 };
+  }
+  const frontmatterEnd = lines.findIndex((line, index) => index > 0 && line === "---");
+  if (frontmatterEnd < 0) {
+    return { content, applied: 0, skippedAlreadyAnchored: 0 };
+  }
+
+  const out: string[] = [];
+  let applied = 0;
+  let skippedAlreadyAnchored = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    if (i <= 0 || i >= frontmatterEnd || !/^\s*-\s+kind:\s*/.test(line)) {
+      out.push(line);
+      continue;
+    }
+
+    const block: string[] = [line];
+    i += 1;
+    while (i < frontmatterEnd && !/^\s*-\s+kind:\s*/.test(lines[i] ?? "")) {
+      block.push(lines[i] ?? "");
+      i += 1;
+    }
+    i -= 1;
+
+    const evidenceLine = block.find((l) => /^\s*evidence_path:\s*/.test(l));
+    const digestLineIndex = block.findIndex((l) => /^\s*output_digest:\s*/.test(l));
+    const hasAnchor = block.some((l) => /^\s*anchor_commit:\s*/.test(l));
+    if (!evidenceLine || digestLineIndex < 0) {
+      out.push(...block);
+      continue;
+    }
+
+    const evidencePath = unquoteYamlScalar(evidenceLine.replace(/^\s*evidence_path:\s*/, ""));
+    const claimed = unquoteYamlScalar(
+      (block[digestLineIndex] ?? "").replace(/^\s*output_digest:\s*/, ""),
+    ).toLowerCase();
+    const anchor = anchors.get(`${evidencePath}\0${claimed}`);
+    if (!anchor) {
+      out.push(...block);
+      continue;
+    }
+    if (hasAnchor) {
+      skippedAlreadyAnchored += 1;
+      out.push(...block);
+      continue;
+    }
+
+    for (let j = 0; j < block.length; j += 1) {
+      out.push(block[j] ?? "");
+      if (j === digestLineIndex) {
+        const indent = (block[j] ?? "").match(/^(\s*)/)?.[1] ?? "";
+        out.push(`${indent}anchor_commit: ${anchor}`);
+        applied += 1;
+      }
+    }
+  }
+  return { content: out.join("\n"), applied, skippedAlreadyAnchored };
 }
 
 /** Node I/O 実装の履歴走査 deps。 */

@@ -11,13 +11,19 @@ applies_to:
 
 # SKILL_MAP
 
-Catalog index for `docs/skills/`. This is an index, not a skill body — read an
+Catalog index for `skills/`. This is an index, not a skill body — read an
 individual pack only when its trigger is active. Do not load every pack at once;
 each costs context.
 
+Deliberately outside this index: `skills/review-checklist.yaml` is a gate
+checklist **data asset** (single-runtime judgment-gate review evidence SSoT),
+not a workflow skill body. It is excluded from skill scoring/injection by
+`shouldScoreSkillAsset` (src/skill-scoring/scoring.ts, PLAN-L7-277 N-1) and is
+intentionally not listed in the trigger table below (PLAN-REVERSE-280 item 3).
+
 ## How recommendation works
 
-`ut-tdd skill suggest --plan <path>` scores every pack against the plan's `layer`
+`ut-tdd skill suggest --plan <plan-id>` scores every pack against the plan's `layer`
 and drive model (the recommender reads each pack's `applies_to.layers` /
 `applies_to.drive_models` frontmatter, not its body). Load only the top-scoring
 packs for the current task.
@@ -25,7 +31,7 @@ packs for the current task.
 ## Discovery protocol (session start / task arrival)
 
 1. `ut-tdd status` — current layer, drive model, active PLAN.
-2. `ut-tdd skill suggest --plan <active-plan-path>` — ranked packs.
+2. `ut-tdd skill suggest --plan <active-plan-id>` — ranked packs.
 3. Read the top-scoring pack(s) before starting work.
 4. With no PLAN yet (Discovery S0 / cold start), pick from the trigger table.
 5. Skip packs that do not match the current layer/drive — they only cost context.
@@ -66,6 +72,29 @@ packs for the current task.
 | Browser / screen (L10) verification | browser-testing-and-screen-verification |
 | Git / Conventional Commits / CI | git |
 | Doc maintenance (README / runbook prose) | documentation |
+| Before writing any code (delete/absorb/reuse/config first) | code-minimalism |
+| Test-case ideation quality / oracle / when to stop testing | test-breakage-thinking |
+| Screen state-matrix / visual-regression triage / a11y judgement | visual-state-verification |
+| Which design docs to write, at what granularity (tailoring) | design-tailoring-and-granularity |
+| Requirement elicitation via screen prototypes (pre-freeze) | screen-driven-requirements |
+| Contract headroom / envelope versioning judgement | contract-envelope-design |
+| Where to start a slice (domain/prototype/contract-first) | vmodel-drive-direction |
+| Design principles (pillars), VO/domain/class norms | design-principles-pillars |
+| Stage: charter / demands / requirements freeze | vmodel-stage-upstream |
+| Stage: basic design (decomposition, domain, infra outline) | vmodel-stage-architecture |
+| Stage: detailed design + shift-left test design | vmodel-stage-detailed-design |
+| Stage: implementation / TDD closure / unit test | vmodel-stage-implementation-unit |
+| Stage: integration → system → acceptance → operational test | vmodel-stage-integration-acceptance-ops |
+| Product pattern presets (scale × platform adoption/granularity) | product-profile-tailoring |
+| Data design docs (DB / schema / mapping / dictionary / IO) | design-family-data |
+| Security & privacy design docs | design-family-security-privacy |
+| Ops / reliability / DR / incident design docs | design-family-operations-reliability |
+| Performance / KPI / logging / cost design docs | design-family-performance-observability |
+| Web frontend design docs (responsive / CWV / i18n-a11y) | design-family-web-frontend |
+| Mobile & desktop client design docs | design-family-mobile-desktop |
+| CLI / API governance / webhook / event design docs | design-family-cli-api-platform |
+| AI agent / AI-output verification / model governance docs | design-family-ai-agent |
+| SaaS business docs (billing / tenant / SLA / compliance) | design-family-saas-business |
 
 ## Domain / project skills (indexed by category + metadata)
 

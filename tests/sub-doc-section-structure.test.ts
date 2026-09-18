@@ -8,7 +8,7 @@ import {
   STANDARD_DELIVERABLE_SECTIONS,
   type SubDocSectionStructureInput,
   subDocSectionStructureMessages,
-} from "../src/lint/sub-doc-section-structure";
+} from "../src/lint/sub-doc-section-structure.ts";
 
 function plan(subDoc: string, h2Names: string[], status = "confirmed") {
   return {

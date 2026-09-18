@@ -12,6 +12,27 @@ applies_to:
     - Discovery
     - Scrum
     - Add-feature
+decision_points:
+  - when: "Evaluating candidate technologies and considering 'popularity' or 'community size' as a criterion."
+    choose: "name the specific underlying proxy (maintenance risk, hiring pool, ecosystem maturity) as the criterion instead"
+    over: "using 'popularity'/'community' directly as a standalone evaluation criterion"
+    because: "the evaluation criteria rules explicitly prohibit these as standalone criteria since they are proxies that hide what is actually being measured, making the comparison table unfalsifiable."
+  - when: "A PLAN `requires` an ADR that is still in `Proposed` status."
+    choose: "block pair-freeze until the ADR is advanced to `Accepted` with PO confirmation recorded in review_evidence"
+    over: "proceeding to L4 design on the assumption the ADR will be accepted eventually"
+    because: "the ADR lifecycle table states `Proposed` blocks pair-freeze for any dependent PLAN; proceeding without Accepted status lets unconfirmed technology decisions propagate into committed design."
+  - when: "More than five candidate technologies are under consideration for a research-memo."
+    choose: "narrow the candidate list to five or fewer before building the comparison table"
+    over: "comparing all candidates in the matrix regardless of count"
+    because: "the research-memo structure caps candidates at five (minimum two); beyond five the file requires narrowing first, since an unbounded comparison matrix dilutes evidence-gathering per candidate."
+  - when: "A new technology decision would supersede an existing accepted ADR."
+    choose: "update the old ADR's status to `Superseded` with a link to the new ADR"
+    over: "authoring the new ADR without updating the old one's status"
+    because: "the pair-freeze checklist explicitly requires no ADR is superseded without a status update and back-link — leaving the old ADR `Accepted` would let two contradictory accepted decisions coexist."
+  - when: "A PLAN needs external documentation or comparative research for S2 PoC evidence-gathering."
+    choose: "use `ut-tdd claude --role pmo-tech-docs --dry-run` for the retrieval"
+    over: "having the orchestrating agent browse and synthesize external docs directly inline"
+    because: "the Discovery drive S1-S2 cycle names this delegation path specifically for external documentation retrieval, keeping the research role and evidence trail separate from the orchestrating PLAN work."
 ---
 
 # tech selection
@@ -56,8 +77,8 @@ Both must appear in the PLAN's `generates` field. `ut-tdd plan lint` will fail i
   pillar from `CLAUDE.md` (foundation-first, type-safety, observability, etc.).
 - Do not use "popularity" or "community" as standalone criteria — they are
   proxies; name what they proxy (maintenance risk, hiring, ecosystem maturity).
-- At least one criterion must be a UT-TDD operational constraint: Windows/Bun
-  compatibility, hook integration, `bun run test` / Biome compatibility.
+- At least one criterion must be a UT-TDD operational constraint: Windows/Node
+  compatibility, hook integration, `npm run test` / Biome compatibility.
 
 ## ADR lifecycle in UT-TDD
 

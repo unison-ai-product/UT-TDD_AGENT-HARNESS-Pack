@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { TIER_TABLE } from "../src/task/tier-router";
-import { MODEL_IDS, PROPOSAL_SUBAGENT_LANES, selectTeamModel } from "../src/team/model-policy";
+import { TIER_TABLE } from "../src/task/tier-router.ts";
+import { MODEL_IDS, PROPOSAL_SUBAGENT_LANES, selectTeamModel } from "../src/team/model-policy.ts";
 
 /**
  * U-MODELID: model-id SSoT (PLAN-L7-58 carry)。
@@ -12,7 +12,9 @@ import { MODEL_IDS, PROPOSAL_SUBAGENT_LANES, selectTeamModel } from "../src/team
  * を値で確認し、かつ「両モジュールに生の ID literal が再混入していないか」をソース走査で fail-close する。
  */
 
-const repoRoot = join(__dirname, "..");
+import { headSnapshotRoot } from "./support/workspace-roots.ts";
+
+const repoRoot = headSnapshotRoot();
 const ALL_IDS: string[] = [...Object.values(MODEL_IDS.claude), ...Object.values(MODEL_IDS.codex)];
 
 function quotedOccurrences(file: string, id: string): number {
@@ -30,7 +32,8 @@ describe("U-MODELID: model-id SSoT", () => {
     });
     expect(TIER_TABLE.T1).toEqual({
       claude: MODEL_IDS.claude.sonnet,
-      codex: MODEL_IDS.codex.worker,
+      // T1 実装帯 = luna (PLAN-L7-430、PO 2026-07-14)。terra はテスト実装 intent 経路。
+      codex: MODEL_IDS.codex.luna,
     });
     expect(TIER_TABLE.T2).toEqual({ claude: MODEL_IDS.claude.haiku, codex: MODEL_IDS.codex.spark });
   });
@@ -47,7 +50,7 @@ describe("U-MODELID: model-id SSoT", () => {
     expect(
       selectTeamModel({ provider: "codex", role: "docs", engine: "codex-pg", task: "README typo" })
         .model,
-    ).toBe(MODEL_IDS.codex.spark);
+    ).toBe(MODEL_IDS.codex.mini);
     expect(
       selectTeamModel({
         provider: "claude",

@@ -1,0 +1,9 @@
+{
+  "memoryId": "memory:project:pr-410-exact-head-closing-review-request-at-8143ce40--a48ed94cd3fe",
+  "pr": 410,
+  "exactHead": "8143ce40f6df3f56ebcee9d745d6f38422e1912f",
+  "reviewRevision": "rv1-6945ce76a9e1c90246e2a61a1a50058ffb46664b494480e08b8c2c4f8036755b",
+  "authorFamily": "codex",
+  "requestedAt": "2026-08-27T03:13:17.425Z",
+  "invocationNonce": "nonce-6945ce76a9e1c90246e2a61a1a50058f"
+}

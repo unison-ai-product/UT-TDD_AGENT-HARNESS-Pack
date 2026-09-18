@@ -5,22 +5,22 @@ import {
   type AdapterPlan,
   type AdapterProvider,
   buildAdapterPlan,
-} from "../runtime/adapter";
+} from "../runtime/adapter.ts";
 import {
   type AgentSlotsDeps,
   fireSlot,
   releaseSlot,
   type Slot,
   type SlotStatus,
-} from "../runtime/agent-slots";
-import type { ExecutionMode } from "../runtime/detect";
+} from "../runtime/agent-slots.ts";
+import type { ExecutionMode } from "../runtime/detect.ts";
 import {
   mustSerialize,
   type TeamDefinition,
   type TeamMember,
   teamDefinitionSchema,
-} from "../schema/team";
-import { selectTeamModel, type TeamModelSelection } from "./model-policy";
+} from "../schema/team.ts";
+import { selectTeamModel, type TeamModelSelection } from "./model-policy.ts";
 import {
   dependencyFailedMessage,
   duplicateRoleProviderMessage,
@@ -38,7 +38,7 @@ import {
   TEAM_RUN_REQUIRES_CROSS_PROVIDER_REVIEW_MESSAGE,
   TEAM_RUN_REQUIRES_HYBRID_MESSAGE,
   teamDependencyCycleMessage,
-} from "./run-policy";
+} from "./run-policy.ts";
 
 export type TeamProvider = AdapterProvider | "local";
 
@@ -300,6 +300,7 @@ export function buildTeamRunPlan(
       role: member.role,
       engine: member.engine,
       task: member.task,
+      intent: member.intent,
       difficulty: member.difficulty,
       // placement (tier-router) のモデルを engine 既定より優先。空文字 (blocked) は無視。
       model: placement?.model || member.model,

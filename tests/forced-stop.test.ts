@@ -10,8 +10,8 @@ import {
   recordFeedback,
   recordForcedStop,
   scanDanglingStops,
-} from "../src/runtime/forced-stop";
-import type { SessionEvent, SessionLogDeps } from "../src/runtime/session-log";
+} from "../src/runtime/forced-stop.ts";
+import type { SessionEvent, SessionLogDeps } from "../src/runtime/session-log.ts";
 
 /** in-memory file store の mock deps (now 固定で決定論)。 */
 function mockDeps(

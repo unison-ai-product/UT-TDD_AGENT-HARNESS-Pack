@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { planIdSchema } from "../src/schema/frontmatter.ts";
 import {
   kindSchema,
   recommendedCommandV1Schema,
@@ -7,8 +8,7 @@ import {
   VALID_KINDS,
   VALID_LAYERS,
   VALID_ORCHESTRATION_MODES,
-} from "../src/schema";
-import { planIdSchema } from "../src/schema/frontmatter";
+} from "../src/schema/index.ts";
 
 describe("planIdSchema (§1.10 A、NN = d{2,} で 99 ceiling 解消)", () => {
   it("2 桁 plan_id を受理", () => {
@@ -36,10 +36,11 @@ describe("schema (zod single source, ADR-001 / requirements_v1.2 §1)", () => {
     expect(VALID_LAYERS).toContain("cross");
   });
 
-  it("12 kinds incl. charter (L0 企画); zod rejects unknown", () => {
-    expect(VALID_KINDS).toHaveLength(12);
+  it("13 kinds incl. charter (L0 企画) and verify (right arm); zod rejects unknown", () => {
+    expect(VALID_KINDS).toHaveLength(13);
     expect(kindSchema.safeParse("impl").success).toBe(true);
     expect(kindSchema.safeParse("charter").success).toBe(true);
+    expect(kindSchema.safeParse("verify").success).toBe(true);
     expect(kindSchema.safeParse("nope").success).toBe(false);
   });
 

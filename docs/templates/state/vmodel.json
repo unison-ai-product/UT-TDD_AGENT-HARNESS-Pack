@@ -1,0 +1,61 @@
+{
+  "_meta": {
+    "purpose": "UT-TDD V-model 4 artifact + 8 directed edge runtime state template (PLAN-002 W2).",
+    "spec_ref": "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md §2.1-2.7 / §7.3",
+    "_superseded": "ADR-001 (2026-05-27): 旧 L1-L4 + L3.5/L3.8/L6 層・G1-G4/G3.8 は requirements_v1.2 で L0-L14 + W-model (pair=G1/G3/G4/G5/G6, trace=G7) に再定義。Python (coverage.py/pytest) も TS (vitest) へ。本 template は TS vmodel 実装時に L0-L14 で再生成する。",
+    "note": "JSON does not support comments. Underscore-prefixed top-level keys are metadata; consumers must read 'plan_id' / 'layers' / 'freeze_status' / 'edges' / 'pair_freezes' / 'l6_qa' / 'inverted_pyramid'.",
+    "ut_tdd_adapt": [
+      "旧来の planning/architecture/detailed/functional/impl 5 layer + 30 D-* deliverable を捨て、",
+      "UT-TDD §2.1 の 4 artifact (design/impl/test_design/test_code) と §2.2 の 3 段階 freeze (Pair / Red / Trace) に再構築。",
+      "旧来の score_formula は §2.7 受入条件 (4 artifact 揃い + 8 edge pass + coverage >=80%) に置換。"
+    ]
+  },
+  "plan_id": "PLAN-NNN",
+  "schema_version": 1,
+  "layers": {
+    "L1": { "artifact": "requirements", "test_design": "acceptance-test-design", "pair_status": "pending", "freeze_gate": "G1" },
+    "L2": { "artifact": "CONCEPT/ADR",  "test_design": "system-test-design",     "pair_status": "pending", "freeze_gate": "G2" },
+    "L3": { "artifact": "D-API/D-DB",   "test_design": "integration-test-design","pair_status": "pending", "freeze_gate": "G3" },
+    "L3.5": { "artifact": "functional-design", "test_design": "unit-test-design", "pair_status": "pending", "freeze_gate": "G3" },
+    "L3.8": { "artifact": "unit-test-design",  "test_code":   "unit-test-code (TDD Red)", "pair_status": "pending", "freeze_gate": "G3.8" },
+    "L4":   { "artifact": "impl", "test_code": "unit + integration test code", "pair_status": "pending", "freeze_gate": "G4" },
+    "L6":   { "artifact": "qa-additional-test-design", "test_code": "qa-additional-test-code", "pair_status": "pending", "freeze_gate": "G6" }
+  },
+  "freeze_status": {
+    "G1_pair_freeze":  { "frozen": false, "frozen_at": null, "evidence": null },
+    "G2_pair_freeze":  { "frozen": false, "frozen_at": null, "evidence": null },
+    "G3_pair_freeze":  { "frozen": false, "frozen_at": null, "evidence": null },
+    "G3_8_red_freeze": { "frozen": false, "frozen_at": null, "evidence": null },
+    "G4_trace_freeze": { "frozen": false, "frozen_at": null, "evidence": null }
+  },
+  "edges": {
+    "E1": { "from": "design", "to": "impl",         "status": "pending", "verified_at": null },
+    "E2": { "from": "impl",   "to": "design",       "status": "pending", "verified_at": null },
+    "E3": { "from": "design", "to": "test_design",  "status": "pending", "verified_at": null },
+    "E4": { "from": "test_design", "to": "design",  "status": "pending", "verified_at": null },
+    "E5": { "from": "test_design", "to": "test_code","status": "pending", "verified_at": null },
+    "E6": { "from": "test_code",   "to": "test_design","status": "pending", "verified_at": null },
+    "E7": { "from": "impl",        "to": "test_code","status": "pending", "verified_at": null },
+    "E8": { "from": "test_code",   "to": "impl",    "status": "pending", "verified_at": null }
+  },
+  "l6_qa": {
+    "design_doc": "docs/test-design/<feature>/L6-qa-additional-test-design.md",
+    "test_code_dir": "tests/L6/",
+    "p0_violations": [],
+    "p1_warnings": []
+  },
+  "inverted_pyramid": {
+    "status": "pending",
+    "_note": "P0 if design+impl exist but test_design+test_code missing; P1 if test_code only is missing."
+  },
+  "coverage": {
+    "threshold": 80,
+    "current": null,
+    "_carry": "TS vmodel 実装で coverage (vitest c8/istanbul) integration を実装 (旧 PLAN-002-b は superseded)"
+  },
+  "g3_8_red_freeze": {
+    "_carry": "TS vmodel 実装で vitest collection + 失敗理由分類 (未実装 vs 構文エラー) を実装 (旧 PLAN-002-c は superseded)",
+    "collection_ok": null,
+    "failures_classified_as_unimplemented": null
+  }
+}

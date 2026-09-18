@@ -5,8 +5,8 @@ import {
   HANDOVER_OUTSTANDING_MARKER as SIDECAR_HANDOVER_OUTSTANDING_MARKER,
   MAX_SAME_DAY_ENTRIES as SIDECAR_MAX_SAME_DAY_ENTRIES,
   MAX_SUMMARY_PLANS as SIDECAR_MAX_SUMMARY_PLANS,
-} from "../src/handover/handover-constants";
-import type { HandoverDoc as SidecarHandoverDoc } from "../src/handover/handover-types";
+} from "../src/handover/handover-constants.ts";
+import type { HandoverDoc as SidecarHandoverDoc } from "../src/handover/handover-types.ts";
 import {
   boundSameDayEntries,
   buildPointer,
@@ -36,8 +36,8 @@ import {
   sameFamilyPlan,
   scaffoldFromDigests,
   setActivePlan,
-} from "../src/handover/index";
-import { resolveActivePlan, type SessionLogDeps } from "../src/runtime/session-log";
+} from "../src/handover/index.ts";
+import { resolveActivePlan, type SessionLogDeps } from "../src/runtime/session-log.ts";
 
 const NOW = "2026-06-04T00:00:00.000Z";
 

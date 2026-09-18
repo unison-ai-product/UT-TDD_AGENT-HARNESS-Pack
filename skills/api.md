@@ -15,6 +15,31 @@ applies_to:
     - Add-feature
     - Reverse
     - Retrofit
+decision_points:
+  - when: "an API change removes a field, changes a type, or changes a status code"
+    choose: "treat it as breaking and mint a new version"
+    over: "shipping it as a patch to the existing version"
+    because: "field removal, type change, and status-code change are explicitly classified as breaking changes"
+  - when: "an API change adds an optional field or a new endpoint"
+    choose: "treat it as non-breaking and keep the existing version"
+    over: "bumping the version out of caution"
+    because: "additive changes (optional field, new endpoint) are explicitly classified as non-breaking"
+  - when: "the L7 implementation needs to diverge from what the L4 doc specifies"
+    choose: "update the L4 doc and go through a new pair-freeze before merging"
+    over: "implementing the deviation and updating the L4 doc afterward"
+    because: "code must match the L4 contract exactly — any deviation requires the doc update and pair-freeze first, not as cleanup"
+  - when: "recording a versioning decision for an API surface"
+    choose: "write it explicitly under an ## API Versioning heading in the L4 doc"
+    over: "leaving the versioning rationale implicit in code comments"
+    because: "the versioning decision must not be left implicit in code comments — it is a documented design decision"
+  - when: "deprecating an API version"
+    choose: "add a sunset date to the L4 doc and a Deprecation response header"
+    over: "removing the version once a replacement ships without a transition signal"
+    because: "deprecated versions must carry both a documented sunset date and a runtime Deprecation header — doc-only is insufficient"
+  - when: "extracting an existing API in a Reverse pass"
+    choose: "produce the L4 contract doc from code inspection first, then write tests against it"
+    over: "writing tests directly against observed behaviour without an intermediate L4 doc"
+    because: "the R1 output (contract doc) becomes the SSoT for subsequent Forward/Add-feature work — skipping it leaves no SSoT"
 ---
 
 # api
@@ -66,8 +91,8 @@ requires an L4 doc update and a new pair-freeze before merging.
       the L4 doc by path.
 - [ ] `ut-tdd plan lint` exits 0 (PLAN `generates` lists both L4 and L8 docs).
 - [ ] `ut-tdd doctor` exits 0.
-- [ ] No endpoint name conflicts with existing routes (`ut-tdd graph` for
-      dependency view if wiring crosses modules).
+- [ ] No endpoint name conflicts with existing routes (`ut-tdd graph export
+      --format mermaid` for a dependency view if wiring crosses modules).
 - [ ] L0 glossary updated with any new resource or domain term.
 
 ## Reverse pass (extracting an existing API)

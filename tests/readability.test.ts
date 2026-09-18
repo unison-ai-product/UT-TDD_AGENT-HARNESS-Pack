@@ -1,15 +1,19 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  analyzeArtifacts,
+  analyzeByteIntegrity,
   analyzeReadability,
   loadFreezeReadabilityDocs,
   loadL6ReadabilityDocs,
   loadRuntimeArtifactReadabilityDocs,
   loadSystemReadabilityDocs,
+  type ReadabilityArtifact,
   readabilityMessages,
   runtimeReadabilityMessages,
-} from "../src/lint/readability";
+} from "../src/lint/readability.ts";
 
 describe("readability lint (freeze doc mojibake guard)", () => {
   it("detects replacement characters and em-space/ascii mojibake", () => {
@@ -145,5 +149,126 @@ describe("runtime-artifact readability guard (PLAN-L7-69: .ut-tdd audit/handover
     );
     expect(bad[0]).toContain("runtime-readability — ⚠ mojibake markers 1件");
     expect(bad[0]).toContain(".ut-tdd/handover/provider/x.json:1:cp932-mojibake");
+  });
+});
+
+describe("byte-level integrity guard (PLAN-L7-395: BOM / strict-UTF8 / control / JSON escape)", () => {
+  const artifact = (path: string, bytes: Buffer): ReadabilityArtifact => ({
+    path,
+    bytes,
+    text: bytes.toString("utf8"),
+  });
+
+  it("U-READ-005: flags a UTF-8 BOM that is invisible to the string-level markers", () => {
+    const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("# clean title\n")]);
+    // The decoded text carries only a leading U+FEFF, which no MOJIBAKE_MARKER matches...
+    expect(analyzeReadability([{ path: "a.md", text: bytes.toString("utf8") }]).ok).toBe(true);
+    // ...so only the byte layer catches it.
+    const result = analyzeByteIntegrity([artifact("a.md", bytes)]);
+    expect(result.ok).toBe(false);
+    expect(result.violations).toEqual([{ path: "a.md", marker: "utf8-bom", line: 1 }]);
+  });
+
+  it("U-READ-005: flags UTF-16 LE and BE BOMs (the PowerShell Out-File default trap)", () => {
+    const le = analyzeByteIntegrity([artifact("le.md", Buffer.from([0xff, 0xfe, 0x41, 0x00]))]);
+    expect(le.violations.map((v) => v.marker)).toContain("utf16le-bom");
+    const be = analyzeByteIntegrity([artifact("be.md", Buffer.from([0xfe, 0xff, 0x00, 0x41]))]);
+    expect(be.violations.map((v) => v.marker)).toContain("utf16be-bom");
+  });
+
+  it("U-READ-006: flags non-well-formed UTF-8 bytes deterministically via strict decode", () => {
+    // 0xC3 0x28 is an invalid 2-byte sequence.
+    const result = analyzeByteIntegrity([artifact("x.md", Buffer.from([0x41, 0xc3, 0x28, 0x42]))]);
+    expect(result.violations.map((v) => v.marker)).toContain("invalid-utf8");
+  });
+
+  it("U-READ-007: flags a NUL byte — the BOM-less UTF-16LE ASCII blind spot (IMP-086)", () => {
+    // "hi" mis-saved as BOM-less UTF-16LE = h\0i\0. Valid UTF-8, no U+FFFD, no strict-decode throw.
+    const bytes = Buffer.from([0x68, 0x00, 0x69, 0x00]);
+    expect(analyzeReadability([{ path: "n.md", text: bytes.toString("utf8") }]).ok).toBe(true);
+    const result = analyzeByteIntegrity([artifact("n.md", bytes)]);
+    expect(result.violations.map((v) => v.marker)).toContain("control-character");
+  });
+
+  it("U-READ-007: flags a C1 control codepoint (valid UTF-8, so only visible after decode)", () => {
+    const bytes = Buffer.from(`line1${String.fromCharCode(0x85)}line2`, "utf8");
+    const result = analyzeByteIntegrity([artifact("c1.md", bytes)]);
+    expect(result.violations.map((v) => v.marker)).toContain("control-character");
+  });
+
+  it("U-READ-008: flags JSON-escaped U+FFFD that raw-text regex misses but JSON.parse reveals", () => {
+    // Raw bytes contain the escape sequence �, not a literal U+FFFD char.
+    const bytes = Buffer.from('{"summary":"plan \\uFFFD here"}', "utf8");
+    expect(analyzeReadability([{ path: "p.json", text: bytes.toString("utf8") }]).ok).toBe(true);
+    const result = analyzeByteIntegrity([artifact("p.json", bytes)]);
+    expect(result.violations.map((v) => v.marker)).toContain("json-escaped-mojibake");
+  });
+
+  it("U-READ-008: flags mojibake in JSON keys as well as values", () => {
+    const bytes = Buffer.from('{"\\uFFFD-key":"clean"}', "utf8");
+    expect(analyzeReadability([{ path: "k.json", text: bytes.toString("utf8") }]).ok).toBe(true);
+    const result = analyzeByteIntegrity([artifact("k.json", bytes)]);
+    expect(result.violations.map((v) => v.marker)).toContain("json-escaped-mojibake");
+  });
+
+  it("passes clean no-BOM UTF-8 with fullwidth-only Japanese", () => {
+    const bytes = Buffer.from("# 監査\n工程表は直列で実行する。\n", "utf8");
+    expect(analyzeByteIntegrity([artifact("ok.md", bytes)]).ok).toBe(true);
+  });
+
+  it("U-READ-009: double-encode mojibake passes the byte layer but the marker denylist still catches it", () => {
+    const token = "蟾･遞玖｡ｨ"; // valid UTF-8, so byte integrity is clean
+    const art = artifact("d.md", Buffer.from(token, "utf8"));
+    expect(analyzeByteIntegrity([art]).ok).toBe(true);
+    // analyzeArtifacts merges both layers: the denylist remains the sole net for this class.
+    const merged = analyzeArtifacts([art]);
+    expect(merged.ok).toBe(false);
+    expect(merged.violations.map((v) => v.marker)).toContain("cp932-mojibake");
+  });
+
+  it("U-READ-010: propagates byte-layer violations through analyzeArtifacts", () => {
+    const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("# clean title\n")]);
+    const result = analyzeArtifacts([artifact("bom.md", bytes)]);
+    expect(result.ok).toBe(false);
+    expect(result.violations.map((v) => v.marker)).toContain("utf8-bom");
+  });
+
+  it("U-READ-010: real repo artifacts pass the merged (string + byte) guard", () => {
+    expect(analyzeArtifacts(loadSystemReadabilityDocs()).violations).toEqual([]);
+    expect(analyzeArtifacts(loadRuntimeArtifactReadabilityDocs()).violations).toEqual([]);
+  });
+
+  it("U-READ-010: loader preserves file bytes so real BOM and JSON escape artifacts fail", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-readability-bytes-"));
+    try {
+      mkdirSync(join(root, "docs"), { recursive: true });
+      mkdirSync(join(root, ".ut-tdd", "handover", "provider"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "bom.md"),
+        Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("# clean\n")]),
+      );
+      writeFileSync(
+        join(root, ".ut-tdd", "handover", "provider", "escaped.json"),
+        Buffer.from('{"\\uFFFD-key":"clean"}', "utf8"),
+      );
+
+      const system = analyzeArtifacts(loadSystemReadabilityDocs(root));
+      expect(system.ok).toBe(false);
+      expect(system.violations).toContainEqual({
+        path: join("docs", "bom.md"),
+        marker: "utf8-bom",
+        line: 1,
+      });
+
+      const runtime = analyzeArtifacts(loadRuntimeArtifactReadabilityDocs(root));
+      expect(runtime.ok).toBe(false);
+      expect(runtime.violations).toContainEqual({
+        path: join(".ut-tdd", "handover", "provider", "escaped.json"),
+        marker: "json-escaped-mojibake",
+        line: 1,
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

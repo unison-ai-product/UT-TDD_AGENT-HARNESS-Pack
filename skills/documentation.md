@@ -16,6 +16,27 @@ applies_to:
     - Reverse
     - Add-feature
     - Retrofit
+decision_points:
+  - when: "Deciding whether a doc belongs under this skill or `documentation-and-adrs`"
+    choose: "route V-model design docs (`docs/design/`) and ADRs to `documentation-and-adrs`, and route README/onboarding/runbook prose here"
+    over: "treating all Markdown authoring as one undifferentiated \"write docs\" task"
+    because: "design docs and ADRs have freeze-gate contracts this skill does not cover; misrouting skips the readability check they require"
+  - when: "A `ut-tdd` command's flag or behavior changes during a PLAN"
+    choose: "update every doc reference to it in the same commit as the implementation change"
+    over: "shipping the code change and filing a follow-up doc task"
+    because: "a doc describing a removed or changed flag is worse than no doc — it actively misleads the next reader"
+  - when: "A command or flag is removed rather than changed"
+    choose: "add a `## Migration` note explaining the removal instead of silently deleting the old text"
+    over: "silently replacing the old text with the new behavior"
+    because: "silent replacement erases the trail a reader following stale instructions needs to recover"
+  - when: "Writing a code block into a README or runbook"
+    choose: "use a command or output that actually works against the current codebase, labelling anything else as pseudocode"
+    over: "writing plausible-looking illustrative code without labelling it"
+    because: "unlabelled pseudocode presented as a real command is indistinguishable from a broken example and erodes trust in the whole doc"
+  - when: "A doc has passed through an external editor before commit"
+    choose: "grep for half-width kana (U+FF61-FF9F) and U+FFFD and restore from the last clean git revision if found"
+    over: "manually retyping the suspicious-looking characters"
+    because: "manual repair of mojibake is lossy and can silently introduce different corrupted bytes; git history is the only clean source"
 ---
 
 # documentation
@@ -61,7 +82,7 @@ A UT-TDD README needs at minimum:
 
 1. **Purpose** — one paragraph: what this component does and which system it
    serves.
-2. **Prerequisites** — `bun`, `ut-tdd`, any external dependencies with minimum
+2. **Prerequisites** — `node`/`npm`, `ut-tdd`, any external dependencies with minimum
    versions.
 3. **Quick start** — the minimum command sequence to get a working state.
 4. **Key commands** — a table of the most-used `ut-tdd` commands for this

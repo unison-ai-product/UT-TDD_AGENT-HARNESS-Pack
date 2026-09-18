@@ -14,9 +14,10 @@
  * 全関数 fail-open (never throws): 記録の失敗でワークフローを止めない。
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { ensureDir } from "../shared/fs.ts";
 
 export type {
   RosterCapabilityEntry,
@@ -24,8 +25,8 @@ export type {
   RosterCapabilityInput,
   RosterCapabilityResult,
   RosterSlotSource,
-} from "./agent-slots-roster";
-export { resolveRosterCapability } from "./agent-slots-roster";
+} from "./agent-slots-roster.ts";
+export { resolveRosterCapability } from "./agent-slots-roster.ts";
 
 export type SlotStatus = "running" | "completed" | "failed" | "cancelled";
 export type SlotSource = "agent_guard" | "team_runner" | "manual";
@@ -327,7 +328,7 @@ export function nodeAgentSlotsDeps(repoRoot: string): AgentSlotsDeps {
     now: () => new Date().toISOString(),
     readText: (p) => (existsSync(p) ? readFileSync(p, "utf8") : null),
     writeText: (p, c) => {
-      mkdirSync(dirname(p), { recursive: true });
+      ensureDir(dirname(p), { recursive: true });
       // Atomic write: stage to a unique temp file then rename over the target so a
       // concurrent hook (PreToolUse agent-guard / SubagentStop) or a crash mid-write
       // never leaves a torn/partial JSON that loadSlots would discard as corrupt.

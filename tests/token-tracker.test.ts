@@ -10,18 +10,24 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { type HarnessDb, openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate } from "../src/state-db/migration";
-import { projectModelEvaluations, projectTokenUsage } from "../src/state-db/projection-writer";
+import { type HarnessDb, openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate } from "../src/state-db/migration.ts";
+import { projectModelEvaluations, projectTokenUsage } from "../src/state-db/projection-writer.ts";
 import {
+  claudeProjectSlug,
+  codexSessionBelongsToRepo,
   computeClaudeCostUsd,
   computeCodexCostUsd,
+  loadRepoScopedRuntimeSessionUsage,
   loadRuntimeSessionUsage,
   parseClaudeSessionUsage,
+  parseCodexSessionMetaCwd,
   parseCodexSessionUsage,
   type RunUsage,
+  resolveClaudeProjectDir,
   summarizeRunUsage,
-} from "../src/state-db/token-tracker";
+} from "../src/state-db/token-tracker.ts";
+import { MODEL_IDS } from "../src/team/model-policy.ts";
 
 describe("computeClaudeCostUsd", () => {
   it("computes cost from CLAUDE_PRICING (input + cache multipliers + output)", () => {
@@ -96,6 +102,25 @@ describe("computeCodexCostUsd (OPENAI_PRICING, 公式単価)", () => {
         outputTokens: 1000,
       }),
     ).toBeCloseTo(0.0175, 6);
+  });
+
+  it("computes pricing fallbacks for the GPT-5.6 worker and frontier tiers", () => {
+    expect(
+      computeCodexCostUsd({
+        model: MODEL_IDS.codex.worker,
+        inputTokens: 1_000,
+        cachedInputTokens: 0,
+        outputTokens: 1_000,
+      }),
+    ).toBeCloseTo(0.0175, 6);
+    expect(
+      computeCodexCostUsd({
+        model: MODEL_IDS.codex.frontier,
+        inputTokens: 1_000,
+        cachedInputTokens: 0,
+        outputTokens: 1_000,
+      }),
+    ).toBeCloseTo(0.035, 6);
   });
 
   it("tolerates a trailing date/version suffix (prefix match to gpt-5.4)", () => {
@@ -384,6 +409,281 @@ describe("loadRuntimeSessionUsage (file scan, no CLI invocation)", () => {
   });
 });
 
+describe("claudeProjectSlug (repo -> Claude Code project-slug directory name)", () => {
+  it("replaces path separators and the drive colon with '-' (verified against real ~/.claude/projects naming)", () => {
+    // 実ディレクトリ観測 (2026-07-21): "C:\Users\micro\OneDrive\Desktop\UT-TDD-agent-harness"
+    // -> "C--Users-micro-OneDrive-Desktop-UT-TDD-agent-harness" (ドライブ文字の大小は別途 resolve 側で吸収)。
+    expect(claudeProjectSlug("C:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness")).toBe(
+      "C--Users-micro-OneDrive-Desktop-UT-TDD-agent-harness",
+    );
+    expect(claudeProjectSlug("c:\\dev\\seo-agent")).toBe("c--dev-seo-agent");
+  });
+});
+
+describe("resolveClaudeProjectDir (repo -> matching ~/.claude/projects/<slug> dir)", () => {
+  it("resolves case-insensitively (bash-reported lowercase drive vs GUI-reported uppercase)", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-claude-projects-"));
+    try {
+      // 実観測どおり、同じ repo でも起動経路により大文字 C / 小文字 c の両方が実在しうる。
+      mkdirSync(join(root, "c--Users-micro-OneDrive-Desktop-UT-TDD-agent-harness"), {
+        recursive: true,
+      });
+      const resolved = resolveClaudeProjectDir(
+        root,
+        "C:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness",
+      );
+      expect(resolved).toBe(join(root, "c--Users-micro-OneDrive-Desktop-UT-TDD-agent-harness"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when no matching directory / the projects root is absent (cold-start safe)", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-claude-projects-"));
+    try {
+      mkdirSync(join(root, "c--Users-micro-OneDrive-Desktop-some-other-repo"), { recursive: true });
+      expect(
+        resolveClaudeProjectDir(root, "C:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness"),
+      ).toBeNull();
+      expect(resolveClaudeProjectDir(join(root, "nope"), "C:\\anything")).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("parseCodexSessionMetaCwd + codexSessionBelongsToRepo (Codex cwd filter)", () => {
+  it("extracts cwd from a session_meta first line", () => {
+    const line = JSON.stringify({
+      type: "session_meta",
+      payload: { id: "x", cwd: "C:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness" },
+    });
+    expect(parseCodexSessionMetaCwd(line)).toBe(
+      "C:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness",
+    );
+  });
+
+  it("returns null for a non session_meta first line or a missing/non-string cwd (unknown format, skip)", () => {
+    expect(parseCodexSessionMetaCwd(JSON.stringify({ type: "event_msg", payload: {} }))).toBeNull();
+    expect(
+      parseCodexSessionMetaCwd(JSON.stringify({ type: "session_meta", payload: { id: "x" } })),
+    ).toBeNull();
+    expect(parseCodexSessionMetaCwd("not json")).toBeNull();
+  });
+
+  it("matches repo-root and nested-subdir cwd, case/separator-insensitively; rejects a sibling repo", () => {
+    const repoRoot = "C:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness";
+    expect(codexSessionBelongsToRepo(repoRoot, repoRoot)).toBe(true);
+    expect(
+      codexSessionBelongsToRepo("c:/users/micro/onedrive/desktop/ut-tdd-agent-harness", repoRoot, {
+        platform: "win32",
+      }),
+    ).toBe(true);
+    expect(codexSessionBelongsToRepo(`${repoRoot}\\src\\state-db`, repoRoot)).toBe(true);
+    // 負例: 同名 prefix を持つ **別 repo** (例: -engine-swap worktree) は混入させない。
+    expect(codexSessionBelongsToRepo(`${repoRoot}-engine-swap`, repoRoot)).toBe(false);
+    expect(
+      codexSessionBelongsToRepo("C:\\Users\\micro\\OneDrive\\Desktop\\SNS-agent", repoRoot),
+    ).toBe(false);
+    expect(codexSessionBelongsToRepo(null, repoRoot)).toBe(false);
+  });
+
+  it("case-folds paths only on win32; POSIX (linux) stays case-sensitive (blind review Finding 2, PLAN-L7-454)", () => {
+    // /work/Repo と /work/repo は Linux (case-sensitive FS) では別ディレクトリ。無条件 lowercase は誤同一視。
+    expect(codexSessionBelongsToRepo("/work/Repo", "/work/repo", { platform: "linux" })).toBe(
+      false,
+    );
+    expect(codexSessionBelongsToRepo("/work/repo", "/work/repo", { platform: "linux" })).toBe(true);
+    // Windows は従来どおり case-insensitive を維持する。
+    expect(codexSessionBelongsToRepo("/work/Repo", "/work/repo", { platform: "win32" })).toBe(true);
+  });
+});
+
+describe("loadRepoScopedRuntimeSessionUsage (repo-scope ingest, issue #82 / PLAN-L7-454)", () => {
+  const REPO_ROOT = "C:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness";
+  const REPO_SLUG = "C--Users-micro-OneDrive-Desktop-UT-TDD-agent-harness";
+
+  function claudeAssistantLine(
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+    cwd?: string,
+  ): string {
+    const line: Record<string, unknown> = {
+      type: "assistant",
+      sessionId: "s1",
+      message: { model, usage: { input_tokens: inputTokens, output_tokens: outputTokens } },
+    };
+    if (cwd !== undefined) line.cwd = cwd;
+    return JSON.stringify(line);
+  }
+
+  function codexSessionContent(
+    cwd: string | undefined,
+    inputTokens: number,
+    outputTokens: number,
+  ): string {
+    const metaPayload: Record<string, unknown> = { model: "gpt-5.3-codex" };
+    if (cwd !== undefined) metaPayload.cwd = cwd;
+    return [
+      JSON.stringify({ type: "session_meta", payload: metaPayload }),
+      JSON.stringify({
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: { total_token_usage: { input_tokens: inputTokens, output_tokens: outputTokens } },
+        },
+      }),
+    ].join("\n");
+  }
+
+  it("(a) ingests only repo-owned session usage: matching Claude project-slug dir + matching Codex cwd", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-repo-scope-"));
+    try {
+      const claudeRoot = join(root, "claude-projects");
+      const codexRoot = join(root, "codex-sessions");
+      const ownProjectDir = join(claudeRoot, REPO_SLUG);
+      const otherProjectDir = join(claudeRoot, "c--Users-micro-OneDrive-Desktop-SNS-agent");
+      mkdirSync(ownProjectDir, { recursive: true });
+      mkdirSync(otherProjectDir, { recursive: true });
+      mkdirSync(codexRoot, { recursive: true });
+
+      writeFileSync(
+        join(ownProjectDir, "s1.jsonl"),
+        claudeAssistantLine("claude-opus-4-8", 100, 50, REPO_ROOT),
+      );
+      // (b) 他 project の Claude ディレクトリは走査対象外 (混入不可能、そもそも別ディレクトリ)。
+      writeFileSync(
+        join(otherProjectDir, "foreign.jsonl"),
+        claudeAssistantLine(
+          "claude-opus-4-8",
+          999,
+          999,
+          "C:\\Users\\micro\\OneDrive\\Desktop\\SNS-agent",
+        ),
+      );
+      writeFileSync(join(codexRoot, "own.jsonl"), codexSessionContent(REPO_ROOT, 200, 80));
+      // (b) 他 repo (cwd 不一致) の Codex session は混入させない。
+      writeFileSync(
+        join(codexRoot, "foreign.jsonl"),
+        codexSessionContent("C:\\Users\\micro\\OneDrive\\Desktop\\SNS-agent", 999, 999),
+      );
+      // cwd 不明形式 (session_meta に cwd フィールドが無い) は不採用 + skip カウント対象。
+      writeFileSync(join(codexRoot, "unknown-cwd.jsonl"), codexSessionContent(undefined, 999, 999));
+
+      const { usages, stats } = loadRepoScopedRuntimeSessionUsage(REPO_ROOT, {
+        claudeDirs: [claudeRoot],
+        codexDirs: [codexRoot],
+      });
+
+      expect(stats.claudeProjectDirResolved).toBe(true);
+      expect(stats.claudeFilesChecked).toBe(1);
+      expect(stats.claudeFilesScanned).toBe(1);
+      expect(stats.claudeFilesForeignRepo).toBe(0);
+      expect(stats.claudeFilesSkippedUnknownCwd).toBe(0);
+      expect(stats.codexFilesChecked).toBe(3);
+      expect(stats.codexFilesMatched).toBe(1);
+      expect(stats.codexFilesForeignRepo).toBe(1);
+      expect(stats.codexFilesSkippedUnknownCwd).toBe(1);
+
+      const claudeUsages = usages.filter((u) => u.runtime === "claude");
+      const codexUsages = usages.filter((u) => u.runtime === "codex");
+      // (b) 負例: 他 project/repo の usage 値 (999) が一切紛れ込んでいないことを直接確認する。
+      expect(claudeUsages).toHaveLength(1);
+      expect(claudeUsages[0]).toMatchObject({ inputTokens: 100, outputTokens: 50 });
+      expect(codexUsages).toHaveLength(1);
+      expect(codexUsages[0]).toMatchObject({ inputTokens: 200, outputTokens: 80 });
+      expect(usages.some((u) => u.inputTokens === 999 || u.outputTokens === 999)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("(d) verifies per-file cwd inside a slug-collided Claude project dir; a same-slug foreign-repo file is excluded (blind review Finding 1, PLAN-L7-454)", () => {
+    // claudeProjectSlug は `\`/`/`/`:` を一律 `-` に潰すため非単射: 以下 2 つの異なる repoRoot は
+    // 同一 slug "C--a-b-c" に衝突する。Claude Code 自身もこの slug でディレクトリを作るため、実運用では
+    // 両 repo の session が **同一物理ディレクトリ**へ混在しうる (slug 一致だけでは帰属を保証できない)。
+    const repoRootOwn = "C:\\a-b\\c";
+    const repoRootForeign = "C:\\a\\b-c";
+    expect(claudeProjectSlug(repoRootOwn)).toBe(claudeProjectSlug(repoRootForeign)); // 前提: 衝突を確認
+
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-repo-scope-collision-"));
+    try {
+      const claudeRoot = join(root, "claude-projects");
+      const collidedSlugDir = join(claudeRoot, claudeProjectSlug(repoRootOwn));
+      mkdirSync(collidedSlugDir, { recursive: true });
+
+      writeFileSync(
+        join(collidedSlugDir, "own.jsonl"),
+        claudeAssistantLine("claude-opus-4-8", 111, 22, repoRootOwn),
+      );
+      // 同一 slug ディレクトリ内だが実 cwd は別 repo → per-file 検証で除外されなければならない。
+      writeFileSync(
+        join(collidedSlugDir, "foreign.jsonl"),
+        claudeAssistantLine("claude-opus-4-8", 999, 999, repoRootForeign),
+      );
+
+      const { usages, stats } = loadRepoScopedRuntimeSessionUsage(repoRootOwn, {
+        claudeDirs: [claudeRoot],
+      });
+
+      expect(stats.claudeProjectDirResolved).toBe(true);
+      expect(stats.claudeFilesChecked).toBe(2);
+      expect(stats.claudeFilesScanned).toBe(1);
+      expect(stats.claudeFilesForeignRepo).toBe(1);
+
+      const claudeUsages = usages.filter((u) => u.runtime === "claude");
+      expect(claudeUsages).toHaveLength(1);
+      expect(claudeUsages[0]).toMatchObject({ inputTokens: 111, outputTokens: 22 });
+      expect(usages.some((u) => u.inputTokens === 999 || u.outputTokens === 999)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("(e) a Claude session file with no cwd field is unadopted and counted in claudeFilesSkippedUnknownCwd (blind review Finding 1, PLAN-L7-454)", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-repo-scope-nocwd-"));
+    try {
+      const claudeRoot = join(root, "claude-projects");
+      const projectDir = join(claudeRoot, REPO_SLUG);
+      mkdirSync(projectDir, { recursive: true });
+      // cwd フィールドが無い形式 (旧仕様の走査だけでは他 repo 混入と区別できなかった形式)。
+      writeFileSync(
+        join(projectDir, "no-cwd.jsonl"),
+        claudeAssistantLine("claude-opus-4-8", 999, 999),
+      );
+
+      const { usages, stats } = loadRepoScopedRuntimeSessionUsage(REPO_ROOT, {
+        claudeDirs: [claudeRoot],
+      });
+
+      expect(stats.claudeProjectDirResolved).toBe(true);
+      expect(stats.claudeFilesChecked).toBe(1);
+      expect(stats.claudeFilesScanned).toBe(0);
+      expect(stats.claudeFilesForeignRepo).toBe(0);
+      expect(stats.claudeFilesSkippedUnknownCwd).toBe(1);
+      expect(usages).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("(c) cold-start: no matching project dir / no session dirs => empty usages, no throw", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-repo-scope-cold-"));
+    try {
+      const result = loadRepoScopedRuntimeSessionUsage(REPO_ROOT, {
+        claudeDirs: [join(root, "nope-claude")],
+        codexDirs: [join(root, "nope-codex")],
+      });
+      expect(result.usages).toEqual([]);
+      expect(result.stats.claudeProjectDirResolved).toBe(false);
+      expect(loadRepoScopedRuntimeSessionUsage(REPO_ROOT, {}).usages).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("projectTokenUsage + projectModelEvaluations (token efficiency)", () => {
   function makeRoot(enabled: boolean): string {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-token-eval-"));
@@ -589,7 +889,13 @@ describe("projectTokenUsage + projectModelEvaluations (token efficiency)", () =>
         ]),
       ).toThrow("forced projection failure");
 
-      expect(execSql).toEqual(["BEGIN IMMEDIATE", "ROLLBACK"]);
+      expect(execSql).toEqual([
+        "BEGIN IMMEDIATE",
+        "SAVEPOINT ut_tdd_projection_1",
+        "ROLLBACK TO SAVEPOINT ut_tdd_projection_1",
+        "RELEASE SAVEPOINT ut_tdd_projection_1",
+        "ROLLBACK",
+      ]);
       const count = db.prepare("SELECT COUNT(*) AS n FROM model_runs").get() as { n: number };
       expect(count.n).toBe(0);
     } finally {

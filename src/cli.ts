@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * UT-TDD Agent Harness CLI (TypeScript core, ADR-001).
  * 薄い OS 別 entrypoint (scripts/ut-tdd, ut-tdd.ps1) が本 core を呼ぶ。
@@ -8,43 +8,64 @@ import { execFileSync, spawn } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
-  mkdirSync,
   readdirSync,
   readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Command } from "commander";
 import { parse as parseYaml } from "yaml";
 import {
   catalogAutomationAssets,
   checkRosterConsistency,
   listRosterRegistry,
-} from "./assets/catalog";
-import { loadBranchAudit, renderBranchAudit } from "./audit/branches";
-import { renderQualityAudit, runQualityAudit } from "./audit/quality";
+} from "./assets/catalog.ts";
+import { loadBranchAudit, renderBranchAudit } from "./audit/branches.ts";
+import { renderQualityAudit, runQualityAudit } from "./audit/quality.ts";
 import {
   adapterExecutionEnv,
   executeAdapterPlanForCli,
   registerDelegationCommands,
-} from "./cli/delegation";
-import { registerDistributionCommands } from "./cli/distribution";
-import { registerFeedbackCommands } from "./cli/feedback";
-import { contextSuggest } from "./context/doc-router";
-import { runDoctor } from "./doctor";
+} from "./cli/delegation.ts";
+import { registerDistributionCommands } from "./cli/distribution.ts";
+import { registerFeedbackCommands } from "./cli/feedback.ts";
+import { registerPlanAdmissionCommands } from "./cli/plan-admission.ts";
+import { registerPlanAssetCommands } from "./cli/plan-asset.ts";
+import { registerPlanDraftCommand } from "./cli/plan-draft.ts";
+import { registerPlanRevisionCommand } from "./cli/plan-revise.ts";
+import { registerPrMergeCommands } from "./cli/pr-merge.ts";
+import { registerLiveReviewCommands } from "./cli/review-live.ts";
+import { contextSuggest } from "./context/doc-router.ts";
 import {
   DOCTOR_RUN_PROFILE_IDS,
   DOCTOR_RUN_PROFILES,
   type DoctorRunProfileId,
-} from "./doctor/check-registry";
-import { computeSkillMetrics } from "./feedback/engine";
-import { renderTakeoverFeedback, selectTakeoverFeedback } from "./feedback/surface";
-import { evaluateGateReview, loadReviewChecklistIfPresent } from "./gate/review-tier";
-import { evaluateStaticGate } from "./gate/static";
-import { evaluateGithubOpsGuard, renderGithubOpsGuard } from "./github/ops-guard";
-import { loadRelationGraphSourceSet } from "./graph/loader";
+} from "./doctor/check-registry.ts";
+import { runDoctor, runDoctorMeasured } from "./doctor/index.ts";
+import { writeDoctorResultEnvelopeFile } from "./doctor/result-file.ts";
+import { acquireDoctorLock, doctorLockBlockedMessage } from "./doctor/singleton-lock.ts";
+import { renderElicitationContext, selectElicitationContext } from "./elicitation/context.ts";
+import { appendDesignDecision, DESIGN_DECISION_LOG_PATH } from "./elicitation/record.ts";
+import { computeSkillMetrics } from "./feedback/engine.ts";
+import { registerForwardWorkflowCommands } from "./forward/adapters/cli-registrar.ts";
+import { evaluateGateReview, loadReviewChecklistIfPresent } from "./gate/review-tier.ts";
+import { writeGateRunEvidence } from "./gate/run-evidence.ts";
+import { evaluateStaticGate } from "./gate/static.ts";
+import { runChangeLaneClassification, SystemGitDiffNamesPort } from "./github/change-lane.ts";
+import { collectJobSummary, renderJobSummary } from "./github/job-summary.ts";
+import { evaluateGithubOpsGuard, renderGithubOpsGuard } from "./github/ops-guard.ts";
+import { renderPrTraceBlock, validatePrTraceBody } from "./github/pr-trace.ts";
+import { GhProjectV2Adapter, persistProjectSync, syncForwardProject } from "./github/project-v2.ts";
+import { syncRepositoryBindings } from "./github/repository-bindings.ts";
+import {
+  diffRepositoryPolicy,
+  normalizeRulesets,
+  parseRepositoryPolicy,
+  renderPolicyDiff,
+} from "./github/repository-policy.ts";
+import { loadRelationGraphSourceSet } from "./graph/loader.ts";
 import {
   checkHandoverBypass,
   checkHandoverDiscipline,
@@ -52,17 +73,44 @@ import {
   nodeHandoverDeps,
   runHandover,
   setActivePlanCli,
-} from "./handover/index";
-import { loadChangedFiles, loadStagedFiles } from "./lint/change-impact";
-import { nodeHistoryScanDeps, planDigestMigration } from "./lint/green-command-digest";
-import { computeOutstandingWork, outstandingSummaryLine } from "./lint/outstanding";
+} from "./handover/index.ts";
+import {
+  renderSessionStartDigest,
+  selectSessionStartDigest,
+} from "./handover/session-start-digest.ts";
+// Final retirement admission reuses the independent detector through the CLI runtime graph.
+import {
+  admitFinalBunRetirement,
+  type BunRetirementAdmissionReceipt,
+  type BunRetirementF0bReceipt,
+  type BunRetirementF0cReceipt,
+  type BunRetirementQ0Receipt,
+  collectFinalRetirementFindings,
+  collectFinalRetirementSurfaceInventory,
+} from "./lint/bun-final-retirement.ts";
+import {
+  type NodeBanF0cAggregateBinding,
+  nodeBanAuditMessages,
+  runNodeBanAudit,
+} from "./lint/bun-permanent-ban.ts";
+import { loadChangedFiles, loadStagedFiles } from "./lint/change-impact.ts";
+import {
+  applyDigestAnchorCandidatesToContent,
+  nodeHistoryScanDeps,
+  planDigestMigration,
+} from "./lint/green-command-digest.ts";
+import { parseNodeGenerationCiEvidence } from "./lint/node-generation-ci-policy.ts";
+
+export { collectFinalRetirementFindings };
+
+import { computeOutstandingWork, outstandingSummaryLine } from "./lint/outstanding.ts";
 import {
   analyzeRelationImpact,
   collectRelationGraphProjection,
   exportRelationDiagram,
   type RelationDiagramAdapter,
-} from "./lint/relation-graph";
-import { loadReviewPlans } from "./lint/review-evidence";
+} from "./lint/relation-graph.ts";
+import { loadReviewPlans } from "./lint/review-evidence.ts";
 import {
   inspectMcpProfile,
   listVerificationProfiles,
@@ -72,48 +120,77 @@ import {
   runVerificationProfile,
   saveVerificationEvidence,
   verificationRecommendationMermaid,
-} from "./lint/verification-profile";
+} from "./lint/verification-profile.ts";
+import { runWriteEncodingGuard } from "./lint/write-encoding-guard.ts";
+import { type MemoryKind, renderMemoryList, renderMemorySurface } from "./memory/index.ts";
 import {
-  type MemoryKind,
-  renderMemoryList,
-  renderMemorySurface,
-  selectMemoryEntries,
-  writeMemoryEntry,
-} from "./memory/index";
-import { lintPlanWithGate } from "./plan/lint";
+  type MemoryQueryOptions,
+  type MemoryReadResult,
+  readMemory,
+  registrationReceiptFor,
+  renderMemoryHealth,
+  writeMemory,
+} from "./memory/service.ts";
+import { lintPlanWithGate } from "./plan/lint.ts";
+import { createNodePlanDraftRunner } from "./plan-admission/node-plan-draft-runner.ts";
+import { createNodePlanRevisionRunner } from "./plan-admission/node-plan-revision-runner.ts";
 import {
   type AdapterContextInjection,
   type AdapterProvider,
   buildProviderInvocation,
-} from "./runtime/adapter";
+} from "./runtime/adapter.ts";
 import {
   type AgentGuardInput,
   evaluateAgentGuard,
   normalizeModelFamily,
   type ResolvedFamily,
-} from "./runtime/agent-guard";
-import { SUBAGENT_ALLOWLIST } from "./runtime/agent-guard-policy";
+} from "./runtime/agent-guard.ts";
+import { SUBAGENT_ALLOWLIST } from "./runtime/agent-guard-policy.ts";
 import {
   nodeAgentSlotsDeps,
   recordGuardFire,
   releaseOldestGuardSlot,
   sweepStaleGuardSlots,
-} from "./runtime/agent-slots";
+} from "./runtime/agent-slots.ts";
 import {
   attemptsFromSessionEvents,
   evaluateAttemptEscalation,
   renderEscalationSignals,
   selectPrecedingSessionFile,
-} from "./runtime/attempt-escalation";
-import { detectMode, nextActionForMode, type RuntimeDetection } from "./runtime/detect";
-import { scanDanglingStops } from "./runtime/forced-stop";
+} from "./runtime/attempt-escalation.ts";
+import {
+  buildClaudeProviderInboxEntry,
+  type ClaudeInboxPullRequestObservation,
+  claudeWorkspaceId,
+  isClaudeMemoryWakeTarget,
+  parseClaudeInboxPullRequestObservation,
+  publishClaudeInboxEntry,
+  recoverClaudeInboxBacklog,
+  resolveClaudeWakeDelay,
+  resolveLiveClaudeTarget,
+  summarizeUnclaimedInbox,
+  waitForClaudeMemory,
+} from "./runtime/claude-memory-wake.ts";
+import { detectMode, nextActionForMode, type RuntimeDetection } from "./runtime/detect.ts";
+import { scanDanglingStops } from "./runtime/forced-stop.ts";
+import { createNodeInvocation, verifyNodeGeneration } from "./runtime/node-bootstrap.ts";
+import {
+  isLinkedWorktreeCheckout,
+  requireProjectMemoryRoot,
+  resolveProjectMemoryRoot,
+} from "./runtime/project-memory-root.ts";
 import {
   nodeProviderHandoverDeps,
   type ProviderRuntime,
   readProviderHandoverCurrent,
   runProviderHandover,
-} from "./runtime/provider-handover";
-import { summarizeStagedReview } from "./runtime/review-guard";
+} from "./runtime/provider-handover.ts";
+import { requireRuntimeRepoRoot } from "./runtime/repo-root.ts";
+import { summarizeStagedReview } from "./runtime/review-guard.ts";
+import {
+  classifyRuntimeImageProcess,
+  NodeOnlyProcessObserver,
+} from "./runtime/runtime-image-observer.ts";
 import {
   dispatch,
   nodeDeps,
@@ -122,15 +199,25 @@ import {
   resolveActivePlan,
   type SessionHookInput,
   safeName,
-} from "./runtime/session-log";
+} from "./runtime/session-log.ts";
 import {
   evaluateWorkGuardTargets,
   extractEditTargets,
   normalizeRepoRelative,
   resolveForeignEditOverride,
-} from "./runtime/work-guard";
-import { findReference } from "./search/index";
-import { nodeSetupDeps, runSetup, type SetupArgs } from "./setup/index";
+} from "./runtime/work-guard.ts";
+import { findReference } from "./search/index.ts";
+import {
+  admitConsumerLocalRuntime,
+  admitReleaseAggregate,
+  type ConsumerLocalRuntimeAdmissionInput,
+  nodeSetupDeps,
+  type ReleaseAggregateAdmissionInput,
+  runSetupAsync,
+  type SetupArgs,
+  type SetupConsumerRuntimeInput,
+} from "./setup/index.ts";
+import type { ReleaseChannelAttestation } from "./setup/release-channel-adapter.ts";
 import {
   checkForUpdate,
   defaultHarnessRoot,
@@ -139,25 +226,44 @@ import {
   renderUpdateLine,
   UPDATE_CHECK_DISABLE_ENV,
   updateCheckDisabled,
-} from "./setup/update-check";
+} from "./setup/update-check.ts";
+import { ensureDir } from "./shared/fs.ts";
 import {
   bucketRecommendations,
   buildSkillInjectionSet,
   recommendSkillsForPlan,
   recommendSkillsForText,
   recordSkillRecommendations,
-} from "./skill-engine/recommend";
-import { type SkillCategory, scaffoldSkill } from "./skill-engine/scaffold";
-import { defaultHarnessDbPath, openHarnessDb } from "./state-db/index";
-import { harnessDbStatus } from "./state-db/maintenance";
-import { migrate } from "./state-db/migration";
+  resolveRuntimeSessionId,
+} from "./skill-engine/recommend.ts";
+import { type SkillCategory, scaffoldSkill } from "./skill-engine/scaffold.ts";
+import {
+  claimGithubProjection,
+  deriveStoredForwardReadiness,
+  isManualGithubObservationKind,
+  markGithubProjectionFailed,
+  queueGithubProjection,
+  rebuildExecutionReadiness,
+  recordGithubBinding,
+  selectActiveProjectRows,
+  selectExistingProjectPlans,
+} from "./state-db/github-forward-projection.ts";
+import { defaultHarnessDbPath, openHarnessDb } from "./state-db/index.ts";
+import { harnessDbStatus } from "./state-db/maintenance.ts";
+import { migrate } from "./state-db/migration.ts";
 import {
   projectModelEvaluations,
   projectTokenUsage,
   rebuildHarnessDb,
-} from "./state-db/projection-writer";
-import { loadRuntimeSessionUsage, summarizeRunUsage } from "./state-db/token-tracker";
-import { classifyProposalDocumentCoverage, classifyTask } from "./task/classify";
+} from "./state-db/projection-writer.ts";
+import { buildScopeDryRunPreview } from "./state-db/scope-preview.ts";
+import {
+  refuseBunStopRefresh,
+  runCoalescedStopRefresh,
+  spawnDetachedStopRefresh,
+} from "./state-db/stop-refresh.ts";
+import { loadRuntimeSessionUsage, summarizeRunUsage } from "./state-db/token-tracker.ts";
+import { classifyProposalDocumentCoverage, classifyTask } from "./task/classify.ts";
 import {
   type Provider,
   type RouterRole,
@@ -165,17 +271,22 @@ import {
   route,
   routeTeamMembers,
   routeToAdapterPlan,
-} from "./task/tier-router";
-import { buildAdvisorDecision } from "./team/advisor-policy";
-import { recommendTeamLaunch } from "./team/launch-policy";
+} from "./task/tier-router.ts";
+import {
+  ADVISOR_DECISION_KINDS,
+  type AdvisorDecisionKind,
+  buildAdvisorDecision,
+} from "./team/advisor-policy.ts";
+import { recommendTeamLaunch } from "./team/launch-policy.ts";
 import {
   buildTeamRunPlan,
   executeTeamRunPlan,
   loadTeamDefinition,
   type MemberPlacement,
-} from "./team/run";
-import { formatVmodelInjection, resolveVmodelInjection } from "./vmodel/injection";
-import { lintVmodel } from "./vmodel/lint";
+} from "./team/run.ts";
+import { analyzeTraceImpact } from "./trace/impact.ts";
+import { formatVmodelInjection, resolveVmodelInjection } from "./vmodel/injection.ts";
+import { lintVmodel } from "./vmodel/lint.ts";
 import {
   buildCommandCatalog,
   evaluateRouteCommand,
@@ -184,8 +295,8 @@ import {
   type RouteEvalResult,
   type RouteSignalEntry,
   validateRouteConfigText,
-} from "./workflow/contracts";
-import { evaluateAutomationReadiness } from "./workflow/readiness";
+} from "./workflow/contracts.ts";
+import { evaluateAutomationReadiness } from "./workflow/readiness.ts";
 
 const HOOK_EVENT_SESSION_START = "SessionStart";
 const SAVE_EVIDENCE_OPTION_DESCRIPTION = "persist normalized evidence for DB collector";
@@ -252,7 +363,9 @@ function resolveSkillContextInjection(
   const db = openHarnessDb(":memory:", { repoRoot });
   try {
     try {
-      rebuildHarnessDb({ repoRoot, db });
+      // 文脈注入は skill/PLAN 投影だけが必要で、グローバル token telemetry の再走査は不要。
+      // 毎回の provider 起動で home 配下を走査すると実行境界を不必要に遅延させる。
+      rebuildHarnessDb({ repoRoot, db, skipTokenTelemetry: true });
     } catch {
       recordSkillInjectionAttempt(
         { plan_id: planId, status: "skipped", reason: "rebuild-failed", required: 0, optional: 0 },
@@ -376,20 +489,34 @@ function writeHandoverWarnings(): void {
   }
 }
 
-function runSessionStartSideEffects(
-  repoRoot: string,
-  input: SessionHookInput,
-  deps: ReturnType<typeof nodeDeps>,
-): void {
+type SessionStartSideEffectInput = {
+  repoRoot: string;
+  input: SessionHookInput;
+  deps: ReturnType<typeof nodeDeps>;
+  json?: boolean;
+};
+
+function runSessionStartSideEffects({
+  repoRoot,
+  input,
+  deps,
+  json = false,
+}: SessionStartSideEffectInput): void {
   try {
     scanDanglingStops(deps, input.session_id);
     sweepStaleGuardSlots(nodeAgentSlotsDeps(repoRoot));
   } catch {
     // fail-open: lifecycle maintenance must not block the runtime.
   }
-  surfaceTakeoverFeedbackToStdout(repoRoot);
-  surfaceMemoryToStdout(repoRoot);
-  surfaceAttemptEscalationToStdout(repoRoot, input.session_id);
+  // JSON は機械可読な実行結果だけを stdout に返す契約。人間向け digest は
+  // 並列 provider ごとに DB / memory を再読する必要がなく、lifecycle dispatch
+  // (SessionStart/Stop) は呼び出し側で継続するため、JSON 経路では省略する。
+  if (json) return;
+  surfaceSessionStartDigestToStdout(
+    repoRoot,
+    attemptEscalationBlock(repoRoot, input.session_id),
+    "stdout",
+  );
 }
 
 /**
@@ -398,57 +525,172 @@ function runSessionStartSideEffects(
  * 再導出する (core rebuild の入力境界を広げない)。現セッションを除いた最新 1 ファイルのみを読むため
  * 古い失敗は再浮上しない。独立した fail-open: ログ不在 / 破損で runtime を止めない。
  */
-function surfaceAttemptEscalationToStdout(repoRoot: string, currentSessionId?: string): void {
+function attemptEscalationBlock(repoRoot: string, currentSessionId?: string): string {
   try {
     const dir = join(repoRoot, ".ut-tdd", "logs", "session");
-    if (!existsSync(dir)) return;
+    if (!existsSync(dir)) return "";
     const files = readdirSync(dir)
       .filter((name) => name.endsWith(".jsonl"))
       .map((name) => ({ name, mtimeMs: statSync(join(dir, name)).mtimeMs }));
     const currentName = currentSessionId ? `${safeName(currentSessionId)}.jsonl` : undefined;
     const preceding = selectPrecedingSessionFile(files, currentName);
-    if (!preceding) return;
+    if (!preceding) return "";
     const events = parseSessionEvents(readFileSync(join(dir, preceding), "utf8"));
     const signals = evaluateAttemptEscalation(attemptsFromSessionEvents(events));
-    const block = renderEscalationSignals(signals);
-    if (block) process.stdout.write(block);
+    return renderEscalationSignals(signals);
   } catch {
     // fail-open: escalation surface は best-effort。
+    return "";
+  }
+}
+
+/** DB state、HEAD、actionable、memory を固定4段で返す。各入力は fail-open。 */
+function recentHeadCommits(repoRoot: string, limit = 5): string[] {
+  try {
+    const output = execFileSync("git", ["log", `-${limit}`, "--format=%h %s"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    }).trim();
+    return output ? output.split(/\r?\n/).filter(Boolean) : [];
+  } catch {
+    return [];
   }
 }
 
 /**
- * 引き継ぎ (SessionStart) 時に harness.db の open feedback をエージェントへ surface する
- * (PLAN-L7-110)。stale な prose handover や、共有 working tree の都度計測ではなく、DB を
- * 正本として feedback を「受け取る」経路。独立した fail-open: Codex の並行 db rebuild と競合して
- * ロックされても、引き継ぎ維持処理 (上) も runtime も阻害しない。
+ * 共有 memory の読み出し入口 (PLAN-L7-468)。index (harness.db) が開けなくても
+ * 正本ファイルから結果を返し、degraded は freshness で可視化する。
  */
-function surfaceTakeoverFeedbackToStdout(repoRoot: string): void {
+function readMemoryThroughService(
+  repoRoot: string,
+  options: MemoryQueryOptions = {},
+): MemoryReadResult {
+  const project = requireProjectMemoryRoot(repoRoot);
+  let db: ReturnType<typeof openHarnessDb> | undefined;
   try {
-    const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
-    try {
-      const block = renderTakeoverFeedback(selectTakeoverFeedback(db));
-      if (block) process.stdout.write(block);
-    } finally {
-      db.close();
-    }
+    db = openHarnessDb(defaultHarnessDbPath(project.canonicalProjectRoot), {
+      repoRoot: project.canonicalProjectRoot,
+    });
+    return readMemory({ repoRoot: project.canonicalProjectRoot, db, options });
   } catch {
-    // fail-open: feedback surface は best-effort。DB 不在 / ロック / 破損で runtime を止めない。
+    // index を開けないこと自体は読み出しの失敗ではない (ファイルが正本)。
+    return readMemory({ repoRoot: project.canonicalProjectRoot, options });
+  } finally {
+    db?.close();
   }
 }
 
-function surfaceMemoryToStdout(repoRoot: string): void {
+/**
+ * Read-only PR lifecycle observation at the CLI boundary.
+ *
+ * The inbox core accepts an observation port so it never owns GitHub/network
+ * policy.  `gh pr view` is deliberately invoked without a shell and every
+ * parse/network failure returns `undefined`; callers then leave the entry
+ * live.  A missing observation must never become a terminal decision.
+ */
+function observeClaudeInboxPullRequest(
+  repoRoot: string,
+  pr: number,
+): ClaudeInboxPullRequestObservation | undefined {
+  try {
+    const raw = execFileSync(
+      "gh",
+      ["pr", "view", String(pr), "--json", "state,mergedAt,headRefOid"],
+      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+    return parseClaudeInboxPullRequestObservation(pr, raw);
+  } catch {
+    return undefined;
+  }
+}
+
+function recoverClaudeInboxForSessionStart(repoRoot: string): void {
+  try {
+    recoverClaudeInboxBacklog({
+      repoRoot,
+      dryRun: false,
+      pullRequestState: (pr) => observeClaudeInboxPullRequest(repoRoot, pr),
+    });
+  } catch {
+    // SessionStart remains fail-open; unknown PR state keeps entries live.
+  }
+}
+
+function surfaceSessionStartDigestToStdout(
+  repoRoot: string,
+  escalationBlock = "",
+  outputTo: "stdout" | "stderr" = "stdout",
+): void {
+  const writeOutput = (text: string) => {
+    if (outputTo === "stderr") {
+      process.stderr.write(text);
+      return;
+    }
+    process.stdout.write(text);
+  };
+  // memory は DB 障害と独立に正本ファイルから読む (PLAN-L7-468 欠陥 3)。
+  const memory = readMemoryThroughService(repoRoot, { limit: 5 });
+  let unclaimedInbox: ReturnType<typeof summarizeUnclaimedInbox> | undefined;
+  try {
+    recoverClaudeInboxForSessionStart(repoRoot);
+    const workspaceId = claudeWorkspaceId(repoRoot);
+    unclaimedInbox = summarizeUnclaimedInbox(repoRoot, workspaceId);
+  } catch {
+    unclaimedInbox = undefined;
+  }
   try {
     const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
     try {
-      const block = renderMemorySurface(selectMemoryEntries(db, { limit: 5 }));
-      if (block) process.stdout.write(block);
+      const block = renderSessionStartDigest(
+        selectSessionStartDigest(db, recentHeadCommits(repoRoot), {
+          escalationLines: escalationBlock.trim().split(/\r?\n/).filter(Boolean),
+          memory: memory.entries,
+          unclaimedInbox,
+        }),
+      );
+      if (block) writeOutput(block);
+      process.stderr.write(renderMemoryHealth(memory));
     } finally {
       db.close();
     }
-  } catch {
-    // fail-open: memory surface is shared context, not a runtime blocker.
+  } catch (error) {
+    // hook は止めないが、無音では終わらせない (「引き継ぎ情報が無い」と
+    // 「読めなかった」を SessionStart で区別できないことが欠陥 3 の本体)。
+    // stdout は機械可読出力の面なので汚さない (JSON を parse する呼び手が壊れる)。
+    // 劣化は stderr に出して「無音ではない」を満たす。
+    process.stderr.write(
+      renderDegradedSessionStartDigest({
+        memory,
+        error,
+        headCommits: recentHeadCommits(repoRoot),
+      }),
+    );
   }
+}
+
+/** DB 由来の段が全滅した場合の劣化 digest。memory と HEAD は DB に依存しないので残す。 */
+function renderDegradedSessionStartDigest(input: {
+  memory: MemoryReadResult;
+  error: unknown;
+  headCommits: string[];
+}): string {
+  const { memory, error, headCommits } = input;
+  const reason = error instanceof Error ? error.message : String(error);
+  const lines = [
+    "session-start digest DEGRADED — harness.db 由来の段 (state/gates, actionable) を読めなかった",
+    `  reason: ${reason}`,
+    "  → 「引き継ぎ情報が無い」ではなく「index が読めなかった」。DB 復旧まで判断の根拠にしない",
+    "[2/4 head]",
+  ];
+  if (headCommits.length === 0) lines.push("  - unavailable");
+  for (const commit of headCommits) lines.push(`  - ${commit}`);
+  lines.push("[4/4 memory] (source=.ut-tdd/memory 正本ファイル)");
+  if (memory.entries.length === 0) lines.push("  - none");
+  for (const entry of memory.entries) {
+    const body = entry.body.replace(/\s+/g, " ").slice(0, 160);
+    lines.push(`  - ${entry.kind} ${entry.title}: ${body}`);
+  }
+  return `${lines.join("\n")}\n${renderMemoryHealth(memory)}`;
 }
 
 const program = new Command();
@@ -510,9 +752,13 @@ program
   .option("--profiles", "list available doctor profiles and exit")
   .option("--scope <scope>", "limit doctor checks to a supported scope (full|toolchain)")
   .option("--timing", "include per-check doctor timing diagnostics")
+  .option(
+    "--result-file <path>",
+    "write the measured result as an envelope for a same-job consumer (PLAN-L7-461)",
+  )
   .option("--json", "JSON output")
   .action(
-    (opts: {
+    async (opts: {
       strictTelemetryProvenance?: boolean;
       strictGreenCommandDigest?: boolean;
       setupSmoke?: boolean;
@@ -520,6 +766,7 @@ program
       profiles?: boolean;
       scope?: string;
       timing?: boolean;
+      resultFile?: string;
       json?: boolean;
     }) => {
       if (opts.profiles === true) {
@@ -558,14 +805,60 @@ program
         process.exitCode = 1;
         return;
       }
-      const r = runDoctor(undefined, {
-        strictTelemetryProvenance: opts.strictTelemetryProvenance === true,
-        strictGreenCommandDigest: opts.strictGreenCommandDigest === true,
-        setupSmoke: opts.setupSmoke === true,
-        ...(profile ? { profile: profile as DoctorRunProfileId } : {}),
-        scope,
-        timing: opts.timing === true,
-      });
+      // 多重起動 fail-fast (PLAN-L7-442): 再試行嵐で doctor プロセスが積み上がり
+      // メモリ枯渇する実害 (2026-07-16) の再発防止。lock 障害は fail-open。
+      const lock = acquireDoctorLock(process.cwd());
+      if (!lock.acquired) {
+        const message = doctorLockBlockedMessage(lock.holder);
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify({ ok: false, messages: [message] }, null, 2)}\n`);
+        } else {
+          process.stderr.write(`${message}\n`);
+        }
+        process.exitCode = 2;
+        return;
+      }
+      let measured: ReturnType<typeof runDoctorMeasured>;
+      try {
+        measured = runDoctorMeasured(undefined, {
+          strictTelemetryProvenance: opts.strictTelemetryProvenance === true,
+          strictGreenCommandDigest: opts.strictGreenCommandDigest === true,
+          setupSmoke: opts.setupSmoke === true,
+          ...(profile ? { profile: profile as DoctorRunProfileId } : {}),
+          scope,
+          timing: opts.timing === true,
+        });
+      } finally {
+        lock.release();
+      }
+      const r = measured.result;
+      if (opts.resultFile) {
+        // PLAN-L7-461: 同一 job 内の consumer (vitest fence) が「どの面をどの条件で観測したか」を
+        // 完全一致で検査できるよう、観測面ごと書き出す。書き出し失敗は測定自体を失敗させない
+        // (consumer は envelope 不在で自走へ fail-close する)。
+        try {
+          writeDoctorResultEnvelopeFile(opts.resultFile, process.cwd(), {
+            scope:
+              measured.profile.invocation === "registry" ? measured.profile.scope : "setup-smoke",
+            profile: profile
+              ? (profile as DoctorRunProfileId)
+              : opts.setupSmoke === true
+                ? measured.profile.id
+                : null,
+            options: {
+              strict_green_command_digest: opts.strictGreenCommandDigest === true,
+              strict_telemetry_provenance: opts.strictTelemetryProvenance === true,
+              timing: opts.timing === true,
+            },
+            checkIds: measured.checkIds,
+            result: r,
+          });
+        } catch (error) {
+          process.stderr.write(
+            `doctor: result-file の書き出しに失敗 (consumer は自走へ落ちる): ${String(error)}\n`,
+          );
+        }
+      }
       if (opts.json) {
         process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
       } else {
@@ -825,6 +1118,94 @@ graph
     process.stdout.write(`${artifact.content}\n`);
   });
 
+const trace = program.command("trace").description("ID-based typed spec trace traversal");
+trace
+  .command("impact")
+  .description("compute upstream/downstream/test impact from a spec id")
+  .requiredOption("--id <id>", "spec id to traverse, for example VMS-004")
+  .option("--json", "JSON output")
+  .action((opts: { id: string; json?: boolean }) => {
+    const repoRoot = process.cwd();
+    const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
+    try {
+      migrate(db);
+      const result = analyzeTraceImpact(db, opts.id);
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      } else if (result.ok) {
+        process.stdout.write(`trace impact: ${result.root?.spec_id} (${result.root?.spec_kind})\n`);
+        for (const node of result.upstream) process.stdout.write(`  upstream: ${node.spec_id}\n`);
+        for (const node of result.downstream) {
+          process.stdout.write(`  downstream: ${node.spec_id}\n`);
+        }
+        for (const node of result.tests) process.stdout.write(`  test: ${node.spec_id}\n`);
+      } else {
+        for (const finding of result.findings) {
+          process.stderr.write(`[${finding.severity}] ${finding.code}: ${finding.message}\n`);
+        }
+      }
+      process.exitCode = result.ok ? 0 : 1;
+    } finally {
+      db.close();
+    }
+  });
+trace
+  .command("rag")
+  .description("list typed spec closure RAG ledger entries")
+  .option("--id <id>", "filter by spec id")
+  .option("--json", "JSON output")
+  .action((opts: { id?: string; json?: boolean }) => {
+    type TraceRagRow = {
+      spec_id: string;
+      spec_kind: string;
+      layer: string;
+      sub_doc: string;
+      rag: string;
+      closure_status: string;
+      requires_test: number;
+      upstream_count: number;
+      downstream_count: number;
+      test_count: number;
+      finding_count: number;
+      impact_summary: string;
+      source_path: string;
+      indexed_at: string;
+    };
+    const repoRoot = process.cwd();
+    const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
+    try {
+      migrate(db);
+      const rows = opts.id
+        ? db
+            .prepare(
+              "SELECT spec_id, spec_kind, layer, sub_doc, rag, closure_status, requires_test, upstream_count, downstream_count, test_count, finding_count, impact_summary, source_path, indexed_at FROM spec_rag_closure_entries WHERE spec_id = ? ORDER BY spec_id",
+            )
+            .all(opts.id)
+        : db
+            .prepare(
+              "SELECT spec_id, spec_kind, layer, sub_doc, rag, closure_status, requires_test, upstream_count, downstream_count, test_count, finding_count, impact_summary, source_path, indexed_at FROM spec_rag_closure_entries ORDER BY CASE rag WHEN 'red' THEN 0 WHEN 'yellow' THEN 1 ELSE 2 END, spec_id",
+            )
+            .all();
+      const typedRows = rows as TraceRagRow[];
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(typedRows, null, 2)}\n`);
+        return;
+      }
+      if (typedRows.length === 0) {
+        process.stdout.write("trace rag: no rows (run `ut-tdd db rebuild` first)\n");
+        process.exitCode = opts.id ? 1 : 0;
+        return;
+      }
+      for (const row of typedRows) {
+        process.stdout.write(
+          `${row.rag} ${row.spec_id} ${row.closure_status} tests=${row.test_count} findings=${row.finding_count} ${row.impact_summary}\n`,
+        );
+      }
+    } finally {
+      db.close();
+    }
+  });
+
 const session = program.command("session").description("session-log runtime events");
 session
   .command("start")
@@ -832,9 +1213,9 @@ session
   .option("--session <id>", SESSION_OPTION_DESCRIPTION)
   .action((opts: { session?: string }) => {
     const input = readHookInput(HOOK_EVENT_SESSION_START, opts.session);
-    const repoRoot = process.cwd();
+    const repoRoot = requireRuntimeRepoRoot();
     const deps = nodeDeps(repoRoot, gitBranch, gitHead);
-    runSessionStartSideEffects(repoRoot, input, deps);
+    runSessionStartSideEffects({ repoRoot, input, deps });
     dispatch(input, deps, HOOK_EVENT_SESSION_START);
     process.stdout.write(`session-log: start ${input.session_id ?? "ut-tdd-cli"}\n`);
   });
@@ -845,12 +1226,81 @@ session
   .option("--session <id>", SESSION_OPTION_DESCRIPTION)
   .action((opts: { session?: string }) => {
     const input = readHookInput("Stop", opts.session);
-    dispatch(input, nodeDeps(process.cwd(), gitBranch, gitHead), "Stop");
+    const repoRoot = requireRuntimeRepoRoot();
+    dispatch(input, nodeDeps(repoRoot, gitBranch, gitHead), "Stop");
     writeHandoverWarnings();
+    // PLAN-L7-365 Step 2 (issue #78): Stop 境界で on-disk harness.db を自動追従。
+    // Stop hook の timeout 予算 (5s) を消費しないよう detached で fire-and-forget 起動し、
+    // fail-open — 起動失敗は警告のみで session 終了 (exit 0) を妨げない。
+    const refresh = spawnDetachedStopRefresh({ repoRoot });
+    if (!refresh.launched && !refresh.coalesced) {
+      process.stderr.write(`session-log: db refresh not launched (${refresh.reason})\n`);
+    }
     process.stdout.write(`session-log: summary ${input.session_id ?? "ut-tdd-cli"}\n`);
   });
 
+session
+  .command("db-refresh")
+  .description(
+    "Stop 境界の on-disk harness.db refresh (session summary から detached 起動される内部エントリ)",
+  )
+  .requiredOption("--generation <id>", "Stop refresh lease generation")
+  .action((opts: { generation: string }) => {
+    const repoRoot = requireRuntimeRepoRoot();
+    if (
+      refuseBunStopRefresh({
+        repoRoot,
+        generation: opts.generation,
+        execPath: process.execPath,
+        runtimeBunVersion: (process.versions as NodeJS.ProcessVersions & { bun?: string }).bun,
+      })
+    ) {
+      process.stderr.write("session-log: db refresh skipped (bun-runtime-refused)\n");
+      return;
+    }
+    const result = runCoalescedStopRefresh({
+      repoRoot,
+      generation: opts.generation,
+    });
+    const r = result.runs.at(-1);
+    if (!result.owned || !r) {
+      process.stderr.write("session-log: db refresh skipped (stale-generation)\n");
+      return;
+    }
+    if (!r.ok) {
+      process.stderr.write(`session-log: db refresh skipped (${r.skippedReason})\n`);
+    }
+    if (r.vacuum?.warning) {
+      process.stderr.write(`session-log: db vacuum skipped (${r.vacuum.warning})\n`);
+    }
+    process.stdout.write(
+      `session-log: db refresh ${r.ok ? "ok" : "skipped"} (rebuilt=${r.rebuilt}, tokenRuns=${r.tokenRunsIngested}, vacuumRan=${r.vacuum?.ran ?? false})\n`,
+    );
+  });
+
 const hook = program.command("hook").description("package-local hook entrypoints");
+hook
+  .command("claude-memory-wake")
+  .description("wait for a HARNESS memory notification and rewake an idle Claude session")
+  .action(async () => {
+    if (!isClaudeMemoryWakeTarget(process.env)) return;
+    const input = readHookInput("Stop");
+    const repoRoot = requireRuntimeRepoRoot({ allowCwdFallback: true });
+    const result = await waitForClaudeMemory({
+      repoRoot,
+      sessionId: input.session_id ?? "ut-tdd-cli",
+      pollIntervalMs: resolveClaudeWakeDelay(process.env.UT_TDD_CLAUDE_WAKE_POLL_MS, 2_000),
+      maxWaitMs: resolveClaudeWakeDelay(process.env.UT_TDD_CLAUDE_WAKE_MAX_MS, 900_000),
+      pullRequestState: (pr) => observeClaudeInboxPullRequest(repoRoot, pr),
+    });
+    if (result.kind === "delivered" && result.message) {
+      process.stderr.write(`${result.message}\n`);
+      process.exitCode = 2;
+    } else if (result.kind === "denied") {
+      process.stderr.write(`claude-memory-wake: denied (${result.reason})\n`);
+    }
+  });
+
 hook
   .command("post-tool-use")
   .description("record PostToolUse through the shared session-log core")
@@ -873,23 +1323,28 @@ hook
         ...(opts.path ? { file_path: opts.path } : {}),
         ...(opts.command ? { command: opts.command } : {}),
       };
-      dispatch(
-        {
-          ...input,
-          hook_event_name: "PostToolUse",
-          tool_name: opts.tool ?? input.tool_name ?? (opts.command ? "Bash" : "manual"),
-          tool_input: toolInput,
-          tool_response: opts.outcome
-            ? {
-                ...(typeof input.tool_response === "object" ? input.tool_response : {}),
-                outcome: opts.outcome,
-              }
-            : input.tool_response,
-        },
-        nodeDeps(process.cwd(), gitBranch, gitHead),
-        "PostToolUse",
-      );
+      const repoRoot = requireRuntimeRepoRoot({ allowCwdFallback: true });
+      const postInput = {
+        ...input,
+        hook_event_name: "PostToolUse",
+        tool_name: opts.tool ?? input.tool_name ?? (opts.command ? "Bash" : "manual"),
+        tool_input: toolInput,
+        tool_response: opts.outcome
+          ? {
+              ...(typeof input.tool_response === "object" ? input.tool_response : {}),
+              outcome: opts.outcome,
+            }
+          : input.tool_response,
+      };
+      dispatch(postInput, nodeDeps(repoRoot, gitBranch, gitHead), "PostToolUse");
+      const encodingGuard = runWriteEncodingGuard(postInput, {
+        repoRoot,
+        changedFiles: () => loadChangedFiles(repoRoot),
+      });
       process.stdout.write(`session-log: post-tool-use ${input.session_id ?? "ut-tdd-cli"}\n`);
+      for (const message of encodingGuard.messages) {
+        process.stderr.write(`${message}\n`);
+      }
     },
   );
 
@@ -899,7 +1354,7 @@ hook
     "PreToolUse(Agent|Task): enforce subagent allowlist and declared model family; exits: 0=pass, 1=error, 2=blocked",
   )
   .action(() => {
-    const repoRoot = process.cwd();
+    const repoRoot = requireRuntimeRepoRoot();
     const input = parseHookInput<AgentGuardInput>(readStdin());
     if (!input) {
       process.stderr.write("[ut-tdd-guard] BLOCK: malformed hook JSON (fail-close)\n");
@@ -930,7 +1385,7 @@ hook
     "PreToolUse(Edit|Write|MultiEdit/apply_patch|write_file): block foreign edits; exits: 0=pass, 1=error, 2=blocked",
   )
   .action(() => {
-    const repoRoot = process.cwd();
+    const repoRoot = requireRuntimeRepoRoot();
     const input = parseHookInput<{ tool_input?: unknown; session_id?: string }>(readStdin());
     if (!input) {
       // Work guard remains fail-open on malformed hook I/O, matching the repo-local shim.
@@ -958,7 +1413,7 @@ hook
   .action(() => {
     // SubagentStop payload (session_id/transcript_path/stop_hook_active) は終了 subagent の
     // slot_id を含まず slot 個体相関に使えないため読まない (設計根拠 = agent-slots.md §2.4)。
-    const released = releaseOldestGuardSlot(nodeAgentSlotsDeps(process.cwd()));
+    const released = releaseOldestGuardSlot(nodeAgentSlotsDeps(requireRuntimeRepoRoot()));
     process.stdout.write(
       released
         ? `agent-slots: released ${released.slot_id} (${released.agent_kind})\n`
@@ -1033,6 +1488,10 @@ guard
   );
 
 const plan = program.command("plan").description("PLAN 操作");
+registerPlanAssetCommands(plan);
+registerPlanAdmissionCommands(plan);
+registerPlanDraftCommand(plan, { runner: createNodePlanDraftRunner(process.cwd()) });
+registerPlanRevisionCommand(plan, { runner: createNodePlanRevisionRunner(process.cwd()) });
 plan
   .command("lint [path]")
   .description("PLAN lint")
@@ -1050,21 +1509,51 @@ plan
   .command("digest-migrate")
   .description(
     "green_command digest を記録時点 commit へ anchor 化する計画 (PLAN-L7-303、dry-run 既定)。" +
-      "履歴から claimed digest 一致 commit を特定し recoverable/suspect に分類する。--execute は PO ゲート (committed PLAN 改変=監査境界) につき未実装。",
+      "履歴から claimed digest 一致 commit を特定し recoverable/suspect に分類する。",
   )
   .option("--json", "JSON 出力")
-  .action((opts: { json?: boolean }) => {
+  .option(
+    "--execute",
+    "recoverable entry に anchor_commit を追記する (既存 output_digest は変更しない)",
+  )
+  .action((opts: { json?: boolean; execute?: boolean }) => {
     const repoRoot = process.cwd();
-    const candidates = planDigestMigration(
-      loadReviewPlans(repoRoot),
-      nodeHistoryScanDeps(repoRoot),
-    );
+    const plans = loadReviewPlans(repoRoot);
+    const candidates = planDigestMigration(plans, nodeHistoryScanDeps(repoRoot));
     if (opts.json) {
       process.stdout.write(`${JSON.stringify(candidates, null, 2)}\n`);
       return;
     }
     const counts = { recoverable: 0, suspect: 0, "already-anchored": 0 } as Record<string, number>;
     for (const c of candidates) counts[c.disposition] = (counts[c.disposition] ?? 0) + 1;
+    if (opts.execute) {
+      const byFile = new Map<string, typeof candidates>();
+      for (const c of candidates.filter((x) => x.disposition === "recoverable")) {
+        byFile.set(c.file, [...(byFile.get(c.file) ?? []), c]);
+      }
+      let touchedFiles = 0;
+      let applied = 0;
+      let skippedAlreadyAnchored = 0;
+      for (const [file, fileCandidates] of byFile) {
+        const path = join(repoRoot, "docs", "plans", file);
+        const before = readFileSync(path, "utf8");
+        const result = applyDigestAnchorCandidatesToContent(before, fileCandidates);
+        applied += result.applied;
+        skippedAlreadyAnchored += result.skippedAlreadyAnchored;
+        if (result.content !== before) {
+          writeFileSync(path, result.content, "utf8");
+          touchedFiles += 1;
+        }
+      }
+      process.stdout.write(
+        `plan digest-migrate --execute — applied=${applied} files=${touchedFiles} ` +
+          `skipped_already_anchored=${skippedAlreadyAnchored} suspect=${counts.suspect}\n`,
+      );
+      process.stdout.write(
+        "既存 output_digest は変更していない。suspect は履歴に claimed 一致 blob が無いため未更新。\n",
+      );
+      return;
+    }
     process.stdout.write(
       `plan digest-migrate (dry-run) — ${candidates.length} green_command: ` +
         `recoverable=${counts.recoverable} suspect=${counts.suspect} already-anchored=${counts["already-anchored"]}\n`,
@@ -1077,7 +1566,7 @@ plan
     }
     process.stdout.write(
       "\nsuspect = どの commit にも claimed 一致 blob 無し (捏造/回復不能疑い、A-18x 台帳化)。" +
-        "\n書き込み (anchor_commit back-fill) は committed PLAN 改変 = 監査境界につき PO ゲート。\n",
+        "\n書き込みは --execute で recoverable に anchor_commit のみ追記する。\n",
     );
   });
 
@@ -1287,7 +1776,40 @@ db.command("rebuild")
   .description("harness.db schema と deterministic projection を再構築")
   .option("--json", "JSON output")
   .action((opts: { json?: boolean }) => {
-    const r = rebuildHarnessDb({ repoRoot: process.cwd() });
+    // Memory projection must come from the canonical project root: a linked worktree cwd
+    // would otherwise project its own legacy .ut-tdd/memory (PLAN-L7-566 PR-2, P-MEMCUT-006).
+    // The process.cwd() fallback below exists for the nested-snapshot-clone case (a real `git
+    // clone` of a snapshot tree, U-TESTHYGIENE-043) where the clone has git topology (it is a
+    // clone, so `git rev-parse` resolves) but no usable project identity of its own. Measured on
+    // Windows CI (run 35216823766): that case yields reason "project_identity_unavailable", not
+    // "git_topology_unavailable" — a nested clone is a git repo, so git-dir/git-common-dir both
+    // resolve fine, only `loadProjectIdentityFromHead` comes back empty. A linked worktree always
+    // has a git-dir distinct from its git-common-dir (`isLinkedWorktreeCheckout`), so gating the
+    // fallback on "not a linked worktree" keeps the P-MEMCUT-006 negatives fail-closed: a linked
+    // worktree with an unresolvable or drifted identity must never fall back to `process.cwd()`
+    // and silently project its own legacy memory. "project_identity_drift" (a resolvable but
+    // *disagreeing* identity) stays fail-closed unconditionally in both topologies — drift is
+    // never the nested-snapshot case, it always means two distinct, resolvable identities.
+    const projectRoot = resolveProjectMemoryRoot(process.cwd());
+    let dbRebuildRepoRoot: string;
+    if (projectRoot.ok) {
+      dbRebuildRepoRoot = projectRoot.canonicalProjectRoot;
+    } else if (
+      (projectRoot.reason === "git_topology_unavailable" ||
+        projectRoot.reason === "project_identity_unavailable") &&
+      !isLinkedWorktreeCheckout(process.cwd())
+    ) {
+      dbRebuildRepoRoot = process.cwd();
+    } else {
+      process.stderr.write(
+        `ut-tdd db rebuild: refusing to project memory (project_memory_root reason=` +
+          `${projectRoot.reason}); a linked worktree or a repo with drifted/unavailable project ` +
+          "identity must not project legacy memory into harness.db (PLAN-L7-566 P-MEMCUT-006)\n",
+      );
+      process.exitCode = 1;
+      return;
+    }
+    const r = rebuildHarnessDb({ repoRoot: dbRebuildRepoRoot });
     if (opts.json) {
       process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
       return;
@@ -1299,7 +1821,62 @@ db.command("rebuild")
     process.stdout.write(
       "  note: plans / roadmap rollups / review evidence / optional Phase3 outputs を projection\n",
     );
+    if (r.tokenIngest) {
+      const t = r.tokenIngest;
+      process.stdout.write(
+        `  token telemetry (repo-scoped, issue #82): claude files matched ${t.claudeFilesScanned}/${t.claudeFilesChecked} ` +
+          `(project dir resolved=${t.claudeProjectDirResolved}, foreign repo ${t.claudeFilesForeignRepo}, unknown cwd ${t.claudeFilesSkippedUnknownCwd}), ` +
+          `codex files matched ${t.codexFilesMatched}/${t.codexFilesChecked} ` +
+          `(foreign repo ${t.codexFilesForeignRepo}, unknown cwd ${t.codexFilesSkippedUnknownCwd})\n`,
+      );
+    }
   });
+db.command("scope-preview")
+  .description("preview document/activation detection scope from harness.db profiles")
+  .requiredOption("--profile <profile>", "document scale profile id (poc|standard|enterprise)")
+  .option("--activation-profile <profile>", "optional activation profile id")
+  .option("--capability <flag...>", "capability flag(s) that resolve conditional documents")
+  .option("--json", "JSON output")
+  .action(
+    (opts: {
+      profile: string;
+      activationProfile?: string;
+      capability?: string[];
+      json?: boolean;
+    }) => {
+      const repoRoot = process.cwd();
+      const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
+      try {
+        const result = buildScopeDryRunPreview(db, {
+          profileId: opts.profile,
+          activationProfileId: opts.activationProfile,
+          capabilityFlags: opts.capability,
+        });
+        if (opts.json) {
+          process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        } else {
+          process.stdout.write(
+            `scope-preview: profile=${result.profile_id} docs=${result.summary.documents_total} ` +
+              `in_scope=${result.summary.documents_in_scope} conditional=${result.summary.documents_conditional} ` +
+              `deferred=${result.summary.documents_deferred} skipped=${result.summary.documents_skipped}\n`,
+          );
+          process.stdout.write(`  gates=${result.gates.join(",") || "-"}\n`);
+          process.stdout.write(`  detectors=${result.detectors.join(",")}\n`);
+          for (const row of result.documents) {
+            process.stdout.write(
+              `  ${row.resolved_scope_status} ${row.doc_type_id} ${row.detail_override}/${row.status_override} gate=${row.gate_id} action=${row.required_action}\n`,
+            );
+          }
+          for (const finding of result.findings) {
+            process.stdout.write(`  ${finding.severity} ${finding.kind}: ${finding.message}\n`);
+          }
+        }
+        if (!result.ok) process.exitCode = 1;
+      } finally {
+        db.close();
+      }
+    },
+  );
 
 const progress = program.command("progress").description("artifact progress read model");
 progress
@@ -1579,7 +2156,7 @@ skill
       let written = false;
       if (writable) {
         const absolute = join(repoRoot, result.path);
-        mkdirSync(dirname(absolute), { recursive: true });
+        ensureDir(dirname(absolute), { recursive: true });
         writeFileSync(absolute, result.content, "utf8");
         written = true;
       }
@@ -1593,7 +2170,7 @@ skill
     },
   );
 
-program
+const review = program
   .command("review")
   .description("prepare a deterministic review packet for the current worktree")
   .option("--uncommitted", "review uncommitted git changes")
@@ -1605,7 +2182,28 @@ program
       // 意図しない混入を staged 段階で弾く (doctor 失敗 / suspect 検出で fail-close)。
       const staged = loadStagedFiles(process.cwd());
       const summary = summarizeStagedReview(staged);
-      const doctor = runDoctor();
+      const lock = acquireDoctorLock(process.cwd());
+      if (!lock.acquired) {
+        const message = doctorLockBlockedMessage(lock.holder);
+        const blocked = {
+          scope: "staged",
+          ok: false,
+          staged: summary.staged,
+          suspect: summary.suspect,
+          doctorOk: false,
+          doctorMessages: [message],
+        };
+        if (opts.json) process.stdout.write(`${JSON.stringify(blocked, null, 2)}\n`);
+        else process.stderr.write(`${message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      let doctor: ReturnType<typeof runDoctor>;
+      try {
+        doctor = runDoctor();
+      } finally {
+        lock.release();
+      }
       const ok = doctor.ok && summary.ok;
       const stagedOutput = {
         scope: "staged",
@@ -1634,7 +2232,28 @@ program
       return;
     }
     const changedFiles = loadChangedFiles(process.cwd());
-    const doctor = runDoctor();
+    const lock = acquireDoctorLock(process.cwd());
+    if (!lock.acquired) {
+      const message = doctorLockBlockedMessage(lock.holder);
+      const blocked = {
+        scope: "uncommitted",
+        ok: false,
+        changedFiles,
+        verificationRecommendations: [],
+        missingProfiles: [],
+        doctorMessages: [message],
+      };
+      if (opts.json) process.stdout.write(`${JSON.stringify(blocked, null, 2)}\n`);
+      else process.stderr.write(`${message}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    let doctor: ReturnType<typeof runDoctor>;
+    try {
+      doctor = runDoctor();
+    } finally {
+      lock.release();
+    }
     const verification = recommendVerificationProfiles(changedFiles);
     const output = {
       scope: "uncommitted",
@@ -1667,6 +2286,8 @@ program
     process.exitCode = doctor.ok ? 0 : 1;
   });
 
+registerLiveReviewCommands(review);
+
 program
   .command("cutover")
   .description("prepare a non-destructive cutover / rollback plan")
@@ -1681,7 +2302,7 @@ program
       mode: opts.dryRun ? "dry-run" : "requires-human-approval",
       from,
       to: opts.to,
-      checks: ["bun run src\\cli.ts doctor", "bun run src\\cli.ts db status --json"],
+      checks: ["node src\\cli.ts doctor", "node src\\cli.ts db status --json"],
       rollback:
         from === "unknown" ? "record source ref before applying cutover" : `git switch ${from}`,
       humanApprovalRequired: true,
@@ -2027,7 +2648,7 @@ function loadRouteApprovalPolicy(repoRoot: string): RouteApprovalPolicy | undefi
 
 function appendRouteApprovalAudit(repoRoot: string, evaluated: RouteEvalResult): string {
   const auditDir = join(repoRoot, ".ut-tdd", "audit");
-  mkdirSync(auditDir, { recursive: true });
+  ensureDir(auditDir, { recursive: true });
   const auditPath = join(auditDir, "route-approval.jsonl");
   appendFileSync(
     auditPath,
@@ -2139,6 +2760,10 @@ program
   .option("--task <text>", "task text")
   .option("--task-file <path>", TASK_FILE_OPTION_DESCRIPTION)
   .option("--provider <provider>", "advisor provider (claude|codex)")
+  .option(
+    "--decision <kind>",
+    "decision kind (design|progress|implementation|troubleshooting|uiux); inferred when omitted",
+  )
   .option("--current-model <model>", "current orchestrator model that needs advice")
   .option("--reason <text>", "why upper-model advice is needed")
   .option("--plan <id>", "PLAN id")
@@ -2150,6 +2775,7 @@ program
       task?: string;
       taskFile?: string;
       provider?: string;
+      decision?: string;
       currentModel?: string;
       reason?: string;
       plan?: string;
@@ -2168,11 +2794,21 @@ program
         process.exitCode = 1;
         return;
       }
+      if (opts.decision && !(ADVISOR_DECISION_KINDS as readonly string[]).includes(opts.decision)) {
+        // 受理集合は advisor-policy の SSoT に従う (旧実装は design|implementation を
+        // ハードコードしており、uiux / troubleshooting が CLI から指定できなかった)。
+        process.stderr.write(
+          `advisor --decision must be one of ${ADVISOR_DECISION_KINDS.join(" | ")}\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
       const mode = opts.mode ?? detectMode().mode;
       const decision = buildAdvisorDecision({
         task,
         mode,
         provider: opts.provider as AdapterProvider | undefined,
+        decisionKind: opts.decision as AdvisorDecisionKind | undefined,
         currentModel: opts.currentModel,
         reason: opts.reason,
         planId: opts.plan,
@@ -2189,12 +2825,17 @@ program
         if (opts.json) process.stdout.write(`${JSON.stringify(decision, null, 2)}\n`);
         else {
           process.stdout.write(
-            `advisor: provider=${decision.provider} model=${decision.model} effort=${decision.effort} intent=${decision.task_intent} lower=${decision.current_model_lower_than_advisor} dry-run\n`,
+            `advisor: provider=${decision.provider} model=${decision.model} effort=${decision.effort} mode=${decision.consultation_mode} decision=${decision.decision_kind} intent=${decision.task_intent} lower=${decision.current_model_lower_than_advisor} dry-run\n`,
           );
           process.stdout.write(`  - ${decision.reason}\n`);
           process.stdout.write(
             `  - dispatch: command=${decision.adapterPlan.command} args=[${decision.adapterPlan.args.join(" ")}]\n`,
           );
+          if (decision.fallback) {
+            process.stdout.write(
+              `  - fallback on response error: provider=${decision.fallback.provider} model=${decision.fallback.model} effort=${decision.fallback.effort} mode=${decision.fallback.consultation_mode}\n`,
+            );
+          }
         }
         return;
       }
@@ -2208,6 +2849,24 @@ program
         },
         { gitBranch, gitHead, runSessionStartSideEffects, writeHandoverWarnings },
       );
+      // 一次相談先のレスポンスエラーは advisor 全体を落とさず fallback へ切替える
+      // (advisor-tool の advisor_tool_result_error と同じ fail-soft 思想)。
+      let fallbackExecution: ReturnType<typeof executeAdapterPlanForCli> | undefined;
+      if ((execution.exit_code ?? 1) !== 0 && decision.fallback?.adapterPlan.available) {
+        process.stderr.write(
+          `advisor: primary provider=${decision.provider} failed (exit=${execution.exit_code ?? "null"}); falling back to provider=${decision.fallback.provider} model=${decision.fallback.model} mode=${decision.fallback.consultation_mode}\n`,
+        );
+        fallbackExecution = executeAdapterPlanForCli(
+          decision.fallback.adapterPlan,
+          {
+            sessionPrefix: `advisor-${decision.fallback.provider}`,
+            toolName: "advisor",
+            planId: opts.plan,
+            jsonOut: Boolean(opts.json),
+          },
+          { gitBranch, gitHead, runSessionStartSideEffects, writeHandoverWarnings },
+        );
+      }
       const output = {
         ...decision,
         adapterPlan: {
@@ -2215,14 +2874,31 @@ program
           ...execution,
           dry_run: false,
         },
+        ...(fallbackExecution && decision.fallback
+          ? {
+              fallback: {
+                ...decision.fallback,
+                adapterPlan: {
+                  ...decision.fallback.adapterPlan,
+                  ...fallbackExecution,
+                  dry_run: false,
+                },
+              },
+              fallback_used: true,
+            }
+          : {}),
       };
       if (opts.json) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
-      else {
+      else if (fallbackExecution && decision.fallback) {
+        process.stdout.write(
+          `advisor executed (fallback): provider=${decision.fallback.provider} model=${decision.fallback.model} mode=${decision.fallback.consultation_mode} exit=${fallbackExecution.exit_code ?? "null"}\n`,
+        );
+      } else {
         process.stdout.write(
           `advisor executed: provider=${decision.provider} model=${decision.model} exit=${execution.exit_code ?? "null"}\n`,
         );
       }
-      process.exitCode = execution.exit_code ?? 1;
+      process.exitCode = (fallbackExecution ?? execution).exit_code ?? 1;
     },
   );
 
@@ -2245,6 +2921,8 @@ program
   .option("--reviewer-model <model>", "reviewer provider/model id")
   .option("--checklist <path>", "YAML checklist evidence for single-runtime review")
   .option("--coverage-summary <path>", "coverage/coverage-summary.json evidence for G7")
+  .option("--plan <id>", "plan_id to attach to gate run evidence")
+  .option("--session <id>", "session_id to attach to gate run evidence")
   .option("--human-approved", "standalone human approval evidence")
   .option("--json", "JSON output")
   .action(
@@ -2257,6 +2935,8 @@ program
         reviewerModel?: string;
         checklist?: string;
         coverageSummary?: string;
+        plan?: string;
+        session?: string;
         humanApproved?: boolean;
         json?: boolean;
       },
@@ -2296,11 +2976,62 @@ program
         static_gate: staticGate,
         messages: [...review.messages, ...staticGate.messages],
       };
-      if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      let gateRunEvidence: { path: string; gate_run_id: string } | null = null;
+      let gateRunEvidenceWarning: string | null = null;
+      try {
+        const written = writeGateRunEvidence({
+          repoRoot: process.cwd(),
+          gateId: id,
+          planId:
+            opts.plan ??
+            process.env.UT_TDD_PLAN_ID ??
+            resolveActivePlan(nodeDeps(process.cwd(), gitBranch)),
+          sessionId: opts.session ?? process.env.UT_TDD_SESSION_ID ?? null,
+          status: result.passed ? "passed" : "failed",
+          mode,
+          reviewKind: result.review_kind,
+          workerModel: opts.workerModel ?? null,
+          reviewerModel: opts.reviewerModel ?? null,
+          checklistPath: opts.checklist ?? null,
+          coverageSummaryPath: opts.coverageSummary ?? null,
+          staticApplicable: staticGate.applicable,
+          checks: [
+            {
+              name: "review-tier",
+              result: review.passed ? "passed" : "failed",
+              messages: review.messages,
+            },
+            {
+              name: "static-gate",
+              result: staticGate.applicable
+                ? staticGate.passed
+                  ? "passed"
+                  : "failed"
+                : "not_applicable",
+              messages: staticGate.messages,
+            },
+          ],
+          messages: result.messages,
+        });
+        gateRunEvidence = {
+          path: written.path,
+          gate_run_id: written.evidence.gate_run_id,
+        };
+      } catch (error) {
+        gateRunEvidenceWarning = `gate run evidence write failed: ${String(error)}`;
+      }
+      const output = {
+        ...result,
+        gate_run_evidence: gateRunEvidence,
+        gate_run_evidence_warning: gateRunEvidenceWarning,
+      };
+      if (opts.json) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
       else {
         process.stdout.write(
           `gate ${id}: ${result.passed ? "passed" : "failed"} mode=${result.mode} review=${result.review_kind ?? "-"} cross_agent_review=${result.cross_agent_review} static=${staticGate.applicable ? (staticGate.passed ? "passed" : "failed") : "n-a"}\n`,
         );
+        if (gateRunEvidence) process.stdout.write(`  - evidence: ${gateRunEvidence.path}\n`);
+        if (gateRunEvidenceWarning) process.stdout.write(`  - ${gateRunEvidenceWarning}\n`);
         for (const m of result.messages) process.stdout.write(`  - ${m}\n`);
       }
       process.exitCode = result.passed ? 0 : 1;
@@ -2616,7 +3347,17 @@ team
         }
         let teamSessionSeq = 0;
         const repoRoot = process.cwd();
-        const sessionDeps = nodeDeps(repoRoot, gitBranch, gitHead);
+        const repoHasGitDir = existsSync(join(repoRoot, ".git"));
+        const cachedBranch = repoHasGitDir ? gitBranch() : null;
+        const cachedHead = repoHasGitDir ? gitHead() : null;
+        const sessionDeps = nodeDeps(
+          repoRoot,
+          () => cachedBranch,
+          () => cachedHead,
+        );
+        if (opts.json) {
+          sessionDeps.warn = (message) => process.stderr.write(`${message}\n`);
+        }
         const execution = await executeTeamRunPlan(result, {
           slots: nodeAgentSlotsDeps(repoRoot),
           runCommand: ({ command, args, provider, env, stdin }) =>
@@ -2627,23 +3368,48 @@ team
                 session_id: sessionId,
                 ...(opts.plan ? { plan_id: opts.plan } : {}),
               };
-              runSessionStartSideEffects(repoRoot, startInput, sessionDeps);
+              runSessionStartSideEffects({
+                repoRoot,
+                input: startInput,
+                deps: sessionDeps,
+                json: Boolean(opts.json),
+              });
               dispatch(startInput, sessionDeps, HOOK_EVENT_SESSION_START);
               const invocation = buildProviderInvocation({ provider, command, args });
               const ioMode = opts.json ? "ignore" : "inherit";
-              const child = spawn(invocation.command, invocation.args, {
-                cwd: repoRoot,
-                env: adapterExecutionEnv(provider, env),
-                // Provider prompts are passed through stdin; argv carries only fixed
-                // command flags so shell metacharacters and tool markup stay inert.
-                // codex はプロンプトを stdin で受ける (cmd.exe shell-wrap 回避、PLAN-L7-77)。
-                stdio: stdin === undefined ? ioMode : ["pipe", ioMode, ioMode],
-                shell: invocation.shell ?? false,
-                windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
-              });
+              let child: ReturnType<typeof spawn>;
+              try {
+                child = spawn(invocation.command, invocation.args, {
+                  cwd: repoRoot,
+                  env: adapterExecutionEnv(provider, env),
+                  // Provider prompts are passed through stdin; argv carries only fixed
+                  // command flags so shell metacharacters and tool markup stay inert.
+                  // codex はプロンプトを stdin で受ける (cmd.exe shell-wrap 回避、PLAN-L7-77)。
+                  stdio: stdin === undefined ? ioMode : ["pipe", ioMode, ioMode],
+                  shell: invocation.shell ?? false,
+                  windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
+                });
+              } catch (error) {
+                process.stderr.write(
+                  `${provider} provider launch failed (team run): ${String(error)}\n`,
+                );
+                resolve({ exitCode: null });
+                return;
+              }
               if (stdin !== undefined) {
-                child.stdin?.write(stdin);
-                child.stdin?.end();
+                const inputStream = child.stdin;
+                if (inputStream) {
+                  // Provider が入力を読む前に終了すると Node は stdin の EPIPE を
+                  // 未処理 error event として親プロセスへ上げる。close event の終了
+                  // コードを正本にし、早期 close は team run を落とさない。
+                  inputStream.on("error", () => undefined);
+                  try {
+                    inputStream.write(stdin);
+                    inputStream.end();
+                  } catch {
+                    // close/error handler が最終結果を確定する。
+                  }
+                }
               }
               let finalized = false;
               const finish = (exitCode: number | null) => {
@@ -2700,6 +3466,170 @@ team
 const audit = program.command("audit").description("read-only repository audits");
 
 audit
+  .command("node-ban")
+  .description("Q0 Node-only Bun permanent-ban qualification audit")
+  .requiredOption("--generation <path>", "sealed Node generation directory")
+  .requiredOption("--f0c-evidence <path>", "F0c aggregate evidence JSON")
+  .requiredOption("--f0c-lane <path...>", "Linux and Windows F0c lane evidence JSON")
+  .option("--receipt <path>", "write Q0 receipt JSON")
+  .option("--json", "JSON output")
+  .action(
+    (opts: {
+      generation: string;
+      f0cEvidence: string;
+      f0cLane: string[];
+      receipt?: string;
+      json?: boolean;
+    }) => {
+      try {
+        const repoRoot = process.cwd();
+        const subjectRevision = execFileSync("git", ["rev-parse", "HEAD"], {
+          cwd: repoRoot,
+          encoding: "utf8",
+        }).trim();
+        const generation = verifyNodeGeneration(
+          repoRoot,
+          resolve(repoRoot, opts.generation),
+          subjectRevision,
+        );
+        const observer = new NodeOnlyProcessObserver();
+        const runNodeScope = (
+          scope: "status" | "doctor" | "test" | "hook",
+          args: readonly string[],
+          input?: string,
+        ) => {
+          const invocation = createNodeInvocation(generation, args);
+          observer.invoke(
+            invocation,
+            () => {
+              try {
+                execFileSync(invocation.command, invocation.args, {
+                  cwd: repoRoot,
+                  ...invocation.options,
+                  ...(input ? { input } : {}),
+                  stdio: "ignore",
+                  timeout: 30_000,
+                });
+              } catch {
+                // The scope is still observed as a Node invocation. A command
+                // failure is reported by its own command/gate; it must not
+                // cause an unobserved fallback to be mistaken for success.
+              }
+            },
+            scope,
+          );
+        };
+        runNodeScope("status", ["status", "--json"]);
+        runNodeScope("doctor", ["doctor", "--profile", "consumer-toolchain"]);
+        runNodeScope("test", [
+          "plan",
+          "lint",
+          "docs/plans/PLAN-L7-458-node-self-hosted-bun-ban-foundation.md",
+        ]);
+        runNodeScope("hook", ["hook", "work-guard"], "{}\n");
+        observer.proveNoFallback(
+          "descendant",
+          "child-process observer port recorded zero forbidden descendants",
+        );
+        observer.proveNoFallback(
+          "download",
+          "runtime-image acquisition port is disabled and recorded zero downloads",
+        );
+        const result = runNodeBanAudit({
+          repoRoot,
+          subjectRevision,
+          f0c: JSON.parse(readFileSync(opts.f0cEvidence, "utf8")) as NodeBanF0cAggregateBinding,
+          node: {
+            generation_id: generation.receipt.generation_id,
+            lane: process.platform === "win32" ? "windows" : "linux",
+            subject_revision: generation.receipt.subject_revision,
+            artifact_digest: `sha256:${generation.receipt.compiled_cli.sha256}`,
+            receipt_digest: generation.receipt.receipt_digest,
+            runtime: "node",
+          },
+          f0cLanes: opts.f0cLane.map((path) => {
+            const evidence = parseNodeGenerationCiEvidence(
+              JSON.parse(readFileSync(resolve(repoRoot, path), "utf8")),
+            );
+            if (!evidence) throw new Error("invalid F0c lane evidence");
+            return evidence;
+          }),
+          processObservations: observer.snapshot(),
+          observedScopes: ["status", "doctor", "test", "hook", "descendant", "download"],
+          classifyProcess: classifyRuntimeImageProcess,
+        });
+        if (opts.receipt)
+          writeFileSync(
+            resolve(repoRoot, opts.receipt),
+            `${JSON.stringify(result.receipt)}\n`,
+            "utf8",
+          );
+        process.stdout.write(
+          opts.json
+            ? `${JSON.stringify(result.receipt, null, 2)}\n`
+            : `${nodeBanAuditMessages(result).join("\n")}\n`,
+        );
+        process.exitCode = result.receipt.qualification === "qualified" ? 0 : 1;
+      } catch (error) {
+        process.stderr.write(`node-ban-audit failed: ${String(error)}\n`);
+        process.exitCode = 2;
+      }
+    },
+  );
+
+audit
+  .command("bun-retirement")
+  .description("admit the final Bun retirement from exact F0b/F0c/Q0 receipts")
+  .requiredOption("--f0b <path>", "F0b sealed Node receipt JSON")
+  .requiredOption("--f0c <path>", "F0c aggregate receipt JSON")
+  .requiredOption("--q0 <path>", "Q0 Node-only audit receipt JSON")
+  .requiredOption("--f0c-lane <path...>", "Linux and Windows F0c lane evidence JSON")
+  .requiredOption("--retirement-receipt <path>", "exact final retirement admission receipt JSON")
+  .option("--json", "JSON output")
+  .action(
+    (opts: {
+      f0b: string;
+      f0c: string;
+      q0: string;
+      f0cLane: string[];
+      retirementReceipt: string;
+      json?: boolean;
+    }) => {
+      try {
+        const repoRoot = process.cwd();
+        const readJson = <T>(path: string): T =>
+          JSON.parse(readFileSync(resolve(repoRoot, path), "utf8")) as T;
+        const retirementSubject = execFileSync("git", ["rev-parse", "HEAD"], {
+          cwd: repoRoot,
+          encoding: "utf8",
+        }).trim();
+        const lanes = opts.f0cLane.map((path) => {
+          const evidence = parseNodeGenerationCiEvidence(readJson<unknown>(path));
+          if (!evidence) throw new Error("invalid F0c lane evidence");
+          return evidence;
+        });
+        const result = admitFinalBunRetirement({
+          repoRoot,
+          f0b: readJson<BunRetirementF0bReceipt>(opts.f0b),
+          f0c: readJson<BunRetirementF0cReceipt>(opts.f0c),
+          q0: readJson<BunRetirementQ0Receipt>(opts.q0),
+          f0cLanes: lanes,
+          retirementSubject,
+          retirementReceipt: readJson<BunRetirementAdmissionReceipt>(opts.retirementReceipt),
+          // The inventory is derived from the exact tracked checkout here;
+          // callers cannot provide a hand-maintained all-clean list.
+          surfaces: collectFinalRetirementSurfaceInventory(repoRoot),
+        });
+        process.stdout.write(`${JSON.stringify(result, null, opts.json ? 2 : 0)}\n`);
+        process.exitCode = 0;
+      } catch (error) {
+        process.stderr.write(`bun-retirement-admission failed: ${String(error)}\n`);
+        process.exitCode = 2;
+      }
+    },
+  );
+
+audit
   .command("quality")
   .description("detect hardcoded values, security risks, and technical debt markers")
   .option("--json", "JSON output")
@@ -2748,6 +3678,214 @@ branch
 
 const github = program.command("github").description("GitHub operations guards");
 
+const githubProject = github
+  .command("project")
+  .description("HARNESS DB正本からGitHub Project V2へForward状態を投影する");
+
+githubProject
+  .command("sync")
+  .description("Project item差分をdry-runし、--apply指定時だけ反映する")
+  .requiredOption("--owner <login>", "GitHub Project owner")
+  .requiredOption("--number <n>", "GitHub Project number", (value) => Number.parseInt(value, 10))
+  .requiredOption("--repository <id>", "repository identity (owner/name)")
+  .option("--db <path>", "harness.db path (default: .ut-tdd/harness.db)")
+  .option("--plan <id>", "1 PLANだけを同期する")
+  .option("--all-active", "完了・保留を除く全active PLANを同期する")
+  .option("--apply", "GitHubとbinding projectionへ反映する")
+  .option("--json", "JSON output")
+  .action(
+    (opts: {
+      owner: string;
+      number: number;
+      repository: string;
+      db?: string;
+      plan?: string;
+      allActive?: boolean;
+      apply?: boolean;
+      json?: boolean;
+    }) => {
+      if (!Number.isInteger(opts.number) || opts.number < 1) {
+        process.stderr.write("github project sync: --number must be a positive integer\n");
+        process.exitCode = 1;
+        return;
+      }
+      if (opts.plan && opts.allActive) {
+        process.stderr.write(
+          "github project sync: --plan and --all-active are mutually exclusive\n",
+        );
+        process.exitCode = 1;
+        return;
+      }
+      if (opts.apply && !opts.plan && !opts.allActive) {
+        process.stderr.write("github project sync: --apply requires --plan or --all-active\n");
+        process.exitCode = 1;
+        return;
+      }
+      const db = openHarnessDb(opts.db ?? defaultHarnessDbPath(process.cwd()), {
+        repoRoot: process.cwd(),
+      });
+      let outboxIds: string[] = [];
+      let outboxClaimed = false;
+      try {
+        if (opts.apply) migrate(db);
+        const projectedRows = deriveStoredForwardReadiness(db, process.cwd(), opts.repository);
+        const existingProjectPlans = selectExistingProjectPlans(db, opts.repository);
+        const activeRows = selectActiveProjectRows(projectedRows, existingProjectPlans);
+        const rows = opts.plan
+          ? projectedRows.filter((row) => row.planId === opts.plan)
+          : activeRows;
+        if (opts.plan && rows.length === 0) throw new Error(`PLAN not found: ${opts.plan}`);
+        outboxIds = opts.apply
+          ? rows.map((row) =>
+              queueGithubProjection({
+                db,
+                repositoryId: opts.repository,
+                planId: row.planId,
+                planRevision: row.revision,
+                operation: "project-item-upsert",
+                payload: {
+                  owner: opts.owner,
+                  projectNumber: opts.number,
+                  readiness: row.readiness,
+                  currentGate: row.currentGate,
+                  headSha: row.headSha,
+                },
+              }),
+            )
+          : [];
+        if (opts.apply) {
+          claimGithubProjection(db, outboxIds);
+          outboxClaimed = true;
+        }
+        const result = syncForwardProject({
+          rows,
+          owner: opts.owner,
+          projectNumber: opts.number,
+          port: new GhProjectV2Adapter(),
+          apply: Boolean(opts.apply),
+        });
+        if (opts.apply) {
+          persistProjectSync({
+            db,
+            repositoryId: opts.repository,
+            projectId: result.projectId,
+            rows,
+            result,
+            outboxIds,
+          });
+        }
+        if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        else
+          process.stdout.write(
+            `github project sync: ${result.applied ? "applied" : "dry-run"} plans=${rows.length} mutations=${result.mutations.length}\n`,
+          );
+      } catch (error) {
+        if (opts.apply && outboxClaimed && outboxIds.length > 0)
+          markGithubProjectionFailed(db, outboxIds);
+        process.stderr.write(`github project sync failed: ${String(error)}\n`);
+        process.exitCode = 3;
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+const githubBinding = github
+  .command("binding")
+  .description("Issue・branch・PR・CI・review・merge観測をPLANへ結合する");
+
+githubBinding
+  .command("sync")
+  .description("typed PR traceを持つGitHub PR群からlifecycle bindingを再構築する")
+  .requiredOption("--repository <id>", "repository identity (owner/name)")
+  .option("--db <path>", "harness.db path (default: .ut-tdd/harness.db)")
+  .option("--json", "JSON output")
+  .action((opts: { repository: string; db?: string; json?: boolean }) => {
+    const db = openHarnessDb(opts.db ?? defaultHarnessDbPath(process.cwd()), {
+      repoRoot: process.cwd(),
+    });
+    try {
+      migrate(db);
+      const result = syncRepositoryBindings({ db, repositoryId: opts.repository });
+      rebuildExecutionReadiness({ db });
+      if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      else
+        process.stdout.write(
+          `github binding sync: inspected=${result.inspectedPullRequests} traced=${result.tracedPullRequests} bindings=${result.bindingIds.length} skipped=${result.skipped.length}\n`,
+        );
+    } catch (error) {
+      process.stderr.write(`github binding sync failed: ${String(error)}\n`);
+      process.exitCode = 3;
+    } finally {
+      db.close();
+    }
+  });
+
+githubBinding
+  .command("observe")
+  .requiredOption("--repository <id>", "repository identity (owner/name)")
+  .requiredOption("--plan <id>", "PLAN ID")
+  .requiredOption("--revision <revision>", "PLAN revision/source hash")
+  .requiredOption("--kind <kind>", "project_item|issue|branch|pull_request")
+  .requiredOption("--object-id <id>", "provider object identity")
+  .requiredOption("--state <state>", "normalized object state")
+  .option("--project-item-id <id>", "Project item identity")
+  .option("--url <url>", "provider URL")
+  .option("--head <sha>", "subject HEAD SHA")
+  .option("--json", "JSON output")
+  .action(
+    (opts: {
+      repository: string;
+      plan: string;
+      revision: string;
+      kind: string;
+      objectId: string;
+      state: string;
+      projectItemId?: string;
+      url?: string;
+      head?: string;
+      json?: boolean;
+    }) => {
+      if (!isManualGithubObservationKind(opts.kind)) {
+        process.stderr.write(`github binding observe: unsupported kind ${opts.kind}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
+      try {
+        migrate(db);
+        const bindingId = recordGithubBinding(db, {
+          repositoryId: opts.repository,
+          planId: opts.plan,
+          planRevision: opts.revision,
+          projectItemId: opts.projectItemId,
+          objectKind: opts.kind as "project_item" | "issue" | "branch" | "pull_request",
+          objectId: opts.objectId,
+          objectUrl: opts.url,
+          headSha: opts.head,
+          state: opts.state,
+        });
+        const rows = rebuildExecutionReadiness({ db });
+        const output = {
+          ok: true,
+          bindingId: bindingId ?? null,
+          written: bindingId !== undefined,
+          readiness: rows.find((row) => row.planId === opts.plan),
+        };
+        if (opts.json) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+        else
+          process.stdout.write(
+            bindingId ? `github binding observed: ${bindingId}\n` : "github binding unchanged\n",
+          );
+      } catch (error) {
+        process.stderr.write(`github binding observe failed: ${String(error)}\n`);
+        process.exitCode = 1;
+      } finally {
+        db.close();
+      }
+    },
+  );
+
 github
   .command("guard")
   .description("fail-close branch-type and commit message checks for harness-check")
@@ -2785,7 +3923,204 @@ github
     },
   );
 
+// PLAN-L7-455 (troubleshoot): 変更ファイル分類 (doc-only lane 判定、fail-close)。
+// harness-check.yml の重い step (full vitest / full doctor 等) を doc-only 変更で
+// skip するための判定を出す。判定不能・新種 path は必ず "full" にフォールバックする。
+github
+  .command("classify-changes")
+  .description("git diff ベースの変更分類 (doc-only lane 判定、fail-close)")
+  .requiredOption("--event-name <name>", "github.event_name")
+  .requiredOption("--head-sha <sha>", "diff 対象 head SHA")
+  .option("--base-sha <sha>", "pull_request の base SHA")
+  .option("--before-sha <sha>", "push event の before SHA")
+  .option("--github-output <path>", "GITHUB_OUTPUT へ lane=<value> を追記するファイルパス")
+  .option("--json", "JSON output")
+  .action(
+    (opts: {
+      eventName: string;
+      headSha: string;
+      baseSha?: string;
+      beforeSha?: string;
+      githubOutput?: string;
+      json?: boolean;
+    }) => {
+      const result = runChangeLaneClassification({
+        eventName: opts.eventName,
+        headSha: opts.headSha,
+        baseSha: opts.baseSha,
+        beforeSha: opts.beforeSha,
+        git: new SystemGitDiffNamesPort(process.cwd()),
+      });
+      if (opts.githubOutput) {
+        appendFileSync(opts.githubOutput, `lane=${result.lane}\n`);
+      }
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      } else {
+        process.stdout.write(
+          `change lane: ${result.lane} (${result.reason}; range=${result.range ?? "none"}; files=${result.fileCount})\n`,
+        );
+      }
+    },
+  );
+
+// PLAN-L7-451 W3: $GITHUB_STEP_SUMMARY 向け projection。summary 生成失敗で CI を
+// red にしないため、常に exit 0 で degrade する (判定正本は gate 実測)。
+github
+  .command("summary")
+  .description("GitHub Actions Job Summary 向け markdown を stdout へ出力 (read-only projection)")
+  .option("--db <path>", "harness.db path (default: .ut-tdd/harness.db)")
+  .action((opts: { db?: string }) => {
+    try {
+      const repoRoot = process.cwd();
+      const data = collectJobSummary({
+        dbPath: opts.db ?? defaultHarnessDbPath(repoRoot),
+        repoRoot,
+        headSha: gitHead() ?? "",
+        branch: gitBranch() ?? "",
+      });
+      process.stdout.write(renderJobSummary(data));
+    } catch (error) {
+      process.stdout.write(`## UT-TDD harness summary\n\n> summary degraded: ${String(error)}\n`);
+    }
+  });
+
+const githubPr = github
+  .command("pr")
+  .description("typed PR trace contract — <!-- ut-tdd:trace/v1 --> block (PLAN-L7-451 W4)");
+
+githubPr
+  .command("render")
+  .description("PR body へ貼る trace block を生成する (手入力しない)")
+  .requiredOption("--plan <planId>", "PLAN ID (PLAN-L7-451 など)")
+  .requiredOption("--route-mode <mode>", "route mode (add-feature / recovery / reverse など)")
+  .option("--head <sha>", "subject HEAD SHA (default: git rev-parse HEAD)")
+  .option("--base <sha>", "base SHA (default: git rev-parse origin/main)")
+  .option("--plan-revision <n>", "PLAN revision")
+  .option("--episode-id <id>", "execution episode ID (Forward 外のみ)")
+  .requiredOption("--issue-number <n>", "GitHub issue number")
+  .action(
+    (opts: {
+      plan: string;
+      routeMode: string;
+      head?: string;
+      base?: string;
+      planRevision?: string;
+      episodeId?: string;
+      issueNumber: string;
+    }) => {
+      try {
+        const resolve = (ref: string): string =>
+          execFileSync("git", ["rev-parse", ref], { encoding: "utf8" }).trim();
+        const block = renderPrTraceBlock({
+          plan_id: opts.plan,
+          route_mode: opts.routeMode,
+          subject_head: opts.head ?? resolve("HEAD"),
+          base_sha: opts.base ?? resolve("origin/main"),
+          plan_revision: opts.planRevision,
+          episode_id: opts.episodeId,
+          issue_number: opts.issueNumber,
+        });
+        process.stdout.write(`${block}\n`);
+      } catch (error) {
+        process.stderr.write(`pr render failed: ${String(error)}\n`);
+        process.exitCode = 1;
+      }
+    },
+  );
+
+githubPr
+  .command("validate")
+  .description("PR body の trace block を検証する (欠落・破損は fail-close)")
+  .requiredOption("--body-file <path>", "PR body を書いたファイル")
+  .option("--json", "JSON output")
+  .action((opts: { bodyFile: string; json?: boolean }) => {
+    if (!existsSync(opts.bodyFile)) {
+      process.stderr.write(`pr validate: body file not found: ${opts.bodyFile}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    const result = validatePrTraceBody(readFileSync(opts.bodyFile, "utf8"));
+    if (opts.json) {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    } else if (result.ok) {
+      process.stdout.write(`pr trace — OK (plan_id=${result.fields.plan_id})\n`);
+    } else {
+      process.stdout.write("pr trace — FAIL\n");
+      for (const finding of result.findings) {
+        process.stdout.write(`  - [${finding.code}] ${finding.message}\n`);
+      }
+    }
+    process.exitCode = result.ok ? 0 : 1;
+  });
+
+// PLAN-L7-451 W6: repository policy 監査 (read-only)。適用操作は含めない。
+const githubPolicy = github
+  .command("policy")
+  .description("repository policy 監査 — authoring source と GitHub 現物の照合 (read-only)");
+
+const REPOSITORY_POLICY_PATH = "docs/governance/github-repository-policy.yaml";
+
+function fetchRulesetsViaGh(repository: string): unknown[] {
+  const list = JSON.parse(
+    execFileSync("gh", ["api", `repos/${repository}/rulesets?includes_parents=true`], {
+      encoding: "utf8",
+    }),
+  ) as Array<Record<string, unknown>>;
+  return list.map((entry) =>
+    JSON.parse(
+      execFileSync("gh", ["api", `repos/${repository}/rulesets/${String(entry.id)}`], {
+        encoding: "utf8",
+      }),
+    ),
+  );
+}
+
+githubPolicy
+  .command("inspect")
+  .description("GitHub 現物の Rulesets を取得して表示する")
+  .action(() => {
+    try {
+      const policy = parseRepositoryPolicy(readFileSync(REPOSITORY_POLICY_PATH, "utf8"));
+      const rulesets = fetchRulesetsViaGh(policy.repository);
+      process.stdout.write(`${JSON.stringify(normalizeRulesets(rulesets), null, 2)}\n`);
+    } catch (error) {
+      process.stderr.write(`policy inspect failed (gh/外部障害): ${String(error)}\n`);
+      process.exitCode = 3;
+    }
+  });
+
+githubPolicy
+  .command("diff")
+  .description("authoring source と現物の乖離を finding 列挙 (乖離 exit 1 / gh 障害 exit 3)")
+  .option("--observed-file <path>", "gh を使わず観測 JSON (raw rulesets) をファイルから読む")
+  .action((opts: { observedFile?: string }) => {
+    let policy: ReturnType<typeof parseRepositoryPolicy>;
+    try {
+      policy = parseRepositoryPolicy(readFileSync(REPOSITORY_POLICY_PATH, "utf8"));
+    } catch (error) {
+      process.stderr.write(`policy diff failed (authoring source): ${String(error)}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    let observedRaw: unknown;
+    try {
+      observedRaw = opts.observedFile
+        ? JSON.parse(readFileSync(opts.observedFile, "utf8"))
+        : fetchRulesetsViaGh(policy.repository);
+    } catch (error) {
+      process.stderr.write(`policy diff failed (gh/外部障害): ${String(error)}\n`);
+      process.exitCode = 3;
+      return;
+    }
+    const result = diffRepositoryPolicy(policy, normalizeRulesets(observedRaw));
+    process.stdout.write(renderPolicyDiff(result));
+    process.exitCode = result.ok ? 0 : 1;
+  });
+
 registerFeedbackCommands(program);
+registerPrMergeCommands(program);
+registerForwardWorkflowCommands(program);
 
 program
   .command("setup")
@@ -2799,8 +4134,12 @@ program
   .option("--tl-team <slug>", "CODEOWNERS の TL team slug")
   .option("--qa-team <slug>", "CODEOWNERS の QA team slug")
   .option("--po-team <slug>", "CODEOWNERS の PO team slug")
+  .option(
+    "--consumer-runtime-input <path>",
+    "sealed consumer runtime input JSON emitted by the release materializer",
+  )
   .action(
-    (opts: {
+    async (opts: {
       solo?: boolean;
       team?: boolean;
       dryRun?: boolean;
@@ -2808,6 +4147,7 @@ program
       tlTeam?: string;
       qaTeam?: string;
       poTeam?: string;
+      consumerRuntimeInput?: string;
     }) => {
       if (opts.solo && opts.team) {
         process.stderr.write("--solo と --team は同時指定できません (どちらか一方)\n");
@@ -2835,13 +4175,111 @@ program
         teamCount === 3
           ? { tl: opts.tlTeam as string, qa: opts.qaTeam as string, po: opts.poTeam as string }
           : undefined;
+      let consumerRuntime: SetupArgs["consumerRuntime"];
+      if (opts.consumerRuntimeInput) {
+        try {
+          const value = JSON.parse(readFileSync(opts.consumerRuntimeInput, "utf8")) as {
+            identity?: SetupConsumerRuntimeInput["identity"];
+            admission_input?: unknown;
+            compiled_esm_base64?: unknown;
+            node_bootstrap_receipt_base64?: unknown;
+          };
+          if (
+            !value.identity ||
+            !value.admission_input ||
+            typeof value.compiled_esm_base64 !== "string" ||
+            typeof value.node_bootstrap_receipt_base64 !== "string"
+          )
+            throw new Error(
+              "identity/admission_input/compiled_esm_base64/node_bootstrap_receipt_base64 are required",
+            );
+          const rawAdmission = value.admission_input as Record<string, unknown>;
+          const rawAggregate = rawAdmission.aggregate_input as Record<string, unknown>;
+          const rawFinalTree = rawAggregate?.final_tree as Record<string, unknown>;
+          const rawAttestation = rawAggregate?.attestation as Record<string, unknown>;
+          const rawAttestationEntries = rawAttestation?.entries;
+          if (
+            !rawAggregate ||
+            !rawFinalTree ||
+            !Array.isArray(rawFinalTree.manifestEntries) ||
+            !Array.isArray(rawFinalTree.sourcePaths) ||
+            !Array.isArray(rawFinalTree.cleanPackAllowlist) ||
+            !Array.isArray(rawFinalTree.channelMappings) ||
+            typeof rawAggregate.repository !== "string" ||
+            typeof rawAggregate.channel !== "string" ||
+            !rawAttestation ||
+            rawAttestation.status !== "attested" ||
+            typeof rawAttestation.releaseId !== "string" ||
+            typeof rawAttestation.artifactSourceCommit !== "string" ||
+            typeof rawAttestation.expectedDigest !== "string" ||
+            typeof rawAttestation.actualDigest !== "string" ||
+            !Array.isArray(rawAttestationEntries) ||
+            typeof rawAdmission.control_manifest_base64 !== "string"
+          )
+            throw new Error(
+              "admission_input.aggregate_input/final_tree/attestation/control_manifest_base64 are required",
+            );
+          const attestation = {
+            status: "attested" as const,
+            releaseId: rawAttestation.releaseId,
+            artifactSourceCommit: rawAttestation.artifactSourceCommit,
+            expectedDigest: rawAttestation.expectedDigest,
+            actualDigest: rawAttestation.actualDigest,
+            entries: rawAttestationEntries.map((entry) => {
+              const item = entry as Record<string, unknown>;
+              if (
+                typeof item.path !== "string" ||
+                typeof item.mode !== "string" ||
+                typeof item.content_base64 !== "string"
+              )
+                throw new Error("aggregate attestation entry is invalid");
+              if (item.mode !== "100644" && item.mode !== "100755" && item.mode !== "120000")
+                throw new Error("aggregate attestation entry mode is invalid");
+              return {
+                path: item.path,
+                mode: item.mode,
+                content: Buffer.from(item.content_base64, "base64"),
+              };
+            }),
+          } satisfies Extract<ReleaseChannelAttestation, { status: "attested" }>;
+          const aggregateInput = {
+            repository: rawAggregate.repository,
+            channel: rawAggregate.channel,
+            finalTree: rawFinalTree,
+          } as unknown as ReleaseAggregateAdmissionInput;
+          const aggregate = await admitReleaseAggregate(aggregateInput, {
+            attestChannel: async () => attestation,
+          });
+          if (!aggregate.ok) throw new Error(`consumer_runtime_aggregate_${aggregate.error}`);
+          const admissionInput = {
+            ...rawAdmission,
+            plan: {
+              ...aggregate.plan,
+            },
+            controlManifestBytes: Buffer.from(rawAdmission.control_manifest_base64, "base64"),
+          } as unknown as ConsumerLocalRuntimeAdmissionInput;
+          const admitted = admitConsumerLocalRuntime(admissionInput);
+          if (!admitted.ok) throw new Error(`consumer_runtime_aggregate_${admitted.error}`);
+          consumerRuntime = {
+            identity: value.identity,
+            admission: admitted.admission,
+            compiled_esm: Buffer.from(value.compiled_esm_base64, "base64"),
+            node_bootstrap_receipt: Buffer.from(value.node_bootstrap_receipt_base64, "base64"),
+          };
+        } catch (error) {
+          process.stderr.write(`--consumer-runtime-input invalid: ${String(error)}\n`);
+          process.exitCode = 1;
+          return;
+        }
+      }
       const args: SetupArgs = {
         ...(phase ? { phase } : {}),
         dryRun: Boolean(opts.dryRun),
         applyBranchProtection: Boolean(opts.applyBranchProtection),
         ...(teams ? { teams } : {}),
+        ...(consumerRuntime ? { consumerRuntime } : {}),
       };
-      const r = runSetup(args, deps);
+      const r = await runSetupAsync(args, deps);
       process.stdout.write(`phase: ${r.phase}${args.dryRun ? " (dry-run)" : ""}\n`);
       for (const w of r.written) process.stdout.write(`  ${args.dryRun ? "·" : "+"} ${w}\n`);
       process.stdout.write(
@@ -2866,8 +4304,20 @@ memory
   .option("--body <text>", "memory body")
   .option("--body-file <path>", "read memory body from a UTF-8 file")
   .option("--tags <csv>", "comma-separated tags")
+  .option("--notify-claude", "deliver this memory to an active Claude session immediately")
+  .option("--operation-id <id>", "stable delivery operation id")
+  .option("--receipt-json", "print the registration receipt as one JSON line")
   .action(
-    (opts: { title: string; kind: string; body?: string; bodyFile?: string; tags?: string }) => {
+    (opts: {
+      title: string;
+      kind: string;
+      body?: string;
+      bodyFile?: string;
+      tags?: string;
+      notifyClaude?: boolean;
+      operationId?: string;
+      receiptJson?: boolean;
+    }) => {
       const body = opts.bodyFile ? readFileSync(opts.bodyFile, "utf8") : (opts.body ?? "");
       const tags = opts.tags
         ? opts.tags
@@ -2876,13 +4326,44 @@ memory
             .filter(Boolean)
         : [];
       try {
-        const entry = writeMemoryEntry(process.cwd(), {
-          kind: opts.kind as MemoryKind,
-          title: opts.title,
-          body,
-          tags,
+        const repoRoot = requireRuntimeRepoRoot({ allowCwdFallback: true });
+        const project = requireProjectMemoryRoot(repoRoot);
+        const entry = writeMemory({
+          repoRoot: project.canonicalProjectRoot,
+          input: {
+            kind: opts.kind as MemoryKind,
+            title: opts.title,
+            body,
+            tags,
+          },
         });
         process.stdout.write(`memory: wrote ${entry.source_path}\n`);
+        const operationId = opts.operationId?.trim() || entry.content_hash.slice(0, 16);
+        if (opts.notifyClaude) {
+          const mode = detectMode();
+          const originRuntime = mode.currentRuntime === "claude" ? "system" : "codex";
+          const target = resolveLiveClaudeTarget(repoRoot);
+          if (!target.ok) throw new Error(target.reason);
+          const notification = buildClaudeProviderInboxEntry({
+            memory: entry,
+            projectId: project.projectId,
+            operationId,
+            workspaceId: target.workspaceId,
+            producer: {
+              provider: originRuntime === "codex" ? "codex" : "claude",
+              sessionId: resolveRuntimeSessionId(),
+            },
+            target: { scope: "session", provider: "claude", sessionId: target.sessionId },
+          });
+          const deliveryPath = publishClaudeInboxEntry(repoRoot, notification);
+          process.stdout.write(`memory: notified Claude via ${deliveryPath}\n`);
+        }
+        if (opts.receiptJson) {
+          const writtenPath = join(project.canonicalProjectRoot, entry.source_path);
+          const rawText = readFileSync(writtenPath, "utf8");
+          const receipt = registrationReceiptFor({ entry, rawText, operationId });
+          process.stdout.write(`${JSON.stringify(receipt)}\n`);
+        }
       } catch (error) {
         process.stderr.write(`memory: ${error instanceof Error ? error.message : String(error)}\n`);
         process.exitCode = 1;
@@ -2892,38 +4373,100 @@ memory
 
 memory
   .command("list")
-  .description("list shared memory entries from harness.db")
+  .description("list shared memory entries (source=.ut-tdd/memory files, harness.db=index)")
   .option("--query <text>", "filter by text")
   .option("--limit <n>", "maximum rows", "20")
   .action((opts: { query?: string; limit?: string }) => {
-    const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
-    try {
-      process.stdout.write(
-        renderMemoryList(
-          selectMemoryEntries(db, { query: opts.query, limit: Number(opts.limit ?? 20) }),
-        ),
-      );
-    } finally {
-      db.close();
-    }
+    const result = readMemoryThroughService(process.cwd(), {
+      query: opts.query,
+      limit: Number(opts.limit ?? 20),
+    });
+    process.stdout.write(renderMemoryList(result.entries));
+    process.stderr.write(renderMemoryHealth(result));
   });
 
 memory
   .command("recall")
-  .description("render shared memory context from harness.db")
+  .description("render shared memory context (source=.ut-tdd/memory files, harness.db=index)")
   .option("--query <text>", "filter by text")
   .option("--limit <n>", "maximum rows", "5")
   .action((opts: { query?: string; limit?: string }) => {
-    const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
+    const result = readMemoryThroughService(process.cwd(), {
+      query: opts.query,
+      limit: Number(opts.limit ?? 5),
+    });
+    const block = renderMemorySurface(result.entries);
+    process.stdout.write(block || "memory: no entries\n");
+    process.stderr.write(renderMemoryHealth(result));
+  });
+
+const elicit = program
+  .command("elicit")
+  .description("design-decision elicitation bound to the current V-model stage (PLAN-L7-428)");
+elicit
+  .command("context")
+  .description(
+    "resolve current stage + skill decision defaults + design coverage into an elicitation packet",
+  )
+  .option("--plan <plan_id>", "target PLAN (default: first ready schedule row)")
+  .option("--json", "JSON output")
+  .action((opts: { plan?: string; json?: boolean }) => {
+    const repoRoot = process.cwd();
+    const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
     try {
-      const block = renderMemorySurface(
-        selectMemoryEntries(db, { query: opts.query, limit: Number(opts.limit ?? 5) }),
+      const ctx = selectElicitationContext(db, { repoRoot, planId: opts.plan });
+      process.stdout.write(
+        opts.json ? `${JSON.stringify(ctx, null, 2)}\n` : renderElicitationContext(ctx),
       );
-      process.stdout.write(block || "memory: no entries\n");
     } finally {
       db.close();
     }
   });
+elicit
+  .command("record")
+  .description(`append an adopted design decision to ${DESIGN_DECISION_LOG_PATH}`)
+  .requiredOption("--plan <plan_id>", "PLAN the decision belongs to")
+  .requiredOption("--topic <text>", "what was decided (判断の種別)")
+  .requiredOption("--chosen <text>", "adopted option")
+  .requiredOption("--reason <text>", "why it was adopted")
+  .option("--options <csv>", "comma-separated candidate options")
+  .action(
+    (opts: { plan: string; topic: string; chosen: string; reason: string; options?: string }) => {
+      const repoRoot = process.cwd();
+      let currentLocation = "";
+      try {
+        const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
+        try {
+          const ctx = selectElicitationContext(db, { repoRoot, planId: opts.plan });
+          currentLocation = ctx.stage?.current_location ?? "";
+        } finally {
+          db.close();
+        }
+      } catch {
+        // fail-open: 工程表 stage が引けなくても記録は成立させる
+      }
+      try {
+        const record = appendDesignDecision(repoRoot, {
+          planId: opts.plan,
+          currentLocation,
+          topic: opts.topic,
+          options: opts.options?.split(",") ?? [],
+          chosen: opts.chosen,
+          reason: opts.reason,
+          sessionId: resolveRuntimeSessionId(),
+        });
+        process.stdout.write(
+          `elicit: recorded ${record.plan_id}${record.current_location ? ` @ ${record.current_location}` : ""} → ${DESIGN_DECISION_LOG_PATH}\n`,
+        );
+        process.stdout.write(
+          "elicit: 正本への転記を忘れずに (PLAN 設計判断節 / ADR、governance §共通ルール 7)\n",
+        );
+      } catch (error) {
+        process.stderr.write(`elicit: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    },
+  );
 
 registerDistributionCommands(program);
 

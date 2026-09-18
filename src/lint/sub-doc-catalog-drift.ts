@@ -13,7 +13,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { VALID_SUB_DOCS } from "../schema/index";
+import { VALID_SUB_DOCS } from "../schema/index.ts";
 
 export const REQUIREMENTS_DOC_PATH = "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md";
 

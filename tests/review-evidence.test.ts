@@ -5,11 +5,15 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeReviewEvidence,
   extractReviewEntries,
+  GREEN_COMMAND_KINDS,
+  GREEN_COMMAND_RUNNERS,
+  GREEN_COMMAND_SCOPES,
   hasReviewEvidence,
   loadReviewPlans,
   type ParsedReviewPlan,
   parseReviewPlan,
-} from "../src/lint/review-evidence";
+} from "../src/lint/review-evidence.ts";
+import { frontmatterSchema } from "../src/schema/frontmatter.ts";
 
 /** review-evidence lint (IMP-071 presence + IMP-076 cross-review semantic) — review 前置証跡の機械強制。 */
 
@@ -22,6 +26,36 @@ const plan = (o: Partial<ParsedReviewPlan>): ParsedReviewPlan => ({
   hasEvidence: false,
   crossEntries: [],
   ...o,
+});
+
+describe("GitHub review lane custody", () => {
+  it("U-GHBIND-004: extracts immutable lane, revision, HEAD, trials, and citations", () => {
+    const [entry] = extractReviewEntries(`---
+plan_id: PLAN-L7-1-example
+review_evidence:
+  - reviewer: blind-reviewer
+    review_kind: cross_agent
+    reviewed_at: 2026-07-29T01:00:00Z
+    tests_green_at: 2026-07-29T00:00:00Z
+    verdict: PASS
+    worker_model: claude-sonnet-5
+    reviewer_model: gpt-5.6-sol
+    lane: claim-blind
+    plan_revision: rev-1
+    subject_head: abcdef1
+    attack_trials: 3
+    citations:
+      - src/example.ts:10
+---
+`);
+    expect(entry).toMatchObject({
+      lane: "claim-blind",
+      plan_revision: "rev-1",
+      subject_head: "abcdef1",
+      attack_trials: 3,
+      citations: ["src/example.ts:10"],
+    });
+  });
 });
 
 describe("green command evidence (IMP-108)", () => {
@@ -97,6 +131,7 @@ describe("green command evidence (IMP-108)", () => {
                 evidence_path: "tests/review-evidence.test.ts",
                 output_digest: "sha256:0123456789abcdef",
                 completed_at: "2026-06-23",
+                anchor_commit: "5604874bb73905967b19f2e6cbc048101f807e39",
               },
             ],
           },
@@ -106,6 +141,73 @@ describe("green command evidence (IMP-108)", () => {
 
     expect(r.greenCommandViolations).toEqual([]);
     expect(r.ok).toBe(true);
+  });
+
+  it("U-GREENDEF-006: runner=node is a valid green command runner after the Node cutover (PLAN-L7-462)", () => {
+    const r = analyzeReviewEvidence([
+      plan({
+        plan_id: "PLAN-NEW-GREEN-NODE",
+        updated: "2026-06-23",
+        hasEvidence: true,
+        crossEntries: [
+          {
+            review_kind: "intra_runtime_subagent",
+            reviewed_at: "2026-06-23",
+            tests_green_at: "2026-06-23",
+            green_commands: [
+              {
+                kind: "unit_test",
+                command: "node scripts/run-vitest-snapshot.ts tests/review-evidence.test.ts",
+                runner: "node",
+                scope: "targeted",
+                exit_code: 0,
+                evidence_path: "tests/review-evidence.test.ts",
+                output_digest: "sha256:0123456789abcdef",
+                completed_at: "2026-06-23",
+                anchor_commit: "5604874bb73905967b19f2e6cbc048101f807e39",
+              },
+            ],
+          },
+        ],
+      }),
+    ]);
+
+    expect(r.greenCommandViolations).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it("U-GREENDEF-008: completed_at after tests_green_at は violation", () => {
+    const r = analyzeReviewEvidence([
+      plan({
+        plan_id: "PLAN-NEW-GREEN-AFTER",
+        updated: "2026-06-23",
+        hasEvidence: true,
+        crossEntries: [
+          {
+            review_kind: "intra_runtime_subagent",
+            reviewed_at: "2026-06-24",
+            tests_green_at: "2026-06-23",
+            green_commands: [
+              {
+                kind: "unit_test",
+                command: "bun test tests/review-evidence.test.ts",
+                runner: "bun",
+                scope: "targeted",
+                exit_code: 0,
+                evidence_path: "tests/review-evidence.test.ts",
+                output_digest: "sha256:0123456789abcdef",
+                completed_at: "2026-06-24",
+              },
+            ],
+          },
+        ],
+      }),
+    ]);
+
+    expect(r.greenCommandViolations).toEqual([
+      { plan_id: "PLAN-NEW-GREEN-AFTER", reason: "completed_after_tests_green_at" },
+    ]);
+    expect(r.ok).toBe(false);
   });
 
   it("U-GREENDEF-004: nonzero green command exit code fails", () => {
@@ -176,6 +278,133 @@ describe("green command evidence (IMP-108)", () => {
   });
 });
 
+/**
+ * issue #191: anchor 無しの output_digest は working tree の現在値と比較されるため、無関係な PR が
+ * 同じ evidence ファイルへ触れただけで赤化する。
+ *
+ * 「新規 entry だけ必須」を `completed_at` で判定する初版は、その値が **書き手の自己申告** なので
+ * 過去日時を書くだけで迂回できた (PR #361 Codex FLAG B-1)。時間軸を判定から外し、**全 entry で
+ * anchor を必須**にする。既存の anchor 無し 8 件は `plan digest-migrate --execute` で実 anchor を
+ * backfill 済みなので、grandfather 集合そのものが不要になった。
+ *
+ * anchor の **実在**検査は本 gate では行わない。squash merge 運用では PR head で記録した正当な
+ * anchor が merge 後の main から到達不能になり (実測: CI で 29 件が false positive)、捏造と
+ * 区別できないため。詳細は PR #361 のコメントと follow-up issue を参照。
+ */
+describe("green command anchor_commit 必須化 (issue #191)", () => {
+  const withCommand = (plan_id: string, command: Record<string, unknown>) =>
+    analyzeReviewEvidence([
+      plan({
+        plan_id,
+        updated: "2026-08-20",
+        hasEvidence: true,
+        crossEntries: [
+          {
+            review_kind: "intra_runtime_subagent",
+            reviewed_at: "2026-08-21T00:00:00Z",
+            tests_green_at: "2026-08-20T00:00:00Z",
+            green_commands: [
+              {
+                kind: "unit_test",
+                command: "npx vitest run tests/review-evidence.test.ts",
+                runner: "node",
+                scope: "targeted",
+                exit_code: 0,
+                evidence_path: "tests/review-evidence.test.ts",
+                output_digest: "sha256:0123456789abcdef",
+                ...command,
+              },
+            ],
+          },
+        ],
+      }),
+    ]);
+
+  it("U-REVIEW-009: requires an anchor regardless of the self-declared completed_at", () => {
+    // 旧実装では発効時刻より前として grandfather された入力。自己申告で迂回できない。
+    const r = withCommand("PLAN-ANCHOR-BACKDATED", {
+      completed_at: "2026-08-19T19:26:02+09:00",
+    });
+    expect(r.greenCommandViolations).toEqual([
+      { plan_id: "PLAN-ANCHOR-BACKDATED", reason: "missing_anchor_commit" },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("U-REVIEW-010: rejects an entry without an anchor", () => {
+    const r = withCommand("PLAN-ANCHOR-MISSING", { completed_at: "2026-08-20T00:00:00Z" });
+    expect(r.greenCommandViolations).toEqual([
+      { plan_id: "PLAN-ANCHOR-MISSING", reason: "missing_anchor_commit" },
+    ]);
+  });
+
+  it("U-REVIEW-011: accepts an entry that carries an anchor", () => {
+    const r = withCommand("PLAN-ANCHOR-OK", {
+      completed_at: "2026-08-20T00:00:00Z",
+      anchor_commit: "5604874bb73905967b19f2e6cbc048101f807e39",
+    });
+    expect(r.greenCommandViolations).toEqual([]);
+  });
+
+  it("U-REVIEW-012: rejects an anchor that is not a git object name", () => {
+    const r = withCommand("PLAN-ANCHOR-INVALID", {
+      completed_at: "2026-08-20T00:00:00Z",
+      anchor_commit: "main",
+    });
+    expect(r.greenCommandViolations).toEqual([
+      { plan_id: "PLAN-ANCHOR-INVALID", reason: "invalid_anchor_commit" },
+    ]);
+  });
+
+  it("U-REVIEW-013: holds the shipped corpus free of anchor violations", () => {
+    const violations = analyzeReviewEvidence(loadReviewPlans()).greenCommandViolations;
+    expect(violations.filter((v) => v.reason.includes("anchor"))).toEqual([]);
+  });
+});
+
+describe("green command vocabulary pin (schema ↔ lint SSoT)", () => {
+  // PR #293 review 申し送り: schema (frontmatter.ts) と lint (review-evidence.ts) の
+  // green_commands 語彙は 2 箇所に重複しており、片側だけの変更が無音で通る。
+  // zod の invalid_enum_value issue が持つ options (= schema 側 enum の実体) を
+  // 突き合わせて同期を恒久固定する (U-VPROF-RUNNER-001 と同型)。
+  function schemaEnumOptions(field: "kind" | "runner" | "scope"): string[] {
+    const r = frontmatterSchema.safeParse({
+      review_evidence: [
+        {
+          reviewer: "r",
+          review_kind: "human",
+          reviewed_at: "2026-08-07",
+          verdict: "approve",
+          green_commands: [
+            {
+              kind: "__probe__",
+              command: "c",
+              runner: "__probe__",
+              scope: "__probe__",
+              exit_code: 0,
+              evidence_path: "p",
+              output_digest: "sha256:0123456789abcdef",
+            },
+          ],
+        },
+      ],
+    });
+    expect(r.success).toBe(false);
+    if (r.success) return [];
+    const issue = r.error.issues.find(
+      (i) => i.code === "invalid_enum_value" && i.path.at(-1) === field,
+    );
+    expect(issue, `no invalid_enum_value issue for ${field}`).toBeDefined();
+    return [...((issue as { options?: readonly (string | number)[] }).options ?? [])].map(String);
+  }
+
+  it("U-GREENDEF-007: schema enum と lint 語彙集合が kind/runner/scope の 3 面で一致する", () => {
+    expect(schemaEnumOptions("kind").sort()).toEqual([...GREEN_COMMAND_KINDS].sort());
+    expect(schemaEnumOptions("runner").sort()).toEqual([...GREEN_COMMAND_RUNNERS].sort());
+    expect(schemaEnumOptions("scope").sort()).toEqual([...GREEN_COMMAND_SCOPES].sort());
+  });
+});
+
 describe("stale approval cleanup (IMP-080)", () => {
   it("U-REVIEW-007: draft + verdict=approve は stale approval violation", () => {
     const r = analyzeReviewEvidence([
@@ -222,6 +451,33 @@ describe("review-evidence lint (review 前置の機械強制、IMP-071)", () => 
     expect(hasReviewEvidence(withEv)).toBe(true);
     expect(hasReviewEvidence(withoutEv)).toBe(false);
     expect(hasReviewEvidence(emptyKey)).toBe(false);
+  });
+
+  it("U-REVIEW-001: hasReviewEvidence — comment lines, key order, and flow style don't defeat presence (issue #503)", () => {
+    const withComments = `plan_id: PLAN-COMMENT\nstatus: confirmed\nreview_evidence:\n  # comment line one\n  # comment line two\n  - reviewer: sol\n    review_kind: intra_runtime_subagent\n`;
+    const withBlankThenComment = `plan_id: PLAN-BLANK\nstatus: confirmed\nreview_evidence:\n\n  # comment\n  - reviewer: sol\n    review_kind: intra_runtime_subagent\n`;
+    const reorderedKeys = `plan_id: PLAN-ORDER\nstatus: confirmed\nreview_evidence:\n  - review_kind: intra_runtime_subagent\n    reviewer: sol\n`;
+    const flowStyle = `plan_id: PLAN-FLOW\nstatus: confirmed\nreview_evidence: [{reviewer: code-reviewer, review_kind: intra_runtime_subagent}]\n`;
+    expect(hasReviewEvidence(withComments)).toBe(true);
+    expect(hasReviewEvidence(withBlankThenComment)).toBe(true);
+    expect(hasReviewEvidence(reorderedKeys)).toBe(true);
+    expect(hasReviewEvidence(flowStyle)).toBe(true);
+
+    const wrap = (body: string) => `---\n${body}---\n# body text\n`;
+    expect(hasReviewEvidence(wrap(withComments))).toBe(true);
+    expect(hasReviewEvidence(wrap(withBlankThenComment))).toBe(true);
+    expect(hasReviewEvidence(wrap(reorderedKeys))).toBe(true);
+    expect(hasReviewEvidence(wrap(flowStyle))).toBe(true);
+
+    const noReviewer = `plan_id: PLAN-NOREV\nstatus: confirmed\nreview_evidence:\n  - review_kind: intra_runtime_subagent\n`;
+    const emptyArray = `plan_id: PLAN-EMPTYARR\nstatus: confirmed\nreview_evidence: []\n`;
+    const malformed = `plan_id: PLAN-MALFORMED\nstatus: confirmed\nreview_evidence:\n  - reviewer: [unterminated\n`;
+    expect(hasReviewEvidence(noReviewer)).toBe(false);
+    expect(hasReviewEvidence(emptyArray)).toBe(false);
+    expect(hasReviewEvidence(malformed)).toBe(false);
+
+    const p = parseReviewPlan("PLAN-COMMENT.md", `---\n${withComments}---\n`);
+    expect(p.hasEvidence).toBe(true);
   });
 
   it("U-REVIEW-002: parseReviewPlan — plan_id/kind/status/hasEvidence を抽出", () => {

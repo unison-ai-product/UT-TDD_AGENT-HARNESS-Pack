@@ -1,19 +1,20 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { normalizePath } from "../lint/shared";
+import { normalizePath } from "../shared/source-text.ts";
 import {
   REFACTOR_CANDIDATE_THRESHOLDS,
   REFACTOR_POLICY_TERMS,
   REFACTOR_SCAN_ROOTS,
-} from "./refactor-candidate-policy";
+} from "./refactor-candidate-policy.ts";
 
 export type RefactorCandidateKind =
   | "split-module"
   | "extract-helper"
   | "deduplicate-function"
   | "externalize-literal"
-  | "externalize-policy";
+  | "externalize-policy"
+  | "verification-defect-routing";
 
 export interface RefactorCandidate {
   kind: RefactorCandidateKind;
@@ -24,6 +25,8 @@ export interface RefactorCandidate {
   confidence: "high" | "medium";
   reason: string;
 }
+
+export type RefactorCandidateLifecycleState = "open" | "accepted" | "rejected" | "implemented";
 
 export const REFACTOR_FEEDBACK_LIMIT = 20;
 
@@ -40,6 +43,18 @@ const {
 
 function stableHash(value: string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+export function refactorCandidateKey(
+  candidate: Pick<RefactorCandidate, "kind" | "subject">,
+): string {
+  return `refactor-candidate:${stableHash(`${candidate.kind}:${candidate.subject}`).slice(7, 23)}`;
+}
+
+export function isRefactorCandidateDecisionState(
+  value: string,
+): value is Exclude<RefactorCandidateLifecycleState, "open"> {
+  return value === "accepted" || value === "rejected" || value === "implemented";
 }
 
 function sourceFiles(dir: string): string[] {

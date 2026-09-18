@@ -21,6 +21,27 @@ applies_to:
     - Reverse
     - Recovery
     - Add-feature
+decision_points:
+  - when: "Composing a prompt for a subagent or team-run task."
+    choose: "Include only the docs the subagent needs for its specific subtask."
+    over: "Forwarding the full primary session context to the subagent."
+    because: "Harness pillar 4 (dynamic context/skill injection) and the context budget rules require per-task scoping; forwarding full context wastes the subagent's budget and drowns the relevant signal."
+  - when: "Selecting how many skills to load for a task."
+    choose: "Load the 1-3 most relevant skills, using `ut-tdd skill suggest --plan <plan-id>` to pick them."
+    over: "Pre-loading the full skill catalog to be safe."
+    because: "Skills cost ~2-4 KB each and the practical context ceiling is ~150-200 KB; bulk-loading crowds out budget for the actual task docs."
+  - when: "A task spans multiple V-model layers and context budget is limited."
+    choose: "Load the skill for the highest-risk layer first."
+    over: "Loading all applicable layer skills in file-list order."
+    because: "Budget is finite and risk is not evenly distributed across layers; prioritizing the highest-risk layer ensures the most consequential judgement gets the needed context even if lower layers must load dynamically later."
+  - when: "A task could use migration snapshots, `docs/archive/`, or vendor source snapshots for background."
+    choose: "Exclude them from injected context."
+    over: "Including them for extra historical context."
+    because: "The skill classifies them as historical-only material never needed for forward work; including them burns budget without informing the current task."
+  - when: "A skill would only be relevant to a minority of sessions for a given layer."
+    choose: "Keep it out of the static read order and load it dynamically via `ut-tdd skill suggest` or explicit `Read`."
+    over: "Adding it to the static CLAUDE.md read order so it's always available."
+    because: "Static loads are paid every session regardless of task; the skill's own threshold is fewer-than-half of typical sessions as the cutoff for dynamic-only loading."
 ---
 
 # context engineering
@@ -36,7 +57,7 @@ skill injection).
 - A subagent prompt is overflowing context budget (~200 KB practical ceiling for
   Sonnet-class models).
 - Adding a new V-model layer to the harness that needs a context injection rule.
-- A `ut-tdd skill suggest --plan <path>` output is being acted on.
+- A `ut-tdd skill suggest --plan <plan-id>` output is being acted on.
 
 ## Per-layer injection table
 
@@ -51,7 +72,7 @@ full doc tree.
 | L8–L10 (integration / system test) | PLAN, test-design doc, `tests/` target | `harness-observability` skill |
 | L11–L14 (acceptance / production) | PLAN, acceptance criteria, `ut-tdd doctor` output | ADR list, handover state |
 
-Use `ut-tdd skill suggest --plan <path>` to get a computed skill recommendation
+Use `ut-tdd skill suggest --plan <plan-id>` to get a computed skill recommendation
 for a specific PLAN before composing a subagent prompt.
 
 ## Context budget rules
@@ -68,7 +89,7 @@ for a specific PLAN before composing a subagent prompt.
 
 ## Dynamic loading procedure
 
-1. Run `ut-tdd skill suggest --plan <path>` to get the recommended skill set.
+1. Run `ut-tdd skill suggest --plan <plan-id>` to get the recommended skill set.
 2. Load the top 1–3 skills. If the task spans multiple layers, load the skill
    for the highest-risk layer first.
 3. For subagent prompts: include only the docs the subagent needs to complete
@@ -81,8 +102,8 @@ for a specific PLAN before composing a subagent prompt.
 - Migration snapshots (`docs/archive/`, `vendor source snapshot`) — historical
   only; never needed for forward work.
 - The full `docs/plans/` directory — pass the single relevant PLAN file.
-- Session logs or raw `harness.db` dumps — use `ut-tdd metrics` / `ut-tdd find`
-  queries instead.
+- Session logs or raw `harness.db` dumps — use `ut-tdd metrics skill` /
+  `ut-tdd find <query>` instead.
 - Credentials, API keys, PII — never in prompt context. See safety boundaries in
   `CLAUDE.md`.
 

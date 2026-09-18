@@ -4,7 +4,7 @@ import {
   type ExecutionMode,
   NEXT_ACTION_BY_MODE,
   nextActionForMode,
-} from "../src/runtime/detect";
+} from "../src/runtime/detect.ts";
 
 describe("detectMode (requirements_v1.2 §7.1)", () => {
   it("returns one of the 4 valid modes", () => {

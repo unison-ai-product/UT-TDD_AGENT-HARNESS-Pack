@@ -41,7 +41,7 @@ export function loadDocs(repoRoot: string = ROOT): DocSource {
       "utf-8",
     ),
     l12AcceptanceTest: readFileSync(
-      resolve(repoRoot, "docs/test-design/harness/L3-acceptance-test-design.md"),
+      resolve(repoRoot, "docs/test-design/harness/L12-acceptance-test-design.md"),
       "utf-8",
     ),
   };

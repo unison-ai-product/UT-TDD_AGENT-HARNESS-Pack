@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyDriveTddFits, routeSignalToMode } from "../src/workflow/contracts";
+import { classifyDriveTddFits, routeSignalToMode } from "../src/workflow/contracts.ts";
 import {
   type BackendCapability,
   composeDesignBottomupDiscovery,
@@ -9,7 +9,7 @@ import {
   runDesignBottomup,
   type ScreenRef,
   type ScreenTraceRef,
-} from "../src/workflow/design-elicitation";
+} from "../src/workflow/design-elicitation.ts";
 
 // design-bottomup 駆動モデル (画面後付け駆動) の ① elicitation engine + Discovery 合成。
 // backend reality (L4 data entity / screen projection / CLI capability) から FE 要件を洗い出し、

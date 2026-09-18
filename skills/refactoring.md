@@ -12,6 +12,27 @@ applies_to:
     - Refactor
     - Forward
     - Add-feature
+decision_points:
+  - when: "the test suite does not fully cover the observable boundary of the code about to be refactored"
+    choose: "write characterisation tests first to establish the regression fence"
+    over: "start restructuring the code and rely on the existing partial test coverage"
+    because: "a refactor without a full regression fence is an unverified behaviour change, not a safe structural change"
+  - when: "a refactor step turns a gate (`typecheck`/`lint`/`test`/`doctor`) Red"
+    choose: "revert the last structural change before proceeding"
+    over: "keep going and fix the Red gate after a few more changes"
+    because: "accumulating multiple structural changes across a Red gate makes it impossible to isolate which change broke behaviour"
+  - when: "a cleanup step would add or remove test cases while restructuring code"
+    choose: "route the test addition to a separate Add-feature or Reverse PLAN"
+    over: "add the tests inside the same Refactor PLAN commit"
+    because: "the refactor cycle checklist requires the same number of Green tests as baseline; adding tests during refactor is a TDD step with separate review obligations, and mixing them invalidates the regression fence's evidentiary value"
+  - when: "a change under a Refactor PLAN alters a public API, `.ut-tdd/` state artefact, or `harness.db` schema"
+    choose: "reclassify the work as Add-feature or Retrofit and route accordingly"
+    over: "keep it under `kind: refactor` since most of the change is structural"
+    because: "any change to externally observable behaviour is by definition not refactoring under FR-L1-25, regardless of how much of the diff is internal"
+  - when: "`ut-tdd doctor` passes after a refactor commit"
+    choose: "treat it as confirmation of structural governance only, and separately verify test-count parity and reviewed output correctness"
+    over: "treat a green `ut-tdd doctor` as proof the refactor preserved behaviour"
+    because: "doctor checks structural governance, not observable output correctness — passing doctor alone does not establish behaviour invariance"
 ---
 
 # refactoring
@@ -37,7 +58,7 @@ Before writing a single line, answer these questions:
 1. What is the **observable boundary** of the code being changed? (Exported
    functions, CLI exit codes, files written to `.ut-tdd/`, DB rows.)
 2. Does the current test suite cover all observable boundary behaviours? Run
-   `bun run test` and confirm coverage. If not, write characterisation tests
+   `npm run test` and confirm coverage. If not, write characterisation tests
    first (see testing skill) — a refactor without a regression fence is a
    behaviour change with no safety net.
 3. Is the PLAN's `kind` value `refactor`? If `kind=add-impl` is present, the
@@ -47,7 +68,7 @@ Before writing a single line, answer these questions:
 
 ### Step 1 — establish a regression fence
 
-Run `bun run test` and record the baseline pass count. If any test is `.skip`
+Run `npm run test` and record the baseline pass count. If any test is `.skip`
 or `.todo` in the scope of the refactor, either un-skip it or file a PLAN to
 address it. Proceed only when the fence is complete and Green.
 
@@ -58,7 +79,7 @@ extract a helper, collapse two equivalent branches, remove dead code. Run
 the full gate sequence after each change:
 
 ```
-bun run typecheck && bun run lint && bun run test && ut-tdd doctor
+npm run typecheck && npm run lint && npm run test && ut-tdd doctor
 ```
 
 If any gate turns Red, revert the last change before proceeding. Do not
@@ -66,7 +87,7 @@ accumulate multiple structural changes across a Red gate.
 
 ### Step 3 — confirm behaviour invariance
 
-- `bun run test` passes with the same number of Green tests as the baseline
+- `npm run test` passes with the same number of Green tests as the baseline
   (no tests added or removed during refactor — only during subsequent
   Add-feature or TDD work).
 - `ut-tdd doctor` exits 0.
@@ -84,7 +105,7 @@ a descent obligation gap.
 
 - [ ] Regression fence is Green before first structural commit.
 - [ ] Each commit contains exactly one structural change.
-- [ ] `bun run typecheck && bun run lint && bun run test && ut-tdd doctor` green
+- [ ] `npm run typecheck && npm run lint && npm run test && ut-tdd doctor` green
   after every commit.
 - [ ] No new exported API surface added (would require Add-feature routing).
 - [ ] No `.ut-tdd/` state schema or `harness.db` schema changed.

@@ -7,9 +7,9 @@ import {
   checkRosterConsistency,
   listRosterRegistry,
   scanSkillCatalog,
-} from "../src/assets/catalog";
-import { openHarnessDb } from "../src/state-db/index";
-import { migrate, rowCounts } from "../src/state-db/migration";
+} from "../src/assets/catalog.ts";
+import { openHarnessDb } from "../src/state-db/index.ts";
+import { migrate, rowCounts } from "../src/state-db/migration.ts";
 
 const legacyRuntimeName = ["he", "lix"].join("");
 
@@ -359,6 +359,7 @@ describe("IT-ASSET-01/02: roster registry and guard consistency", () => {
         "pdm-marketing-innovation",
         "pdm-innovation-manager",
         "code-reviewer",
+        "blind-reviewer",
         "security-audit",
         "qa-test",
         "ut-tdd-tl",
@@ -368,7 +369,7 @@ describe("IT-ASSET-01/02: roster registry and guard consistency", () => {
     expect(result.ok).toBe(true);
     expect(result.missingFromRoster).toEqual([]);
     expect(result.nameMismatches).toEqual([]);
-    expect(result.allowlistedPresent).toBe(19);
+    expect(result.allowlistedPresent).toBe(20);
     expect(result.nonAllowlisted).toEqual([]);
   });
 });

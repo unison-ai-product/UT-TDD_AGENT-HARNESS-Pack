@@ -2,16 +2,17 @@ import type {
   VerificationProfile,
   VerificationProfileId,
   VerificationSignal,
-} from "./verification-profile-types";
+} from "./verification-profile-types.ts";
 
 export const PROFILES: Record<VerificationProfileId, VerificationProfile> = {
   "bun-unit": {
     id: "bun-unit",
     label: "Bun/Vitest unit regression",
-    command: "bun run test",
+    // command と PROFILE_RUNNERS は同一の起動形を指す (snapshot runner が SSoT)。
+    command: "node scripts/run-vitest-snapshot.ts",
     sourceType: "builtin",
     packageName: null,
-    executable: "bun",
+    executable: "node",
     authEnv: [],
     requiresNetwork: false,
     requiresDocker: false,
@@ -23,10 +24,10 @@ export const PROFILES: Record<VerificationProfileId, VerificationProfile> = {
   doctor: {
     id: "doctor",
     label: "UT-TDD doctor hard gate",
-    command: "bun run src/cli.ts doctor",
+    command: "node src/cli.ts doctor",
     sourceType: "builtin",
     packageName: null,
-    executable: "bun",
+    executable: "node",
     authEnv: [],
     requiresNetwork: false,
     requiresDocker: false,
@@ -41,14 +42,14 @@ export const PROFILES: Record<VerificationProfileId, VerificationProfile> = {
     command: "ut-tdd mcp inspect <name> --method tools/list",
     sourceType: "mcp",
     packageName: "@modelcontextprotocol/inspector",
-    executable: "bun",
+    executable: "node",
     authEnv: [],
     requiresNetwork: true,
     requiresDocker: false,
     requiresAuth: false,
     defaultEnabled: false,
     riskTier: "medium",
-    installHint: "bun add -D @modelcontextprotocol/inspector",
+    installHint: "npm install -D @modelcontextprotocol/inspector",
     sourceUrl: "https://github.com/modelcontextprotocol/inspector",
     triggerSignals: ["mcp_profile_changed"],
     allowedTools: ["tools/list"],
@@ -60,14 +61,14 @@ export const PROFILES: Record<VerificationProfileId, VerificationProfile> = {
     command: "ut-tdd verify run --profile playwright-mcp",
     sourceType: "mcp",
     packageName: "@playwright/mcp",
-    executable: "bun",
+    executable: "node",
     authEnv: [],
     requiresNetwork: false,
     requiresDocker: false,
     requiresAuth: false,
     defaultEnabled: false,
     riskTier: "medium",
-    installHint: "bun add -D @playwright/mcp",
+    installHint: "npm install -D @playwright/mcp",
     sourceUrl: "https://github.com/microsoft/playwright-mcp",
     triggerSignals: ["ui_flow", "mcp_profile_changed"],
     allowedTools: ["browser_navigate", "browser_snapshot", "browser_click"],
@@ -98,17 +99,17 @@ export const PROFILES: Record<VerificationProfileId, VerificationProfile> = {
   "vitest-browser-playwright": {
     id: "vitest-browser-playwright",
     label: "Vitest Browser Mode with Playwright provider",
-    command: "bun run test -- --browser",
+    command: "node scripts/run-vitest-snapshot.ts --browser",
     sourceType: "test-foundation",
     packageName: "@vitest/browser-playwright",
-    executable: "bun",
+    executable: "node",
     authEnv: [],
     requiresNetwork: false,
     requiresDocker: false,
     requiresAuth: false,
     defaultEnabled: false,
     riskTier: "low",
-    installHint: "bun add -D @vitest/browser-playwright",
+    installHint: "npm install -D @vitest/browser-playwright",
     sourceUrl: "https://vitest.dev/guide/browser/",
     triggerSignals: ["ui_flow"],
   },
@@ -145,7 +146,7 @@ export const PROFILES: Record<VerificationProfileId, VerificationProfile> = {
     requiresAuth: false,
     defaultEnabled: false,
     riskTier: "medium",
-    installHint: "bun add -D testcontainers",
+    installHint: "npm install -D testcontainers",
     sourceUrl: "https://node.testcontainers.org/",
     triggerSignals: ["db_integration"],
   },
@@ -162,7 +163,7 @@ export const PROFILES: Record<VerificationProfileId, VerificationProfile> = {
     requiresAuth: false,
     defaultEnabled: false,
     riskTier: "low",
-    installHint: "bun add -D msw",
+    installHint: "npm install -D msw",
     sourceUrl: "https://mswjs.io/",
     triggerSignals: ["api_mock_gap"],
   },
@@ -173,9 +174,11 @@ export const PROFILES: Record<VerificationProfileId, VerificationProfile> = {
 export const PROFILE_RUNNERS: Partial<
   Record<VerificationProfileId, readonly [string, readonly string[]]>
 > = {
-  "bun-unit": ["bun", ["run", "test"]] as const,
-  doctor: ["bun", ["run", "src/cli.ts", "doctor"]] as const,
-  "vitest-browser-playwright": ["bun", ["run", "test", "--", "--browser"]] as const,
+  "bun-unit": ["node", ["scripts/run-vitest-snapshot.ts"]] as const,
+  doctor: ["node", ["src/cli.ts", "doctor"]] as const,
+  // "--" は付けない: snapshot runner は残余 argv をそのまま vitest へ渡すため、
+  // package-manager 消費前提の "--" は素通りして vitest の引数を汚す (blind review R2)。
+  "vitest-browser-playwright": ["node", ["scripts/run-vitest-snapshot.ts", "--browser"]] as const,
 };
 
 export const SIGNAL_TO_PROFILE: Record<VerificationSignal, VerificationProfileId[]> = {

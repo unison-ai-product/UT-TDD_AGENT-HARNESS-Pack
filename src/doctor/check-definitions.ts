@@ -1,6 +1,6 @@
-import { buildDoctorCheckDefinitionGroups } from "./check-definition-groups";
-import type { DoctorCheckDefinition, DoctorOptions } from "./runner";
-import type { DoctorDeps } from "./runtime-state";
+import { buildDoctorCheckDefinitionGroups } from "./check-definition-groups.ts";
+import type { DoctorCheckDefinition, DoctorOptions } from "./runner.ts";
+import type { DoctorDeps } from "./runtime-state.ts";
 
 export function buildFullDoctorCheckDefinitions(
   deps: DoctorDeps,

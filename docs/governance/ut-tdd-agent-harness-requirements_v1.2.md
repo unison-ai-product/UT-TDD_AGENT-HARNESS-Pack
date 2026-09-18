@@ -441,8 +441,8 @@ VALID_SUB_DOCS = {
   L1: ["business", "functional", "screen", "technical", "nfr"],                          # 5 種
   L2: ["screen-list", "screen-flow", "wireframe", "ui-element"],                          # 4 種
   L3: ["business", "functional", "nfr", "screen-functional"],                             # 3 コア + 1 FE (screen-functional = 画面/UI 機能要件、② プロダクト選択 UI 有時)
-  L4: ["data", "architecture", "function", "external-if", "ui-standard",
-       "report", "batch", "notification", "code-value"],                                  # 4 コア + 5 標準成果物 (screen は L2 専用層が持つ。ui-standard = FE 設計標準 = data の FE 対)
+  L4: ["data", "architecture", "function", "external-if", "security", "ui-standard",
+       "report", "batch", "notification", "code-value"],                                  # 4 コア + security + 5 標準成果物 (screen は L2 専用層が持つ。ui-standard = FE 設計標準 = data の FE 対)
   L5: ["internal-processing", "module-decomposition", "physical-data", "if-detail",
        "ui-detail"],                                                                      # 4 コア + 1 FE (ui-detail = FE 内部設計 component/state/routing、② プロダクト選択 UI 有時)
   L6: ["function-spec", "class-design", "edge-case", "screen-spec"],                       # 3 コア + 1 FE (screen-spec = per-screen 機能設計、② プロダクト選択 UI 有時)
@@ -460,6 +460,8 @@ PLAN ID 命名は `PLAN-L<N>-<NN>-<sub-doc-slug>` (例: `PLAN-L1-03-screen-requi
 > **FE/UI 設計 doc カタログ vocabulary 登録 (2026-06-25、PLAN-L4-14 §4)**: [document-system-map.md](./document-system-map.md) §1c が定義する per-layer FE/UI 設計 doc カバレッジ (左腕) のうち、これまで「穴 + 未登録候補 slug」だった L3/L5/L6 の FE 設計 doc 型を `VALID_SUB_DOCS` へ登録し、定義を機械可知にする。**L3 `screen-functional`** (画面/UI 機能要件 + 画面 AC、SyRS/BDD) / **L5 `ui-detail`** (FE 内部設計 = component 分割・状態管理・routing・画面内部処理、IEEE 1016 SDD) / **L6 `screen-spec`** (per-screen 機能設計 = 項目/イベント/バリデーション/画面内遷移、Nablarch システム機能設計書(画面) 相当)。いずれも §G.13 の「**② プロダクト選択 (UI 有時)**」(UI を持つ製品のみ起票、BE-only/no-UI は `skip_sub_doc[].reason` で省略)。**vocabulary 登録が先・各型の必須 § 構造定義と body 実体化は body 起票時 (作成段階) に後続** (`report`/`batch` 等を vocabulary 先行登録した PLAN-L7-97 §4 と同方針、speculative な § 定義をしない)。正本は `src/schema/index.ts` の `VALID_SUB_DOCS`、左腕カバレッジ定義の正本は document-system-map §1c。
 >
 > **FE/UI 本文実体化 (2026-06-30、PLAN-L3-06 / PLAN-L5-09 / PLAN-L6-36)**: harness central UI は L3 `screen-functional`、L5 `ui-detail`、L6 `screen-spec` の本文を confirmed 化済み。上記の vocabulary-first rule は一般的なプロダクト選択ルールとして残すが、本プロダクトでは `frontend-design-coverage` が FE 左腕 6 本文ファイルすべてを要求し、pending 0 を報告する。
+
+> **L4 security slot 追加 (2026-07-09、PLAN-L4-16)**: `security` は認証・認可・秘密情報・監査証跡・配布前検査の L4 降下先である。`docs/governance/vmodel-document-catalog.md` の `DOC-L4-SECURITY` と同期し、`docs/design/harness/L4-basic-design/security.md` を正本 body とする。L6 の docs 横断 secret-scan (`PLAN-L6-62`) はこの L4 方針を上流設計として参照する。正本は `src/schema/index.ts` の `VALID_SUB_DOCS`。
 
 > **内部資産拡張 sub-doc (REVERSE-01 V4 注記、2026-06-04)**: harness 自身が統制する内部資産 (roster / skill-pack / drift-lint) は、上記コア sub-doc enum とは別の **拡張 sub-doc** として L4/L5 に存在する (実 PLAN: `PLAN-L4-10〜13` (internal-asset-master/roster/skill-pack/drift-lint) / `PLAN-L5-05〜07` (roster/skill/drift))。これらは製品ドメインの設計 sub-doc でなく harness メタ資産のため、コア `VALID_SUB_DOCS[L4|L5]` の件数確定 (5/4 種) には含めず、**拡張点**として別管理する。lint engine 実装時は `VALID_SUB_DOCS` を「コア + 内部資産拡張」の 2 群で持つ (件数 audit はコア群で行い、拡張群は allow-list 追加)。
 
@@ -1125,9 +1127,12 @@ add-* 完了時、既存 PLAN との双方向 reference を更新:
 
 | 要件 | 仕様 |
 |------|------|
-| event trigger | `harness-check.yml` は `pull_request: branches: [main]` event で実行 |
+| event trigger | `harness-check.yml` は base branchを限定しない全 `pull_request` eventで実行し、`push`は`branches: [main]`だけに限定 |
 | 検出ロジック | PR head が `poc/*` で base が `main` なら subjob `poc-no-merge-guard` が exit 1 |
 | 例外 | なし (poc/* は S4 confirmed 後に Reverse → feature/* で再 PR する) |
+
+`poc/* → main` の拒否はGitHub event filterではなく、全PRで起動したjob内のhead/base guardで行う。
+これによりstacked PR（baseがmain以外）も同じ`harness-check`を必ず通り、base差による未検証経路を作らない。
 
 ## 6.5 CODEOWNERS bootstrap 2 段階
 
@@ -1169,38 +1174,66 @@ PR 内の全 commit が Conventional Commits 形式に従う (`harness-check` �
 - [ ] 全 commit が Conventional Commits 形式 (commitlint subjob で検証)
 - [ ] Phase 0-A → 0-B 2-stage で CODEOWNERS bootstrap
 
-## 6.8 PLAN git ライフサイクル (Issue 起点スパイン、TL review 2026-06-02)
+## 6.8 PLAN git ライフサイクル (通常 Forward / Forward escape 二経路、PO rule 2026-07-15)
 
 > **対象レイヤー**: 本節は **harness の利用者チームに課す製品仕様** (git topology) であり、harness 開発者 (solo / main 直) の手順ではない。Phase 0-A (solo) では本節の branch/PR 強制は緩和され、Phase 0-B (team) で有効化する (§6.5)。
 
-### 6.8.1 Issue = 問題起点スパイン
+### 6.8.1 Issue = Forward escape 境界、Execution Ledger = 実行正本
 
-UT-TDD の全作業は **問題 / ギャップ起点**である。Forward 自体も「発注元 Issue (要件 = 埋めるべきギャップ)」起点 (構想書 §2.5 経路1 entry)。よって **GitHub Issue を作業追跡のスパイン (背骨)** とし、次の一本道で管理する:
+通常 Forward は PLAN Asset / revision と Execution Ledger を正本として
+`plan → pair-freeze → implement → trace-freeze → review → accept` を進む。この正常経路に
+GitHub Issue を必須化してはならない。発注元 Issue が既にある場合は参照してよいが、Issue の有無を
+Forward の状態遷移条件にしない。
+
+作業が通常 Forward を離れる時だけ、**GitHub Issue を typed Forward escape の外部境界として必須化**する。
+対象は11駆動モデル (Discovery / Scrum / Reverse / Recovery / Incident / Refactor / Retrofit /
+Add-feature / Research / design-bottomup / version-up) への退出と、block / reject / reopen / supersede /
+preemptive work / time-bounded defer である。後者はescape typeとして11駆動モデルの一つへ明示routeする。
+Execution Ledger が正本であり、GitHub はその冪等 projection とする。
+旧仕様「全作業を Issue 起点とする」は本節で supersede する。
+escape では drive model、origin、再合流先、Issue 投影証跡を束縛し、通常 Forward のために空 Issue を捏造しない。
+
+通常 Forward:
 
 ```
-問題/signal 検出 or 改善 backlog エントリ
-  → Issue 起票 (問題・signal の記録)
-  → signal→mode routing (§7.8.1) で応答 mode 決定
-  → PLAN 起票 (Issue を解決する V-model 作業単位)
+PLAN Asset / revision 起票
   → branch (§6.1 kind↔prefix で隔離)
   → commit (§6.8.3 単位)
   → PR + CI (§6.9 単位で検証)
-  → merge + Issue close
+  → cross-review + merge + accept
 ```
 
-- **起点は「実観測 signal」と「計画的改善 backlog エントリ (§1.10.G.12 improvement-backlog)」の双方**。Refactor / Retrofit のような能動的負債対処も backlog 起点 Issue として合法 (signal が無くても backlog エントリがあれば起票可)。
-- off-Forward (Reverse / Recovery / Incident / Discovery / Scrum / Refactor / Retrofit / Add-feature) は全て「問題への応答」。右腕テスト失敗の差し戻し (§3.1.5) も問題 = Issue 化する。
-- 起票主体は **Phase 0 では手動 default** (harness は `next_action` に起票手順を提示するのみ)。半自動 (issue template URL suggest) / 自動 (webhook) は将来 PLAN で詳細設計。
+Forward escape:
 
-### 6.8.2 Issue / PLAN / branch の粒度 (1:1:1 原則)
+```
+escape signal 観測
+  → Execution Ledger episode E0-E2 append
+  → drive_model を明示選択して Issue を冪等投影
+  → 駆動モデル内 plan / test / verify
+  → re-entry certificate + Forward 中間テスト
+  → Forward 再合流後テスト
+  → draft PR → cross-review → merge gate → main merge
+  → Issue close projection + 設計学習 telemetry
+```
+
+- escape Issue は `drive_model`, `escape_type`, origin PLAN Asset / revision / L / Forward state,
+  escape reason, re-entry target/policy, recurrence identity を必須にする。未知値、originとの不整合、driveと
+  Issue/PLAN/branch kindの不整合はfail-closeする。
+- GitHub障害時もepisodeを失わない。outboxをretryし、同じidempotency keyからIssueを重複作成しない。
+- escape頻度をL/type/cause/drive_model別に集計し、反復原因を上流のForward仮定・設計判断・evidence policyへ戻す。
+
+### 6.8.2 Issue / PLAN / branch の粒度
 
 | 関係 | 規約 |
 |------|------|
-| 基本 | **1 Issue = 1 PLAN (または 1 Master hub) = 1 branch** |
+| 通常 Forward | **1 PLAN Asset revision = 1 schedule branch**。Issue は任意参照であり起票を強制しない |
+| Forward escape | **1 escape episode = 1 Issue = 1駆動モデルentry branch**。複数PLANを束ねる場合はepisode hubを正本にする |
 | sub-doc 分割時 (L1-L6) | 子 sub-doc PLAN は **Master hub branch から派生**し、子 PR は Master hub PR にまとめて (squash) merge。子ごとに別 Issue/別 branch にしない (並行 merge 衝突回避) |
 | 既存バグの顕在化 | **別 Issue + 別 PR** で扱い、進行中 PR に混ぜない (運用ルール書 §2 踏襲) |
 
-PLAN frontmatter に **`github_issue_id`** (optional、Phase 0-B で recommended) を持たせ、`branch-kind-check` が「feature/* / hotfix/* branch の PLAN に `github_issue_id` 設定」を warn、Issue close 漏れ (merge 済なのに Issue open) を機械検知する (§8.6 失敗変換ループの一部)。PR body は `Closes #<github_issue_id>` を必須フィールドとする。
+PLAN frontmatter の `github_issue_id` は通常 Forward では optional、Forward escape では required とする。
+escape episodeを持つPR bodyだけ `Closes #<github_issue_id>` を必須にし、通常Forwardへ空Issueを捏造しない。
+`drive_model` とorigin/re-entry bindingはfrontmatter単体で二重正本化せず、Execution Ledger episode IDから参照する。
 
 ### 6.8.3 status × kind/mode × freeze → git アクション対応
 
@@ -1213,7 +1246,39 @@ PLAN frontmatter に **`github_issue_id`** (optional、Phase 0-B で recommended
 | L7 trace freeze (G7) | 実装 commit → **impl PR を ready-for-review に昇格** (4 artifact + 8 edge + coverage が揃う点) |
 | G7 通過 (harness-check green) | **feature/* → main merge** (impl の merge gate = G7) |
 | L12 (G12) | deploy gate、po サインオフで本番反映 |
-| PLAN completed / Forward 合流 | Issue を `Closes #NN`。off-Forward は fullback / routing 完了で close |
+| PLAN completed / Forward 合流 | escape episodeを持つ場合だけIssueを `Closes #NN`。通常ForwardはIssueなしで完了可。off-Forwardはfullback / routing完了でclose |
+
+Forward escapeのmergeは、re-entry certificate、駆動モデル内検証、Forward中間テスト、再合流後テスト、
+別provider/modelのcross-review PASS、必須CI、最新HEAD一致を全て満たすまで禁止する。
+
+### 6.8.3A 実行台帳イベントライフサイクル
+
+Forward escapeは次のappend-only event系列を持つ。番号を飛ばす、順序を戻す、GitHub stateから
+正本eventを捏造することを禁止する。各eventは`episode_id`, `sequence`, `occurred_at`, `actor`,
+`payload_digest`, `previous_event_digest`を持つ。
+
+| イベント | 意味 | 必須証拠 |
+|---|---|---|
+| E0 | 離脱を観測 | origin asset/revision/L/state、reason、recurrence identity |
+| E1 | 離脱を分類 | `escape_type`、検証対象のassumption/decision |
+| E2 | 駆動モデルを選択 | `drive_model`、選択根拠、human override evidence |
+| E3 | Issue投影を要求 | idempotency key、projection payload digest |
+| E4 | Issue投影を確認 | repository、issue number/node id、remote version |
+| E5 | 駆動PLANを凍結 | PLAN revision、V-pair obligations、schedule branch |
+| E6 | 駆動検証がGreen | drive固有test profileとgreen evidence |
+| E7 | 再合流を提案 | target Forward state、re-entry policy |
+| E8 | Forward中間テストがGreen | 離脱から合流点までの中間test evidence |
+| E9 | 再合流証明を発行 | E6/E8、origin/target binding、独立検証digest |
+| E10 | Forwardへ再合流 | accepted PLAN revision / state transition |
+| E11 | 再合流後テストがGreen | 合流後Forward test evidence |
+| E12 | draft PRを投影 | PR number、head/base、exact head SHA |
+| E13 | cross-reviewを受理 | author/reviewer別provider、verdict、review digest |
+| E14 | mergeを許可・確認 | required CI、HEAD一致、accept、merge commit |
+| E15 | episodeを閉じ学習 | Issue close、outcome、L/type/cause集計、upstream action |
+
+E3/E4とE12/E14はoutbox/inboxで冪等にする。remote webhookはinboxへ保存してから既存episodeへ照合し、
+未知episode・署名不正・sequence逆行・payload digest不一致をfindingとして隔離する。GitHubはExecution
+Ledgerを直接上書きせず、remote observation eventだけを追加できる。
 
 ### 6.8.4 右腕 (L8-L14) CI 失敗時の差し戻しスパイン (TL Critical fix)
 
@@ -1456,8 +1521,10 @@ runner コスト比 Linux : Windows : macOS ≒ **1 : 1.67 : 10** → **PR は L
 ### 6.9.3 GitHub Actions 構成方針
 
 - **Required check は `harness-check` 1 本**に集約 (1 本集約方針は構想書 §7.2)。**workflow レベル `on.paths` フィルタは使わない** (skip された required check が `pending` で PR を永久ブロックする既知問題 = GitHub 公式 doc「Troubleshooting required status checks」)。
+- `pull_request`はbare trigger（既定の`opened` / `synchronize` / `reopened`）を許可する。`types`を明示する場合は`opened` / `synchronize` / `reopened` / `ready_for_review`を必ず含める。値はGitHub Actions `pull_request` activity typeの有限allowlistに限定し、未知値・非文字列・重複をfail-closeする。
+- `github-ci-policy`のpolicy選択は検査対象workflow本文から推論せず、`package.json.utTdd.artifactProfile`をartifact catalog identityとしてsource/Pack profileを解決する。YAML root/on/job/stepsの構造異常・role/profile不整合・空concurrencyは例外にせずstructured violationを返し、権限は4 artifactすべてで`permissions: {contents: read}`との完全一致だけを受理する。
 - 代わりに **単一 `harness-check` job に集約し、`dorny/paths-filter` + 各 step の `if` 条件**で分岐する (雛形参照)。job 自体は (draft を除き) 常に起動するため required check が `pending` で詰まらず、未該当 step は skip されても job は success/failure を必ず報告する (§6.3 matrix に `docs-only` 判定列を追加)。複数 job に分割する場合のみ、最終 `harness-check` aggregator job に `needs: [...]` + `if: always()` を付け、それだけを Required Status Check に登録する。
-- **concurrency**: group = `harness-check-${{ github.head_ref }}`、`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` (main は deploy 中断防止で false。重い vmodel-lint の race を避けるため group に workflow 名を含める)。
+- **concurrency**: group = `harness-check-${{ github.workflow }}-${{ github.head_ref || github.ref }}`、`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` (main は deploy 中断防止で false。重い vmodel-lint の race を避けるため group に workflow 名を含める)。
 - **draft PR では重 subjob (vitest / vmodel-lint) を skip** (`if: github.event.pull_request.draft == false`)、ready-for-review で起動。
 - **GitHub Merge Queue は不採用** (Free/Team の private repo では利用不可、Enterprise Cloud 専用)。直列化は concurrency で代替。
 
@@ -1465,7 +1532,7 @@ runner コスト比 Linux : Windows : macOS ≒ **1 : 1.67 : 10** → **PR は L
 # .github/workflows/harness-check.yml (雛形、§6.3 matrix を実装。利用者チーム repo に harness が配布する template)
 name: harness-check
 on:
-  pull_request: { types: [opened, synchronize, ready_for_review] }
+  pull_request: { types: [opened, synchronize, reopened, ready_for_review] }
   push: { branches: [main] }
 concurrency:
   group: harness-check-${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -1871,7 +1938,7 @@ output:
 |------|----------|----------|
 | **pre-commit** | gitleaks / commitlint format / 軽量 lint (markdown / yaml) + `ut-tdd self-test --smoke` | < 5s |
 | **pre-push** | §5.3 session 終了前 4 項目 + 軽量 plan lint + 差分対象 self-test | < 15s |
-| **harness-check (CI on PR)** | §6.3 の 8 subjob (重い検証 + 全テスト + 回帰確認) | 数分 |
+| **harness-check (CI on every PR base)** | §6.3 の 8 subjob (重い検証 + 全テスト + 回帰確認)。`pull_request`に`branches` / `branches-ignore`を置かない | 数分 |
 
 `vmodel_lint` の完全検証は **pre-push と CI のみ** で実行。pre-commit には乗せない。
 
@@ -1898,6 +1965,7 @@ output:
 - [ ] pre-commit / pre-push / CI の責任分離 (§7.5) を守る
 - [ ] `ut-tdd self-test --smoke` はネットワーク不要・外部 AI runtime 不要で通る
 - [ ] PR merge gate は GitHub Actions `harness-check` のみを正本とし、ローカル hook 成否だけを merge 条件にしない
+- [x] `harness-check` は全PR base/pathで発火し、`pull_request`の不正な型・base/path filter・不完全/未知activity types・trigger欠落、`push: branches: [main]`の欠落/paths filter、workflow構造異常、権限誤指定、検査対象本文によるprofile偽装を`github-ci-policy`がfail-closeする (PLAN-L6-82 / U-CIPOL-001..012、2026-07-15)
 - [x] **ルール同一性 (MUST、構想書 §2.1.0)**: gate / V-model / checklist / enum / route の正本は `ut-tdd` core + governance docs に単一定義され、`.claude/CLAUDE.md` / `AGENTS.md` がルールを再定義・分岐していない (doctor が両 adapter のルール重複・drift を検出し、検出時 fail)。`src/lint/rule-drift.ts` + doctor `checkRuleDrift` が AGENTS / CLAUDE adapter docs の必須 mode / command marker drift を fail-close 検出 (2026-06-08)。
 - [x] **rule parity test**: 同一 PLAN / diff を claude-only と codex-only で処理した際、`ut-tdd gate` / `ut-tdd plan lint` / `ut-tdd vmodel lint` の **判定結果と exit code が一致**する (runtime 差で結果が変わらない)。`ut-tdd gate` の判断ゲート review-tier は `evaluateGateReview` parity test で codex-only/claude-only 同一結果を機械検証 (2026-06-08)。
 - [x] **hybrid 機能分散 (MUST、構想書 §2.1.0)**: `ut-tdd team run` が `hybrid` で判断系 / 実行系を別 runtime に割り当て、同一 role の同一 runtime 重複・同一作業の二重実行を exit 1 で弾く (§7.1 team run 検証 7)。`validateTeamRun` が worker/reviewer provider 分離・duplicate role/provider を fail-close (2026-06-08)。
@@ -2015,6 +2083,12 @@ skill pack は単独の助言文書ではなく、以下の gate に接続する
 - signal が本表に無い場合は `exit 2` (not-available) + 上流委譲手順を stderr に返す (fail ではなく明示フォールバック)。
 - 複数 token が同時に一致する場合は **最長 token 一致を優先**する。例: `regression_prod` は汎用 `regression` より具体的な incident token として解決し、`forced_stop` は汎用 `stop` より具体的な recovery token として解決する。
 - **PLAN 入口 certificate**: 2026-07-01 以降に作成する non-archived PLAN は frontmatter に `route_signal` と `route_mode` を記録する。`route_signal` は本表の token/alias、`route_mode` は `ut-tdd route eval` / `routeSignalCandidates` が返す候補 mode と一致しなければならない。不一致または欠落は `plan-governance` の `route_certificate_missing` / `route_certificate_mismatch` で fail-close する。既存 PLAN は遡及 backfill せず、future authoring の入口適合を強制する。
+- **PLAN Admission**: 新規PLANは `ut-tdd plan draft` だけがauthoringする。Admissionはsignal、drive model、
+  完全な許可tuple `(kind, layer, sub_doc, workflow_phase, branch)`、工程表targetを検証し、未知/曖昧signal、
+  未登録tuple、過去日時、`archived`、`--force`では回避できない。通常ForwardはIssue不要、Forward escapeは
+  origin PLAN/revision/state、escape reason、reentry target、E4投影済みGitHub Issueを必須とする。成功時だけ
+  ID reservation、append-only admission receipt、PlanAsset revision、Markdown、projectionを原子的に作成し、
+  失敗時のfile/ledger/DB/outboxは0件とする。direct edit/rename/addはreceipt digest不一致としてhook、pre-push、CIがfail-closeする。
 
 ## 7.8.2 RecommendedCommandV1 schema 要件
 

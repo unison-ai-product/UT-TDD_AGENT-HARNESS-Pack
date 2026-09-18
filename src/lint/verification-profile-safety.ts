@@ -1,5 +1,5 @@
-import { normalizePath } from "./shared";
-import { PROFILES } from "./verification-profile-catalog";
+import { normalizePath } from "./shared.ts";
+import { PROFILES } from "./verification-profile-catalog.ts";
 import type {
   ExternalProfileActivationInput,
   ExternalProfileActivationPlan,
@@ -11,7 +11,7 @@ import type {
   VerificationProfileFindingCode,
   VerificationProfileSafetyInput,
   VerificationProfileSafetyResult,
-} from "./verification-profile-types";
+} from "./verification-profile-types.ts";
 
 function getVerificationProfile(id: string): VerificationProfile | null {
   if (!Object.hasOwn(PROFILES, id)) return null;

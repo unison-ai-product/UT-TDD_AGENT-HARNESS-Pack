@@ -3,7 +3,7 @@ import {
   analyzeG10UxWorkflow,
   g10UxWorkflowMessages,
   loadG10UxWorkflowInput,
-} from "../src/lint/g10-ux-workflow";
+} from "../src/lint/g10-ux-workflow.ts";
 
 const workflowBlock = [
   "## G10-WORKFLOW",

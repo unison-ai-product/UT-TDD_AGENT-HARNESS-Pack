@@ -26,6 +26,7 @@ type RelationFindingCode =
   | "external-not-allowed"
   | "missing-projection"
   | "stale-edge"
+  | "invalid-planned-artifact"
   | "missing-test-coverage";
 
 interface RelationNode {
@@ -39,6 +40,8 @@ interface RelationEdge {
   from: string;
   to: string;
   kind: RelationEdgeKind;
+  /** planned は draft PLAN の未materialize成果物だけに許可する。 */
+  lifecycle?: "materialized" | "planned";
 }
 
 interface RelationFinding {
@@ -57,8 +60,11 @@ interface RequirementInput {
 interface PlanInput {
   id: string;
   path?: string;
+  status?: string;
   requirements?: string[];
   generates?: string[];
+  /** generates path ごとの実体化状態。planned は draft PLAN にだけ許可する。 */
+  availability?: Record<string, "materialized" | "planned">;
 }
 
 interface DesignDocInput {

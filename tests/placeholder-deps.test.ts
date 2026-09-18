@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { analyzeDescentObligations } from "../src/lint/descent-obligation";
-import { DEFAULT_DESCENT_ADJACENCY } from "../src/lint/descent-obligation-types";
+import { analyzeDescentObligations } from "../src/lint/descent-obligation.ts";
+import { DEFAULT_DESCENT_ADJACENCY } from "../src/lint/descent-obligation-types.ts";
 import {
   analyzePlaceholderDeps,
   type PlaceholderDepsDoc,
   placeholderDepsMessages,
-} from "../src/lint/placeholder-deps";
+} from "../src/lint/placeholder-deps.ts";
 
 /**
  * U-PHDEPS: placeholder_deps waiting_layer 2 類型 (IMP-107、physical-data §8 / A-85 I-3)。

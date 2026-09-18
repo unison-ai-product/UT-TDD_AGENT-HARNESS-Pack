@@ -15,6 +15,31 @@ applies_to:
     - Add-feature
     - Recovery
     - Incident
+decision_points:
+  - when: "A local run is green but the same push fails on CI."
+    choose: "Treat it as evidence one of the pre-deploy gate commands was skipped locally."
+    over: "Assuming CI is flaky or bypassing with `--no-verify` to unblock the push."
+    because: "The skill states a local-green/CI-red split almost always means a gate step was skipped, not that CI is wrong; `--no-verify` must never be used to route around it."
+  - when: "Deploying an Add-feature increment that is not yet fully verified end-to-end."
+    choose: "Deploy flag-off and enable post-verify."
+    over: "Deploying flag-on and verifying in production traffic."
+    because: "Flag-off deploys give instant rollback (a config flip) versus a full redeploy/rollback cycle for flag-on changes."
+  - when: "A deployed change trips a Sev1 rollback trigger (error rate spike, primary-path non-2xx/3xx, data-integrity failure)."
+    choose: "Roll back immediately without waiting for a second opinion."
+    over: "Holding the deploy live pending further investigation or a second reviewer."
+    because: "The skill states rollback is safer than extended downtime for Sev1 triggers; waiting extends user-facing impact for no added certainty."
+  - when: "A deploy requires both a DB migration and an app-code change, and rollback becomes necessary."
+    choose: "Run the DB down-migration before reverting app code, then confirm integrity."
+    over: "Reverting app code first and migrating the database afterward."
+    because: "Reverted app code expecting the old schema against a still-migrated database produces data-integrity failures; migration-before-code-revert keeps schema and code in sync at every step."
+  - when: "A schema change is needed (e.g., a column rename or a NOT NULL addition) on a live table."
+    choose: "Use a staged expand-contract sequence across multiple deploys."
+    over: "Applying the rename or constraint in a single deploy."
+    because: "The skill classifies rename/NOT-NULL-add as staged, multi-deploy operations (add -> dual-write -> read-new -> drop-old); doing them in one deploy risks a lock or a window of write failures on live data."
+  - when: "A rollback has completed and the system is stable again."
+    choose: "Open a Recovery PLAN with root cause, fix classification, and a regression test before considering the incident closed."
+    over: "Treating the successful rollback itself as the resolution."
+    because: "The skill states a rollback is not a resolution; without the follow-up PLAN and regression test, the same failure can redeploy unnoticed."
 ---
 
 # ci deploy and rollback
@@ -35,9 +60,9 @@ not after a problem appears.
 All must be green; a failure blocks the deploy.
 
 ```
-bun run lint          # Biome check (full output — do not pipe to tail)
-bun run test          # Vitest
-bun run typecheck     # tsc --noEmit
+npm run lint          # Biome check (full output — do not pipe to tail)
+npm run test          # Vitest
+npm run typecheck     # tsc --noEmit
 ut-tdd doctor         # harness structural health + plan governance
 ut-tdd plan lint      # PLAN schema, steps, dependency existence
 ut-tdd review --uncommitted

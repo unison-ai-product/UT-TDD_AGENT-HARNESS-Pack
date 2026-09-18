@@ -8,7 +8,7 @@ import {
   REQUIRED_ROUTING_DOC_MARKERS,
   REQUIRED_ROUTING_ORACLES,
   REQUIRED_SUBAGENT_GUARD_MARKERS,
-} from "./proposal-document-coverage-policy";
+} from "./proposal-document-coverage-policy.ts";
 
 export interface ProposalDocumentCoverageLintInput {
   repoRoot: string;

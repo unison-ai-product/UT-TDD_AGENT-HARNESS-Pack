@@ -7,14 +7,14 @@ import {
   checkOracleTestTrace,
   checkPlanArtifactExistence,
   checkTrackedCanonical,
-} from "../src/doctor/index";
+} from "../src/doctor/index.ts";
 import {
   checkImplPlanTrace as checkImplPlanTraceAdapter,
   checkMergedPlanStatus as checkMergedPlanStatusAdapter,
   checkOracleTestTrace as checkOracleTestTraceAdapter,
   checkPlanArtifactExistence as checkPlanArtifactExistenceAdapter,
   checkTrackedCanonical as checkTrackedCanonicalAdapter,
-} from "../src/doctor/source-trace";
+} from "../src/doctor/source-trace.ts";
 
 describe("doctor source trace adapters", () => {
   it("keeps source/artifact trace gates fail-closed through the extracted module", () => {

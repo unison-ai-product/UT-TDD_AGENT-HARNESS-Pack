@@ -5,7 +5,7 @@
  */
 import { z } from "zod";
 
-/** §1.3 VALID_KINDS (12 種) */
+/** §1.3 VALID_KINDS (13 種) */
 export const VALID_KINDS = [
   "charter",
   "impl",
@@ -19,6 +19,7 @@ export const VALID_KINDS = [
   "recovery",
   "troubleshoot",
   "research",
+  "verify",
 ] as const;
 export const kindSchema = z.enum(VALID_KINDS);
 export type Kind = z.infer<typeof kindSchema>;
@@ -47,6 +48,8 @@ export type Layer = z.infer<typeof layerSchema>;
 
 // L4 標準成果物カタログ = 外部設計成果物。report/batch/notification/code-value の grounding と
 // 区分 (② プロダクト選択) は docs/governance/document-system-map.md §1b を正本とする。
+// security は PLAN-L4-16 で L4 slot として confirmed。認証/認可/秘密情報/監査境界を扱う
+// security/privacy work の降下先であり、L6-62 docs 横断 secret-scan の上流正本になる。
 // FE/UI 設計 doc カタログ (左腕、各 L の per-layer フロント設計 doc) の grounding は §1c を正本とする:
 //   L1 screen / L2 screen-*+ui-element / L3 screen-functional / L4 ui-standard / L5 ui-detail / L6 screen-spec。
 //   screen-functional/ui-detail/screen-spec は ② プロダクト選択 (UI 有時)。
@@ -61,6 +64,7 @@ export const VALID_SUB_DOCS = {
     "architecture",
     "function",
     "external-if",
+    "security",
     "ui-standard",
     "report",
     "batch",
@@ -84,6 +88,7 @@ export const VALID_SUB_DOC_VALUES = [
   "architecture",
   "function",
   "external-if",
+  "security",
   "ui-standard",
   "report",
   "batch",

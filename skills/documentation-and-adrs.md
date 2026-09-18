@@ -16,6 +16,27 @@ applies_to:
     - Reverse
     - Retrofit
     - Discovery
+decision_points:
+  - when: "A design doc gate condition needs to describe when the freeze passes"
+    choose: "an executable contract naming the actor and command, e.g. \"CI must be green and `ut-tdd doctor` must exit 0 before pair-freeze\""
+    over: "a passive summary like \"the freeze passes when tests are green\""
+    because: "passive gate conditions are not falsifiable and fail freeze-review for bare-pronoun/passive-voice violations"
+  - when: "Half-width kana (U+FF61-FF9F) or U+FFFD appears anywhere in the doc being frozen"
+    choose: "block the freeze and restore the doc from the last clean git revision"
+    over: "editing around the corrupted characters and freezing anyway"
+    because: "these markers indicate mojibake corruption from an external editor, not a fixable typo, and a corrupted save must not be frozen"
+  - when: "A Reverse R2 pass documents observed architecture from code"
+    choose: "describe the system strictly as-is, including known warts"
+    over: "describing the aspirational/intended architecture"
+    because: "R2 is the as-is baseline that R3/R4 build on; conflating as-is with aspirational hides the real gap being back-filled"
+  - when: "An ADR reaches the point of setting Status"
+    choose: "leave Status at `Proposed` until `ut-tdd review --uncommitted` is clean and `ut-tdd doctor` exits 0"
+    over: "setting Status to `Accepted` as soon as the Decision text is written"
+    because: "PLAN `dependencies` reference ADRs by Status; a prematurely Accepted ADR with unresolved review findings fails governance lint downstream"
+  - when: "A new term is introduced in a design doc or ADR"
+    choose: "match the existing L0 glossary spelling, or add the term to the glossary in the same change"
+    over: "using a near-synonym that reads naturally in context"
+    because: "synonym drift between docs and the glossary causes `rule-drift` / adapter checks to fail even when the prose is correct"
 ---
 
 # documentation and adrs

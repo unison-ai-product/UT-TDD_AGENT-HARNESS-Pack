@@ -5,7 +5,7 @@
  * This keeps `hybrid` from becoming a false-positive when a wrapper exists but
  * cannot actually launch the provider CLI.
  */
-import { type AdapterProvider, isProviderCommandSpawnable } from "./adapter";
+import { type AdapterProvider, isProviderCommandSpawnable } from "./adapter.ts";
 
 export type ExecutionMode = "standalone" | "claude-only" | "codex-only" | "hybrid";
 

@@ -1,6 +1,120 @@
-import { analyzeDocConsistency, loadDocConsistencyDocs } from "../lint/doc-consistency";
-import { analyzeEntityCoverage, loadBusiness as loadEntityBusiness } from "../lint/entity-coverage";
-import { analyzeFrRegistry, loadFrDocs as loadFrRegistryDocs } from "../lint/fr-registry-audit";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { analyzeDocConsistency, loadDocConsistencyDocs } from "../lint/doc-consistency.ts";
+import {
+  analyzeEntityCoverage,
+  loadBusiness as loadEntityBusiness,
+} from "../lint/entity-coverage.ts";
+import { analyzeFrRegistry, loadFrDocs as loadFrRegistryDocs } from "../lint/fr-registry-audit.ts";
+import {
+  analyzeFixtureManifest,
+  fixtureManifestMessages,
+  parseContractSections,
+  parseFixtureManifest,
+  parseL8FixtureRows,
+} from "../lint/resource-kernel-fixture-manifest.ts";
+import {
+  analyzeResourceKernelPairMapping,
+  parseContractMappingRows,
+  parseFreezeAttributeRows,
+  parseLaneDeclarations,
+  parseRealRunnerTotal,
+  resourceKernelPairMappingMessages,
+} from "../lint/resource-kernel-pair-mapping.ts";
+
+const RGK_L8_DOC = "docs/test-design/harness/L8-integration-test-design.md";
+const RGK_FIXTURE_MANIFEST = "docs/test-design/harness/resource-kernel-fixture-manifest.yaml";
+const RGK_CONTRACT_DOC = "docs/plans/PLAN-L5-25-resource-kernel-physical-protocol.md";
+
+/**
+ * D0-R Resource Kernel の fixture 宣言と正本 manifest の突合を hard gate 検査
+ * (PLAN-L5-25 §7 pair-freeze 条件、issue #149)。
+ *
+ * 識別子の宣言だけで「fixture を freeze した」と読ませないための配線。とくに
+ * `status: planned` の entry が path を実在させていたら violation (実体の偽装検出)。
+ * doc 読み取り失敗も violation (fail-close)。
+ */
+export function checkResourceKernelFixtureManifest(repoRoot: string): {
+  messages: string[];
+  ok: boolean;
+} {
+  try {
+    const r = analyzeFixtureManifest({
+      rows: parseL8FixtureRows(readFileSync(join(repoRoot, RGK_L8_DOC), "utf8")),
+      manifest: parseFixtureManifest(readFileSync(join(repoRoot, RGK_FIXTURE_MANIFEST), "utf8")),
+      contractSections: parseContractSections(
+        readFileSync(join(repoRoot, RGK_CONTRACT_DOC), "utf8"),
+      ),
+      pathExists: (p) => existsSync(join(repoRoot, p)),
+    });
+    if (r.ok) {
+      const counts = Object.entries(r.statusCounts)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ");
+      return {
+        messages: [`resource-kernel-fixture-manifest — OK (fixture ${counts}、双方向孤児 0)`],
+        ok: true,
+      };
+    }
+    return {
+      messages: [
+        `resource-kernel-fixture-manifest — violation: ${fixtureManifestMessages(r).join(" / ")}`,
+      ],
+      ok: false,
+    };
+  } catch {
+    return {
+      messages: [
+        "resource-kernel-fixture-manifest — violation: L8 表 / fixture manifest / PLAN-L5-25 を読めなかった",
+      ],
+      ok: false,
+    };
+  }
+}
+
+/**
+ * D0-R の L5 物理契約 → L8 42 oracle 全数写像の双方向孤児 0 を hard gate 検査
+ * (PLAN-L5-25 §7.1 pair-freeze 条件、issue #149)。
+ *
+ * L8 freeze 属性表と PLAN-L5-25 §7.1 写像表を突合し、片側にしか現れない ID・
+ * lane 語彙逸脱・空属性を violation とする。doc 読み取り失敗も violation (fail-close)。
+ */
+export function checkResourceKernelPairMapping(repoRoot: string): {
+  messages: string[];
+  ok: boolean;
+} {
+  try {
+    const l8Markdown = readFileSync(join(repoRoot, RGK_L8_DOC), "utf8");
+    const r = analyzeResourceKernelPairMapping({
+      freezeRows: parseFreezeAttributeRows(l8Markdown),
+      mappingRows: parseContractMappingRows(readFileSync(join(repoRoot, RGK_CONTRACT_DOC), "utf8")),
+      laneDeclarations: parseLaneDeclarations(l8Markdown),
+      declaredRealRunnerTotal: parseRealRunnerTotal(l8Markdown),
+    });
+    if (r.ok) {
+      const lanes = Object.entries(r.laneCounts)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ");
+      return {
+        messages: [`resource-kernel-pair-mapping — OK (lane ${lanes}、双方向孤児 0)`],
+        ok: true,
+      };
+    }
+    return {
+      messages: [
+        `resource-kernel-pair-mapping — violation: ${resourceKernelPairMappingMessages(r).join(" / ")}`,
+      ],
+      ok: false,
+    };
+  } catch {
+    return {
+      messages: [
+        "resource-kernel-pair-mapping — violation: L8 freeze 属性表 / PLAN-L5-25 §7.1 を読めなかった",
+      ],
+      ok: false,
+    };
+  }
+}
 
 /**
  * doc-consistency lint を hard gate 検査 (PLAN-L7-95、要件 §G.11 の「自動検証」配線)。

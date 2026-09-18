@@ -11,6 +11,27 @@ applies_to:
     - Reverse
     - Retrofit
     - Recovery
+decision_points:
+  - when: "R0 recorded has_existing_tests=true for the subject scope"
+    choose: "Reconstruct R2-as-is-test-design.md mapping every test file to a module node"
+    over: "Skipping test-design reconstruction and only writing R2-as-is-design.md"
+    because: "as-is-test-design becomes the Forward routing destination's starting material for the pair-freeze gate"
+  - when: "R0 recorded has_existing_tests=false for the subject scope"
+    choose: "Record an explicit note confirming test absence in R2-as-is-design.md"
+    over: "Leaving the test-design section blank or omitted"
+    because: "The explicit absence note feeds missing_pair_artifacts in R4; a blank section is ambiguous"
+  - when: "The reconstructed DAG contains an orphaned node"
+    choose: "Resolve the orphan before advancing to R3"
+    over: "Accepting the DAG as complete with the orphan present"
+    because: "The gate to R3 requires the DAG to be navigable with no orphaned nodes"
+  - when: "A structural gap is found (module with no design doc, contract with no test coverage)"
+    choose: "List the gap in R2-as-is-design.md without resolving it"
+    over: "Fixing the gap immediately during R2"
+    because: "Resolution of structural gaps belongs to R3/R4, not R2"
+  - when: "The DAG appears to omit a dependency that is known to exist"
+    choose: "Treat the omission as a blocking gap that must be filled before advancing"
+    over: "Treating it as a minor omission to note and move past"
+    because: "An incomplete DAG that omits known dependencies blocks R3 hypothesis work, which depends on impact assessment"
 ---
 
 # reverse r2

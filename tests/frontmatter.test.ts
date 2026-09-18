@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frontmatterSchema } from "../src/schema/frontmatter";
+import { frontmatterSchema } from "../src/schema/frontmatter.ts";
 
 /** 有効な normal impl frontmatter の最小形 */
 function implBase(overrides: Record<string, unknown> = {}) {
@@ -39,6 +39,120 @@ describe("frontmatter schema (§1.1 / §1.1.parent_design / §3.3 / §3.4)", () 
     expect(frontmatterSchema.safeParse(implBase({ github_issue_id: "42" })).success).toBe(false);
   });
 
+  it("U-PADM-010: admission receiptを厳格に保持し、routeとIssueの二重宣言を照合する", () => {
+    const receipt = {
+      schema_version: "v2",
+      receipt_id: "pa-001",
+      command_id: "cmd-001",
+      admitted_at: "2026-07-15T00:00:00.000Z",
+      source_digest: "sha256:0123456789abcdef",
+      decision_digest: "sha256:fedcba9876543210",
+      receipt_digest: "sha256:9999999999999999",
+      binding: {
+        path: "docs/plans/PLAN-L7-05-frontmatter-schema.md",
+        plan_id: "PLAN-L7-05-frontmatter-schema",
+        asset_id: "plan:l7:05",
+        revision: 1,
+        content_digest: "sha256:1111111111111111",
+      },
+      route: { signal: "forward", mode: "forward" },
+    };
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({ route_signal: "forward", route_mode: "forward", admission_receipt: receipt }),
+      ).success,
+    ).toBe(true);
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({ route_signal: "forward", route_mode: "reverse", admission_receipt: receipt }),
+      ).success,
+    ).toBe(false);
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          route_signal: "forward",
+          route_mode: "forward",
+          admission_receipt: { ...receipt, unexpected: true },
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          route_signal: "redesign",
+          route_mode: "redesign",
+          github_issue_id: 12,
+          supersedes: ["PLAN-L4-99"],
+          admission_receipt: receipt,
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it("U-PADM-011: redesign receiptは設計→実装と矛盾しない資産状態を要求する", () => {
+    const receipt = {
+      schema_version: "v2",
+      receipt_id: "pa-002",
+      command_id: "cmd-002",
+      admitted_at: "2026-07-15T00:00:00.000Z",
+      source_digest: "sha256:0123456789abcdef",
+      decision_digest: "sha256:fedcba9876543210",
+      receipt_digest: "sha256:9999999999999999",
+      binding: {
+        path: "docs/plans/PLAN-L7-05-frontmatter-schema.md",
+        plan_id: "PLAN-L7-05-frontmatter-schema",
+        asset_id: "plan:l7:05",
+        revision: 1,
+        content_digest: "sha256:1111111111111111",
+      },
+      route: { signal: "redesign", mode: "redesign" },
+      issue: {
+        provider: "github",
+        issue_id: 12,
+        episode_id: "E4-12",
+        projection_digest: "sha256:aaaaaaaaaaaaaaaa",
+      },
+      origin: {
+        plan_id: "PLAN-L4-24",
+        revision: 1,
+        digest: "sha256:bbbbbbbbbbbbbbbb",
+      },
+      transition: {
+        direction: "design_to_implementation",
+        implementation_disposition: "none",
+        implementation_target: { target_plan_id: "PLAN-L7-435", target_revision: 1 },
+      },
+      reentry: { target_plan_id: "PLAN-L4-24", target_revision: 2, phase: "forward_merge" },
+      escape_reason: "audit finding",
+      supersedes: ["PLAN-L4-24"],
+    };
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          route_signal: "redesign",
+          route_mode: "redesign",
+          github_issue_id: 12,
+          supersedes: ["PLAN-L4-24"],
+          admission_receipt: receipt,
+        }),
+      ).success,
+    ).toBe(true);
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          route_signal: "redesign",
+          route_mode: "redesign",
+          github_issue_id: 12,
+          supersedes: ["PLAN-L4-24"],
+          admission_receipt: {
+            ...receipt,
+            transition: { ...receipt.transition, implementation_disposition: "preserved" },
+          },
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
   it("kind=impl で parent_design 欠落は fail (§1.1.parent_design)", () => {
     const r = frontmatterSchema.safeParse(implBase({ parent_design: undefined }));
     expect(r.success).toBe(false);
@@ -52,6 +166,7 @@ describe("frontmatter schema (§1.1 / §1.1.parent_design / §3.3 / §3.4)", () 
   it("charter は layer=L0 で通り、L0 以外は fail (§1.3 / §2.1.1)", () => {
     const ok = frontmatterSchema.safeParse(
       implBase({
+        plan_id: "PLAN-L0-99-charter",
         kind: "charter",
         layer: "L0",
         parent_design: undefined,
@@ -112,6 +227,87 @@ describe("frontmatter schema (§1.1 / §1.1.parent_design / §3.3 / §3.4)", () 
           kind: "research",
           layer: "L5",
           parent_design: undefined,
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it("kind=verify accepts only right-arm layers and stays out of cross/workflow kinds", () => {
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          plan_id: "PLAN-L9-99-system-verification",
+          kind: "verify",
+          layer: "L9",
+          parent_design: undefined,
+          route_mode: "verify",
+          verification_gate: "G9",
+        }),
+      ).success,
+    ).toBe(true);
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          plan_id: "PLAN-L7-99-unit-implementation",
+          kind: "verify",
+          layer: "L7",
+          parent_design: undefined,
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          plan_id: "PLAN-L9-99-system-verification",
+          kind: "verify",
+          layer: "cross",
+          parent_design: undefined,
+          workflow_phase: "S2",
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it("plan_id L-token must match layer", () => {
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          plan_id: "PLAN-L8-99-system-verification",
+          kind: "verify",
+          layer: "L9",
+          parent_design: undefined,
+          verification_gate: "G9",
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it("kind=verify requires verification_gate matching the right-arm layer", () => {
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          plan_id: "PLAN-L9-99-system-verification",
+          kind: "verify",
+          layer: "L9",
+          parent_design: undefined,
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          plan_id: "PLAN-L9-99-system-verification",
+          kind: "verify",
+          layer: "L9",
+          parent_design: undefined,
+          verification_gate: "G10",
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      frontmatterSchema.safeParse(
+        implBase({
+          verification_gate: "G7",
         }),
       ).success,
     ).toBe(false);
@@ -218,6 +414,13 @@ describe("frontmatter schema (§1.1 / §1.1.parent_design / §3.3 / §3.4)", () 
     };
     // recovery + cross + phase なしは通る (解禁)
     expect(frontmatterSchema.safeParse(recBase).success).toBe(true);
+    expect(
+      frontmatterSchema.safeParse({
+        ...recBase,
+        backprop_decision: "required",
+        backprop_decision_reason: "L6 contract revision is required",
+      }).success,
+    ).toBe(true);
     // recovery に workflow_phase は fail
     expect(frontmatterSchema.safeParse({ ...recBase, workflow_phase: "S2" }).success).toBe(false);
     // 駆動トークン↔kind 不一致は fail (DISCOVERY token に recovery kind)

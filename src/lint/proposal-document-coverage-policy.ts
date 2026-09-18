@@ -1,4 +1,4 @@
-import type { ProposalDocumentCoverageScenario } from "./proposal-document-coverage";
+import type { ProposalDocumentCoverageScenario } from "./proposal-document-coverage.ts";
 
 export const PROPOSAL_ROUTING_DOC_PATH =
   "docs/test-design/harness/proposal-document-coverage-routing.md";

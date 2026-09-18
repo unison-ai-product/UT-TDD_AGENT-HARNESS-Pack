@@ -15,6 +15,31 @@ applies_to:
     - Reverse
     - Scrum
     - Discovery
+decision_points:
+  - when: "a candidate schedule step cannot be verified at unit-test-design (L6/L7) granularity"
+    choose: "split the step further until each step pairs with one design doc and one test-design doc"
+    over: "keep the step coarse (e.g. \"implement everything\") and rely on review to catch gaps later"
+    because: "a step too large to verify at L6/L7 granularity hides missing V-model pairing until doctor or review surfaces it downstream"
+  - when: "a step produces its own design doc / `generates` artifact"
+    choose: "create a child PLAN for that step"
+    over: "keep it as a schedule step inside the parent PLAN"
+    because: "a step with a standalone `generates` artifact needs its own frontmatter and lint checks; folding it into the parent hides that artifact from PLAN-level tracking"
+  - when: "authoring §工程表 steps around pair-freeze and trace-freeze"
+    choose: "mark the pair-freeze and trace-freeze review steps `[直列]` (serial gates)"
+    over: "mark all steps `[並列]` to maximize apparent throughput"
+    because: "a schedule with no serial gate around pair-freeze/trace-freeze is a decomposition error — gates must complete in order to be gates at all"
+  - when: "a PLAN is being advanced to `status: done`"
+    choose: "confirm `review_evidence` is populated before the status change"
+    over: "mark `status: done` first and backfill review_evidence afterward"
+    because: "marking done without review_evidence is a false-green that a later `ut-tdd doctor` run will surface"
+  - when: "a new requirement fits an existing PLAN's scope by more than half its FRs"
+    choose: "extend the existing PLAN"
+    over: "author a new overlapping PLAN"
+    because: "one PLAN per FR is the foundational discipline; lumping or duplicating FRs across PLANs is a `ut-tdd plan lint` violation"
+  - when: "a `kind: add-feature` PLAN is authored"
+    choose: "declare the Reverse back-fill pairing in `dependencies`"
+    over: "treat add-feature as a standalone forward-only PLAN"
+    because: "add-feature kind requires a Reverse back-fill pairing by rule; omitting it leaves the retroactive trace unresolved"
 ---
 
 # planning and task breakdown
@@ -67,7 +92,7 @@ Schedule steps are numbered and annotated with execution mode:
 2. [並列] Author L6 unit-test design doc — PLAN-L6-NN
 3. [直列] pair-freeze review: ut-tdd review --uncommitted
 4. [直列] implement src/ — PLAN-L7-NN
-5. [直列] trace-freeze: bun run test && ut-tdd doctor
+5. [直列] trace-freeze: npm run test && ut-tdd doctor
 6. [直列] accept: ut-tdd review --uncommitted (no blocking findings)
 ```
 

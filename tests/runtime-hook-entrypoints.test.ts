@@ -1,31 +1,33 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ensureTrackedProjectIdentity } from "./support/project-identity-fixture.ts";
 
 const repoRoot = process.cwd();
 const cliPath = join(repoRoot, "src", "cli.ts");
 const legacyEnvPrefix = ["HE", "LIX"].join("");
+const claudeProjectDir = `$${"{CLAUDE_PROJECT_DIR}"}`;
 
 function runCli(cwd: string, args: string[], input?: unknown, env?: NodeJS.ProcessEnv) {
   const stdin = input === undefined ? undefined : JSON.stringify(input);
-  if (process.platform === "win32") {
-    // cmd.exe は PATH 探索でなく %SystemRoot% から canonical に解決する。
-    // PATH 注入事故 (System32 欠落) でテストが環境誘発 fail しないため (A-128 F-7)。
-    const cmdExe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
-    return spawnSync(cmdExe, ["/d", "/c", "bun", cliPath, ...args], {
-      cwd,
-      encoding: "utf8",
-      env: { ...process.env, ...env },
-      input: stdin,
-    });
-  }
-  return spawnSync("bun", [cliPath, ...args], {
+  // PLAN-L7-462 PR-C (AC-1): hooks は node 直起動が正式経路。実発火 oracle も node で固定し、
+  // shell host (cmd.exe) を経由しない (settings.json の宣言形と実行系統を一致させる)。
+  return spawnSync("node", [cliPath, ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, ...env },
     input: stdin,
+    windowsHide: true,
   });
 }
 
@@ -76,20 +78,30 @@ describe("runtime hook entrypoints", () => {
     const settings = JSON.parse(readFileSync(join(repoRoot, ".claude", "settings.json"), "utf8"));
     const hooks = settings.hooks;
 
-    expect(hooks.SessionStart[0].hooks[0].command).toBe(
-      'bun "$CLAUDE_PROJECT_DIR/src/cli.ts" session start',
-    );
-    expect(hooks.PostToolUse[0].hooks[0].command).toBe(
-      'bun "$CLAUDE_PROJECT_DIR/src/cli.ts" hook post-tool-use',
-    );
-    expect(hooks.Stop[0].hooks[0].command).toBe(
-      'bun "$CLAUDE_PROJECT_DIR/src/cli.ts" session summary',
-    );
+    expect(hooks.SessionStart[0].hooks[0]).toMatchObject({
+      command: "node",
+      args: [`${claudeProjectDir}/src/cli.ts`, "session", "start"],
+    });
+    expect(hooks.PostToolUse[0].hooks[0]).toMatchObject({
+      command: "node",
+      args: [`${claudeProjectDir}/src/cli.ts`, "hook", "post-tool-use"],
+    });
+    expect(hooks.Stop[0].hooks[0]).toMatchObject({
+      command: "node",
+      args: [`${claudeProjectDir}/src/cli.ts`, "session", "summary"],
+    });
+    expect(hooks.Stop[1].hooks[0]).toMatchObject({
+      command: "node",
+      args: [`${claudeProjectDir}/src/cli.ts`, "hook", "claude-memory-wake"],
+      timeout: 930,
+      asyncRewake: true,
+    });
   });
 
   it("shared CLI session/hook commands record a PLAN digest in a temp repo", () => {
     const cwd = mkdtempSync(join(tmpdir(), "ut-tdd-hook-"));
     try {
+      ensureTrackedProjectIdentity(cwd, "fixture/runtime-hook-entrypoints");
       const start = runCli(cwd, ["plan", "use", "PLAN-L4-13"]);
       expect(start.status).toBe(0);
 
@@ -130,10 +142,117 @@ describe("runtime hook entrypoints", () => {
     }
   });
 
+  it("U-MEMWAKE-006: delegated Claude process skips the long-lived wake hook", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "ut-tdd-hook-wake-skip-"));
+    try {
+      const result = runCli(
+        cwd,
+        ["hook", "claude-memory-wake"],
+        { hook_event_name: "Stop", session_id: "delegated-review" },
+        {
+          CLAUDE_CODE_ENTRYPOINT: "",
+          UT_TDD_CLAUDE_WAKE_MAX_MS: "invalid-if-not-skipped",
+        },
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe("");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("U-MEMWAKE-007: CLI hook delivers a targeted workspace inbox and exits 2", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "ut-tdd-hook-wake-delivery-"));
+    try {
+      ensureTrackedProjectIdentity(cwd, "fixture/runtime-hook-wake-delivery");
+      const activate = runCli(
+        cwd,
+        ["hook", "claude-memory-wake"],
+        { hook_event_name: "Stop", session_id: "vscode-target" },
+        {
+          CLAUDE_CODE_ENTRYPOINT: "claude-vscode",
+          UT_TDD_CLAUDE_WAKE_POLL_MS: "10",
+          UT_TDD_CLAUDE_WAKE_MAX_MS: "20",
+        },
+      );
+      expect(activate.status).toBe(0);
+      const publish = runCli(cwd, [
+        "memory",
+        "add",
+        "--kind",
+        "project",
+        "--title",
+        "wake delivery",
+        "--body",
+        "workspace-targeted notification",
+        "--notify-claude",
+        "--operation-id",
+        "cli-hook-delivery",
+      ]);
+      expect(publish.status).toBe(0);
+
+      const delivery = runCli(
+        cwd,
+        ["hook", "claude-memory-wake"],
+        { hook_event_name: "Stop", session_id: "vscode-target" },
+        {
+          CLAUDE_CODE_ENTRYPOINT: "claude-vscode",
+          UT_TDD_CLAUDE_WAKE_POLL_MS: "10",
+          UT_TDD_CLAUDE_WAKE_MAX_MS: "20",
+        },
+      );
+      expect(delivery.status).toBe(2);
+      expect(delivery.stderr).toContain("[UT_TDD_CLAUDE_INBOX]");
+      expect(delivery.stderr).toContain("workspace-targeted notification");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("records hook state at the repository root when launched from a nested cwd", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-hook-root-"));
+    try {
+      const nested = join(root, "docs", "plans");
+      mkdirSync(nested, { recursive: true });
+      ensureTrackedProjectIdentity(root, "fixture/runtime-hook-nested");
+      const run = runCli(
+        nested,
+        ["session", "start"],
+        { hook_event_name: "SessionStart", session_id: "nested-session" },
+        { UT_TDD_PROJECT_DIR: "", CLAUDE_PROJECT_DIR: "" },
+      );
+      expect(run.status).toBe(0);
+      expect(existsSync(join(root, ".ut-tdd", "logs", "session", "nested-session.jsonl"))).toBe(
+        true,
+      );
+      expect(existsSync(join(nested, ".ut-tdd"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks hook state writes when no repository root can be resolved", () => {
+    const isolated = mkdtempSync(join(tmpdir(), "ut-tdd-hook-unresolved-"));
+    try {
+      const run = runCli(
+        isolated,
+        ["session", "start"],
+        { hook_event_name: "SessionStart", session_id: "unresolved-session" },
+        { UT_TDD_PROJECT_DIR: "", CLAUDE_PROJECT_DIR: "" },
+      );
+      expect(run.status).not.toBe(0);
+      expect(existsSync(join(isolated, ".ut-tdd"))).toBe(false);
+    } finally {
+      rmSync(isolated, { recursive: true, force: true });
+    }
+  });
+
   it("ut-tdd codex --execute records the same session lifecycle through the adapter wrapper", () => {
     const cwd = mkdtempSync(join(tmpdir(), "ut-tdd-codex-wrapper-"));
     const binDir = join(cwd, "bin");
     try {
+      ensureTrackedProjectIdentity(cwd, "fixture/runtime-codex-wrapper");
       const fakeCodex = writeFakeCodex(binDir);
       const env = {
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
@@ -169,6 +288,7 @@ describe("runtime hook entrypoints", () => {
     const cwd = mkdtempSync(join(tmpdir(), "ut-tdd-codex-task-file-"));
     const binDir = join(cwd, "bin");
     try {
+      ensureTrackedProjectIdentity(cwd, "fixture/runtime-codex-task-file");
       const fakeCodex = writeFakeCodex(binDir);
       writeFileSync(join(cwd, "task.md"), "implement from task file");
       const env = {
@@ -207,6 +327,7 @@ describe("runtime hook entrypoints", () => {
     const cwd = mkdtempSync(join(tmpdir(), "ut-tdd-codex-plan-"));
     const binDir = join(cwd, "bin");
     try {
+      ensureTrackedProjectIdentity(cwd, "fixture/runtime-codex-plan");
       const fakeCodex = writeFakeCodex(binDir);
       const env = {
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
@@ -256,6 +377,7 @@ describe("runtime hook entrypoints", () => {
     const cwd = mkdtempSync(join(tmpdir(), "ut-tdd-claude-wrapper-"));
     const binDir = join(cwd, "bin");
     try {
+      ensureTrackedProjectIdentity(cwd, "fixture/runtime-claude-wrapper");
       const fakeClaude = writeFakeClaude(binDir);
       const env = {
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
@@ -378,5 +500,5 @@ describe("runtime hook entrypoints", () => {
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 });

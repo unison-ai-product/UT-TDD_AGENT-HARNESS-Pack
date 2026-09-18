@@ -3,16 +3,26 @@ name: harness-check
 on:
   push:
     branches: [main]
+  # universal PR trigger (PLAN-L6-82): pull_request は base 限定しない (stacked PR も発火)。
   pull_request:
-    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-check-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   harness-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.13.0"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
       - name: branch-type guard
         env:
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
@@ -22,11 +32,11 @@ jobs:
         run: |
           printf '%s\n' "$PR_BODY" > .ut-tdd-pr-body.txt
           git log --format=%s -n 20 > .ut-tdd-commit-subjects.txt
-          bun .ut-tdd/bin/ut-tdd.mjs github guard --head-ref "$HEAD_REF" --base-ref "$BASE_REF" --pr-title "$PR_TITLE" --pr-body-file .ut-tdd-pr-body.txt --commit-file .ut-tdd-commit-subjects.txt
-      - run: bun run typecheck
-      - run: bun run test
-      - run: bun .ut-tdd/bin/ut-tdd.mjs audit quality --include-tests --limit 20
+          node .ut-tdd/bin/ut-tdd.mjs github guard --head-ref "$HEAD_REF" --base-ref "$BASE_REF" --pr-title "$PR_TITLE" --pr-body-file .ut-tdd-pr-body.txt --commit-file .ut-tdd-commit-subjects.txt
+      - run: npm run typecheck
+      - run: npm run test
+      - run: node .ut-tdd/bin/ut-tdd.mjs audit quality --include-tests --limit 20
       # Consumer CI gate is doctor --setup-smoke: full doctor asserts source-repo
       # self-application state (design docs / PLAN corpus) and is structurally red
       # on a fresh consumer repository (A-172 C-1).
-      - run: bun .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+      - run: node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke

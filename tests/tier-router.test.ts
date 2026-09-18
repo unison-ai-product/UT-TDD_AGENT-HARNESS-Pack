@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RuntimeDetection } from "../src/runtime/detect";
+import type { RuntimeDetection } from "../src/runtime/detect.ts";
 import {
   assignCross,
   isRouterRole,
@@ -7,7 +7,7 @@ import {
   route,
   routeTeamMembers,
   routeToAdapterPlan,
-} from "../src/task/tier-router";
+} from "../src/task/tier-router.ts";
 import {
   FRONTIER_MODELS,
   FRONTIER_ROLES,
@@ -16,7 +16,8 @@ import {
   resolveModel,
   TIER_TABLE,
   tierFor,
-} from "../src/task/tier-router-policy";
+} from "../src/task/tier-router-policy.ts";
+import { MODEL_IDS } from "../src/team/model-policy.ts";
 
 function det(
   mode: RuntimeDetection["mode"],
@@ -51,8 +52,8 @@ describe("U-TIER: cost-tiered provider router", () => {
   it("U-TIER-003: ワーカーは T0 に解決できない (fail-close 不変条件)", () => {
     expect(() => resolveModel("se", "T0", "claude")).toThrow(/invariant/);
     expect(() => resolveModel("docs", "T0", "codex")).toThrow(/invariant/);
-    expect(resolveModel("se", "T2", "claude")).toBe("claude-haiku-4-5");
-    expect(resolveModel("se", "T1", "codex")).toBe("gpt-5.4");
+    expect(resolveModel("se", "T2", "claude")).toBe(MODEL_IDS.claude.haiku);
+    expect(resolveModel("se", "T1", "codex")).toBe(MODEL_IDS.codex.luna);
   });
 
   it("U-TIER-004: GPT(Codex) も Claude と対称 (全 role 両 provider・同 archetype)", () => {
@@ -70,7 +71,7 @@ describe("U-TIER: cost-tiered provider router", () => {
     expect([...FRONTIER_ROLES].sort()).toEqual(["qa", "tl", "uiux"]);
   });
 
-  it("U-TIER-005: T0 (opus/gpt-5.5) は明示許可ゲート (fail-close)", () => {
+  it("U-TIER-005: T0 (opus/Codex frontier) は明示許可ゲート (fail-close)", () => {
     const d = det("claude-only", "claude");
     const blocked = route({ role: "tl", task: { text: "design the api boundary" } }, d);
     expect(blocked.tier).toBe("T0");
@@ -81,7 +82,7 @@ describe("U-TIER: cost-tiered provider router", () => {
       auth: { explicit: true },
     });
     expect(ready.status).toBe("ready");
-    expect(ready.model).toBe("claude-opus-4-8");
+    expect(ready.model).toBe(MODEL_IDS.claude.opus);
     expect(FRONTIER_MODELS.has(ready.model ?? "")).toBe(true);
   });
 
@@ -98,14 +99,14 @@ describe("U-TIER: cost-tiered provider router", () => {
     const d = det("codex-only", "codex");
     const cheap = route({ role: "se", task: { text: "rename a field" } }, d);
     expect(cheap.tier).toBe("T2");
-    expect(cheap.model).toBe("gpt-5.3-codex-spark");
+    expect(cheap.model).toBe(MODEL_IDS.codex.spark);
 
     const hard = route(
       { role: "se", task: { text: "refactor the database integration architecture" } },
       d,
     );
     expect(hard.tier).toBe("T1");
-    expect(hard.model).toBe("gpt-5.4");
+    expect(hard.model).toBe(MODEL_IDS.codex.luna);
   });
 
   it("U-TIER-008: assignCross は hybrid で判断を相手 provider にフリップ", () => {
@@ -123,42 +124,58 @@ describe("U-TIER: cost-tiered provider router", () => {
     expect(other("claude")).toBe("codex");
   });
 
-  it("U-TIER-009: route は主 provider (currentRuntime) でモデルを選ぶ", () => {
+  it("U-TIER-009: 実装 (se) は hybrid で主の相手 provider が実行する (クロス実行)", () => {
     const claudeDriven = route(
       { role: "se", task: { text: "rename a field" } },
       det("hybrid", "claude"),
     );
-    expect(claudeDriven.provider).toBe("claude");
-    expect(claudeDriven.model).toBe("claude-haiku-4-5");
+    expect(claudeDriven.provider).toBe("codex");
+    expect(claudeDriven.model).toBe(MODEL_IDS.codex.spark);
+    expect(claudeDriven.effort).toBe("middle");
 
     const codexDriven = route(
       { role: "se", task: { text: "rename a field" } },
       det("hybrid", "codex"),
     );
-    expect(codexDriven.provider).toBe("codex");
-    expect(codexDriven.model).toBe("gpt-5.3-codex-spark");
+    expect(codexDriven.provider).toBe("claude");
+    expect(codexDriven.model).toBe(MODEL_IDS.claude.haiku);
+    expect(codexDriven.effort).toBe("middle");
   });
 
-  it("U-TIER-010: route が主→相手のプロバイダ切替を自動配線する (assignCross wired)", () => {
+  it("U-TIER-010: 実装レーンは実行=相手 / 判断=主 のクロス配線 (assignCross wired)", () => {
     const claudeDriven = route(
       { role: "se", task: { text: "rename a field" } },
       det("hybrid", "claude"),
     );
     expect(claudeDriven.cross).toEqual({
-      execution: "claude",
-      judgement: "codex",
+      execution: "codex",
+      judgement: "claude",
       review_kind: "cross_agent",
     });
+    // 実装は難易度に依らず常時クロスレビュー。
+    expect(claudeDriven.crossReview).toBe(true);
 
     const codexDriven = route(
       { role: "se", task: { text: "rename a field" } },
       det("hybrid", "codex"),
     );
     expect(codexDriven.cross).toEqual({
-      execution: "codex",
-      judgement: "claude",
+      execution: "claude",
+      judgement: "codex",
       review_kind: "cross_agent",
     });
+
+    // docs ワーカーは従来どおり創出=主 / 判断=相手。
+    const docs = route(
+      { role: "docs", task: { text: "update the readme" } },
+      det("hybrid", "claude"),
+    );
+    expect(docs.cross).toEqual({
+      execution: "claude",
+      judgement: "codex",
+      review_kind: "cross_agent",
+    });
+    expect(docs.provider).toBe("claude");
 
     const single = route(
       { role: "se", task: { text: "rename a field" } },
@@ -176,7 +193,7 @@ describe("U-TIER: cost-tiered provider router", () => {
     expect(plan).not.toBeNull();
     expect(plan?.provider).toBe("codex");
     expect(plan?.command).toBe("codex");
-    expect(plan?.args).toContain("gpt-5.3-codex-spark");
+    expect(plan?.args).toContain(MODEL_IDS.codex.spark);
     const injected = routeToAdapterPlan(ready, "rename a field", {
       mode: "codex-only",
       contextInjection: {
@@ -207,9 +224,9 @@ describe("U-TIER: cost-tiered provider router", () => {
         auth: { explicit: true },
       },
     );
-    // impl=ワーカー=主(claude)、review=検証=相手(codex) で明示的に別 provider。
-    expect(impl.provider).toBe("claude");
-    expect(review.provider).toBe("codex");
+    // 実装レーン: impl=相手(codex) がクロス実行、review=主(claude) がクロスレビュー。
+    expect(impl.provider).toBe("codex");
+    expect(review.provider).toBe("claude");
     expect(impl.provider).not.toBe(review.provider);
     expect(impl.cross.review_kind).toBe("cross_agent");
     expect(review.cross.review_kind).toBe("cross_agent");
@@ -230,14 +247,15 @@ describe("U-TIER: cost-tiered provider router", () => {
       primary: "claude",
       auth: { explicit: true },
     });
-    // se=ワーカー=主(claude)。
+    // se=実装ワーカー=相手(codex) がクロス実行 (effort middle)。
     expect(routings[0].routed).toBe(true);
-    expect(routings[0].decision?.provider).toBe("claude");
-    expect(routings[0].decision?.model).toBe("claude-haiku-4-5");
-    // qa=検証=相手(codex)、明示許可ありで T0 ready。
+    expect(routings[0].decision?.provider).toBe("codex");
+    expect(routings[0].decision?.model).toBe(MODEL_IDS.codex.spark);
+    expect(routings[0].decision?.effort).toBe("middle");
+    // qa=検証=実行側と別 provider (=主 claude)、明示許可ありで T0 ready。
     expect(routings[1].routed).toBe(true);
-    expect(routings[1].decision?.provider).toBe("codex");
-    expect(routings[1].decision?.model).toBe("gpt-5.5");
+    expect(routings[1].decision?.provider).toBe("claude");
+    expect(routings[1].decision?.model).toBe(MODEL_IDS.claude.opus);
     expect(routings[1].decision?.status).toBe("ready");
     // po=router 非対象 → routed=false (engine fallback)。
     expect(routings[2].routed).toBe(false);
@@ -254,6 +272,7 @@ describe("U-TIER: cost-tiered provider router", () => {
     );
     expect(routings[0].decision?.status).toBe("blocked-needs-approval");
     expect(routings[0].decision?.model).toBeNull();
-    expect(routings[0].decision?.provider).toBe("codex");
+    // qa は実装レーンのクロスレビュー側 (=主 claude) に配置される。
+    expect(routings[0].decision?.provider).toBe("claude");
   });
 });

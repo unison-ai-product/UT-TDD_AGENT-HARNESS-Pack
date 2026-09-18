@@ -7,10 +7,16 @@ import {
   recommendSkillsForText,
   recordSkillInvocations,
   recordSkillRecommendations,
-} from "../src/skill-engine/recommend";
-import { openHarnessDb } from "../src/state-db/index";
-import { migrate, rowCounts } from "../src/state-db/migration";
-import { recordProjectionEvent } from "../src/state-db/projection-writer";
+} from "../src/skill-engine/recommend.ts";
+import { scoreSkillDetailed, shouldScoreSkillAsset } from "../src/skill-scoring/scoring.ts";
+import { stableId } from "../src/stable-id.ts";
+import { openHarnessDb } from "../src/state-db/index.ts";
+import { migrate, rowCounts } from "../src/state-db/migration.ts";
+import { recordProjectionEvent } from "../src/state-db/projection-writer.ts";
+import {
+  projectSkillEvaluations,
+  projectSkillTelemetry,
+} from "../src/state-db/skill-projections.ts";
 
 describe("skill recommendation telemetry", () => {
   function seedPlan(
@@ -41,6 +47,7 @@ describe("skill recommendation telemetry", () => {
       asset_id: string;
       trigger: string;
       capability: string;
+      path?: string;
       role?: string;
       skill_type?: string;
       category?: string;
@@ -54,7 +61,7 @@ describe("skill recommendation telemetry", () => {
       row: {
         asset_id: row.asset_id,
         asset_type: "skill",
-        path: `docs/skills/${row.asset_id.replace("skill:", "")}.yaml`,
+        path: row.path ?? `docs/skills/${row.asset_id.replace("skill:", "")}.yaml`,
         trigger: row.trigger,
         role: row.role ?? "",
         capability: row.capability,
@@ -64,6 +71,34 @@ describe("skill recommendation telemetry", () => {
         applies_drive_models: row.applies_drive_models ?? "Forward",
         drift_status: "current",
         indexed_at: "2026-06-12T00:00:00.000Z",
+      },
+    });
+  }
+
+  function seedInvocation(
+    db: ReturnType<typeof openHarnessDb>,
+    row: {
+      skill_id: string;
+      plan_id: string;
+      id?: string;
+      source: string;
+      accepted?: number;
+      fired_at?: string;
+    },
+  ): void {
+    recordProjectionEvent(db, {
+      table: "skill_invocations",
+      id: row.id ?? `inv:${row.plan_id}:${row.skill_id}:${row.source}`,
+      row: {
+        skill_invocation_id: row.id ?? `inv:${row.plan_id}:${row.skill_id}:${row.source}`,
+        session_id: row.source.startsWith("runtime-hook:") ? "session-runtime" : "rebuild:indirect",
+        plan_id: row.plan_id,
+        skill_id: row.skill_id,
+        layer: "L7",
+        drive: "db",
+        fired_at: row.fired_at ?? "2026-06-12T00:03:00.000Z",
+        source: row.source,
+        accepted: row.accepted ?? 1,
       },
     });
   }
@@ -101,9 +136,10 @@ describe("skill recommendation telemetry", () => {
         drive: "fullstack",
       });
       seedSkill(db, {
-        asset_id: "skill:review-checklist",
-        trigger: "review checklist",
-        capability: "quality review checklist",
+        asset_id: "skill:l7-db-review",
+        trigger: "db implementation review",
+        capability: "L7 db quality review checklist",
+        applies_drive_models: "Add-feature",
       });
       seedAcceptedReview(db, "PLAN-L7-99-skill-test");
 
@@ -119,13 +155,13 @@ describe("skill recommendation telemetry", () => {
       expect(recommendations).toHaveLength(1);
       expect(recommendations[0]).toMatchObject({
         plan_id: "PLAN-L7-99-skill-test",
-        skill_id: "skill:review-checklist",
+        skill_id: "skill:l7-db-review",
         rank: 1,
       });
       expect(invocations).toHaveLength(1);
       expect(invocations[0]).toMatchObject({
         plan_id: "PLAN-L7-99-skill-test",
-        skill_id: "skill:review-checklist",
+        skill_id: "skill:l7-db-review",
         accepted: 1,
       });
       expect(rowCounts(db).skill_recommendations).toBe(1);
@@ -170,13 +206,19 @@ describe("skill recommendation telemetry", () => {
       expect(l3[0]).toMatchObject({
         plan_id: "PLAN-L3-99-skill-layer",
         skill_id: "skill:l3-design-review",
-        reason: "layer=L3; technical_drive=normal; drive_model=Forward; kind=design",
       });
+      expect(l3[0].reason).toContain(
+        "layer=L3; technical_drive=normal; drive_model=Forward; kind=design",
+      );
+      expect(l3[0].reason).toContain("skill=skill:l3-design-review");
       expect(l7[0]).toMatchObject({
         plan_id: "PLAN-L7-99-skill-layer",
         skill_id: "skill:l7-fullstack-test",
-        reason: "layer=L7; technical_drive=fullstack; drive_model=Add-feature; kind=add-impl",
       });
+      expect(l7[0].reason).toContain(
+        "layer=L7; technical_drive=fullstack; drive_model=Add-feature; kind=add-impl",
+      );
+      expect(l7[0].reason).toContain("skill=skill:l7-fullstack-test");
     } finally {
       db.close();
     }
@@ -219,13 +261,17 @@ describe("skill recommendation telemetry", () => {
       expect(reverse[0]).toMatchObject({
         plan_id: "PLAN-L7-99-reverse-skill",
         skill_id: "skill:l7-reverse-routing-review",
-        reason: "layer=L7; technical_drive=reverse; drive_model=Reverse; kind=add-impl",
       });
+      expect(reverse[0].reason).toContain(
+        "layer=L7; technical_drive=reverse; drive_model=Reverse; kind=add-impl",
+      );
       expect(scrum[0]).toMatchObject({
         plan_id: "PLAN-L7-99-scrum-skill",
         skill_id: "skill:l7-scrum-feedback-review",
-        reason: "layer=L7; technical_drive=scrum; drive_model=Scrum; kind=add-impl",
       });
+      expect(scrum[0].reason).toContain(
+        "layer=L7; technical_drive=scrum; drive_model=Scrum; kind=add-impl",
+      );
     } finally {
       db.close();
     }
@@ -242,21 +288,28 @@ describe("skill recommendation telemetry", () => {
         layer: "L7",
         drive: "fullstack",
       });
-      // 3 skill 全て applies_layers=L7 + applies_drive_models=Forward (同点になりがち)。
+      // 実 catalog の frontmatter 分布に寄せる: L7/Add-feature は重なるが、
+      // trigger/capability は review/test/browser/adversarial で薄く分散する。
       seedSkill(db, {
-        asset_id: "skill:hi-overlap",
-        trigger: "fullstack forward implementation add impl",
-        capability: "fullstack forward add impl implementation",
+        asset_id: "skill:code-review-and-quality",
+        trigger: "code review quality implementation test",
+        capability: "L7 add impl quality review and test substance",
+        skill_type: "review",
+        applies_drive_models: "Add-feature",
       });
       seedSkill(db, {
-        asset_id: "skill:mid-overlap",
-        trigger: "fullstack review",
-        capability: "quality review checklist",
+        asset_id: "skill:adversarial-review",
+        trigger: "assumption challenge trace freeze review",
+        capability: "judgement gate falsification review",
+        skill_type: "review",
+        applies_drive_models: "Add-feature",
       });
       seedSkill(db, {
-        asset_id: "skill:no-overlap",
-        trigger: "unrelated topic notes",
-        capability: "miscellaneous supporting notes",
+        asset_id: "skill:browser-testing-and-screen-verification",
+        trigger: "browser screen visual verification",
+        capability: "console network accessibility screenshot",
+        skill_type: "verification",
+        applies_drive_models: "Add-feature",
       });
 
       const rows = recommendSkillsForPlan(db, "PLAN-L7-99-desaturate");
@@ -266,8 +319,219 @@ describe("skill recommendation telemetry", () => {
       expect(scores.every((s) => s <= 1)).toBe(true);
       // overlap の多寡で順位が付く (同点アルファベット順退化でない)。
       const byId = Object.fromEntries(rows.map((r) => [r.skill_id, r.score] as const));
-      expect(byId["skill:hi-overlap"]).toBeGreaterThan(byId["skill:mid-overlap"]);
-      expect(byId["skill:mid-overlap"]).toBeGreaterThan(byId["skill:no-overlap"]);
+      expect(byId["skill:code-review-and-quality"]).toBeGreaterThan(
+        byId["skill:adversarial-review"],
+      );
+      expect(byId["skill:adversarial-review"]).toBeGreaterThan(
+        byId["skill:browser-testing-and-screen-verification"],
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("excludes all-layer/all-drive review checklist assets from scoring candidates", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      seedPlan(db, {
+        plan_id: "PLAN-L7-99-wildcard-boundary",
+        kind: "add-impl",
+        layer: "L7",
+        drive: "db",
+        route_mode: "add-feature",
+      });
+      seedSkill(db, {
+        asset_id: "skill:review-checklist",
+        path: "skills/review-checklist.yaml",
+        trigger: "review checklist",
+        capability: "quality gate review checklist",
+        skill_type: "quality-gate-review",
+        applies_layers: "L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11,L12,L13,L14",
+        applies_drive_models:
+          "Add-feature,Discovery,Forward,Incident,Recovery,Refactor,Research,Retrofit,Reverse,Scrum",
+      });
+      seedSkill(db, {
+        asset_id: "skill:db-implementation-review",
+        trigger: "db implementation add impl review",
+        capability: "L7 database implementation quality test",
+        skill_type: "review",
+        applies_drive_models: "Add-feature",
+      });
+
+      const rows = recommendSkillsForPlan(db, "PLAN-L7-99-wildcard-boundary", { limit: 5 });
+
+      expect(rows.map((row) => row.skill_id)).not.toContain("skill:review-checklist");
+      expect(rows[0]).toMatchObject({ skill_id: "skill:db-implementation-review" });
+      expect(bucketRecommendations(rows).required.map((row) => row.skill_id)).not.toContain(
+        "skill:review-checklist",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("excludes wildcard review checklist assets at the shared scorer boundary", () => {
+    const asset = {
+      asset_id: "skill:review-checklist",
+      path: "skills/review-checklist.yaml",
+      skill_type: "quality-gate-review",
+      trigger: "review checklist",
+      capability: "quality gate review checklist",
+      applies_layers: "L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11,L12,L13,L14",
+      applies_drive_models:
+        "Add-feature,Discovery,Forward,Incident,Recovery,Refactor,Research,Retrofit,Reverse,Scrum",
+    };
+
+    expect(shouldScoreSkillAsset(asset)).toBe(false);
+    expect(
+      scoreSkillDetailed(
+        {
+          reference: "PLAN-L7-99-wildcard-boundary",
+          layer: "L7",
+          drive: "db",
+          kind: "add-impl",
+          workflowMode: "Add-feature",
+        },
+        asset,
+      ),
+    ).toMatchObject({
+      score: 0,
+      excluded: true,
+      exclusionReason: "non-workflow-scoring-asset",
+    });
+  });
+
+  it("applies learning only from runtime-provenance skill evaluations", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      seedPlan(db, {
+        plan_id: "PLAN-L7-99-learning-target",
+        kind: "add-impl",
+        layer: "L7",
+        drive: "db",
+        route_mode: "add-feature",
+      });
+      seedPlan(db, {
+        plan_id: "PLAN-L7-99-runtime-success",
+        kind: "add-impl",
+        layer: "L7",
+        drive: "db",
+        status: "completed",
+        route_mode: "add-feature",
+      });
+      seedPlan(db, {
+        plan_id: "PLAN-L7-99-auto-noise",
+        kind: "add-impl",
+        layer: "L7",
+        drive: "db",
+        status: "completed",
+        route_mode: "add-feature",
+      });
+      for (const skillId of ["skill:runtime-learned", "skill:auto-noise"]) {
+        seedSkill(db, {
+          asset_id: skillId,
+          trigger: "db implementation add impl review",
+          capability: "L7 database implementation quality test",
+          skill_type: "review",
+          applies_drive_models: "Add-feature",
+        });
+      }
+      seedInvocation(db, {
+        skill_id: "skill:runtime-learned",
+        plan_id: "PLAN-L7-99-runtime-success",
+        source: "runtime-hook:skill-suggest",
+      });
+      seedInvocation(db, {
+        skill_id: "skill:auto-noise",
+        plan_id: "PLAN-L7-99-auto-noise",
+        source: "auto-projection:review-evidence",
+      });
+
+      projectSkillEvaluations({
+        db,
+        opts: { asOf: "2026-06-12T00:04:00.000Z" },
+        deps: {
+          nowIso: () => "2026-06-12T00:04:00.000Z",
+          recordProjectionEvent,
+        },
+      });
+
+      const evalRows = db
+        .prepare("SELECT skill_id FROM skill_evaluations ORDER BY skill_id")
+        .all() as { skill_id: string }[];
+      expect(evalRows.map((row) => row.skill_id)).toEqual(["skill:runtime-learned"]);
+
+      const rows = recommendSkillsForPlan(db, "PLAN-L7-99-learning-target", { limit: 2 });
+      const byId = Object.fromEntries(rows.map((row) => [row.skill_id, row] as const));
+      expect(byId["skill:runtime-learned"].score).toBeGreaterThan(byId["skill:auto-noise"].score);
+      expect(byId["skill:runtime-learned"].reason).toContain("learning=0.");
+      expect(byId["skill:auto-noise"].reason).toContain("learning=neutral");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps CLI recommendation and DB projection ranking on the same scorer", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      migrate(db);
+      const planId = "PLAN-L7-99-shared-score";
+      seedPlan(db, {
+        plan_id: planId,
+        kind: "add-impl",
+        layer: "L7",
+        drive: "db",
+        route_mode: "add-feature",
+      });
+      seedSkill(db, {
+        asset_id: "skill:db-implementation-review",
+        trigger: "db implementation add impl review",
+        capability: "L7 database implementation quality test",
+        skill_type: "review",
+        applies_drive_models: "Add-feature",
+      });
+      seedSkill(db, {
+        asset_id: "skill:generic-quality",
+        trigger: "quality review",
+        capability: "general quality checklist",
+        skill_type: "review",
+        applies_drive_models: "Add-feature",
+      });
+
+      const cliRows = recommendSkillsForPlan(db, planId, { limit: 2 });
+      projectSkillTelemetry({
+        db,
+        plans: new Map([
+          [
+            planId,
+            {
+              planId,
+              kind: "add-impl",
+              layer: "L7",
+              drive: "db",
+              status: "confirmed",
+              updatedAt: "2026-06-12T00:00:00.000Z",
+            },
+          ],
+        ]),
+        deps: {
+          nowIso: () => "2026-06-12T00:05:00.000Z",
+          stableId,
+          recordProjectionEvent,
+          skillDriveModelForPlan: () => "Add-feature",
+        },
+      });
+      const projectionRows = db
+        .prepare(
+          "SELECT skill_id, score FROM skill_recommendations WHERE plan_id = ? ORDER BY rank",
+        )
+        .all(planId) as { skill_id: string; score: number }[];
+
+      expect(projectionRows.map((row) => [row.skill_id, row.score])).toEqual(
+        cliRows.map((row) => [row.skill_id, row.score]),
+      );
     } finally {
       db.close();
     }

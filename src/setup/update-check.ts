@@ -11,15 +11,61 @@
  * - Remote results are cached for 24 hours under the harness root.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureDir } from "../shared/fs.ts";
 
 export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
 export const UPDATE_CHECK_CACHE_PATH = join(".ut-tdd", "state", "update-check.json");
 export const UPDATE_CHECK_DISABLE_ENV = "UT_TDD_SKIP_UPDATE_CHECK";
 export const UPDATE_CHECK_REMOTE_ENV = "UT_TDD_UPDATE_CHECK_REMOTE";
+export const UPDATE_CHECK_CACHE_DIR_ENV = "UT_TDD_UPDATE_CHECK_CACHE_DIR";
 const LS_REMOTE_TIMEOUT_MS = 5000;
+
+/**
+ * PLAN-L7-462 step 2: node の spawn は Windows で `.cmd`/`.bat` を PATH 解決しない
+ * (旧runtimeは解決していたため不可視だった)。adapter の provider `.cmd` shim 方式
+ * (src/runtime/adapter.ts buildProviderInvocation) を踏襲し、PATH 上の git が
+ * command script のときだけ ComSpec 経由 (shell:false) で包む。
+ */
+export function gitLsRemoteInvocation(
+  remote: string,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[]; windowsVerbatimArguments?: boolean } {
+  const args = ["ls-remote", "--tags", remote];
+  if (platform !== "win32") return { command: "git", args };
+  const pathValue = env.PATH ?? env.Path ?? "";
+  const exts = [".exe", ".com", ".cmd", ".bat"];
+  let found: string | null = null;
+  for (const dir of pathValue.split(";")) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const candidate = join(dir, `git${ext}`);
+      if (existsSync(candidate)) {
+        found = candidate;
+        break;
+      }
+    }
+    if (found) break;
+  }
+  if (found && /\.(cmd|bat)$/i.test(found)) {
+    // cmd.exe は引用の内側でも %VAR% を展開するため、% を含む remote は安全に渡せない。
+    // その場合は wrap を諦めて素の "git" に落とす (advisory の fail-open 契約に一致)。
+    if (args.some((token) => token.includes("%"))) return { command: "git", args };
+    // 空白・cmd メタ文字を含む token のみ引用する (全引用すると shim 側の %1 比較を壊す)。
+    const quote = (token: string) =>
+      /[\s"^&|<>()!]/.test(token) ? `"${token.replace(/"/g, '""')}"` : token;
+    const inner = [quote(found), ...args.map(quote)].join(" ");
+    return {
+      command: env.ComSpec ?? join(env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe"),
+      args: ["/d", "/s", "/c", `"${inner}"`],
+      windowsVerbatimArguments: true,
+    };
+  }
+  return { command: found ?? "git", args };
+}
 
 export interface UpdateCheckDeps {
   /** Harness checkout root, not consumer cwd. */
@@ -31,6 +77,8 @@ export interface UpdateCheckDeps {
   hasOwnGit: () => boolean;
   /** Optional configured remote for forks, mirrors, or private Pack channels. */
   remoteOverride?: () => string | null;
+  /** Test/runner-only cache root; production defaults to harnessRoot/.ut-tdd. */
+  cacheRoot?: () => string | null;
   /** Tag names from `git ls-remote --tags <remote>`; null means fail-open. */
   listRemoteTags: (remote: string) => string[] | null;
 }
@@ -44,6 +92,15 @@ export interface UpdateCheckResult {
   source: "remote" | "cache" | "none";
   /** Fail-open detail, set when checked=false. */
   detail: string | null;
+}
+
+/** Canonical package.json SemVer, including prerelease/build identifiers. */
+export interface PackageSemver {
+  readonly major: number;
+  readonly minor: number;
+  readonly patch: number;
+  readonly prerelease: readonly string[];
+  readonly build: readonly string[];
 }
 
 interface UpdateCheckCache {
@@ -63,6 +120,63 @@ export function parseSemver(tag: string): [number, number, number] | null {
   const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(tag.trim());
   if (!m) return null;
   return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+const PACKAGE_SEMVER =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+/** Parse a package.json version without accepting tag prefixes or whitespace coercion. */
+export function parsePackageSemver(value: unknown): PackageSemver | null {
+  if (typeof value !== "string") return null;
+  const match = PACKAGE_SEMVER.exec(value);
+  if (!match) return null;
+  const prerelease = match[4]?.split(".") ?? [];
+  if (
+    prerelease.some(
+      (identifier) =>
+        /^\d+$/.test(identifier) && identifier.length > 1 && identifier.startsWith("0"),
+    )
+  )
+    return null;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  if (![major, minor, patch].every(Number.isSafeInteger)) return null;
+  return {
+    major,
+    minor,
+    patch,
+    prerelease,
+    build: match[5]?.split(".") ?? [],
+  };
+}
+
+/** Compare canonical package SemVer values; build metadata has no precedence. */
+export function comparePackageSemver(a: PackageSemver, b: PackageSemver): number {
+  for (const key of ["major", "minor", "patch"] as const) {
+    if (a[key] !== b[key]) return a[key] - b[key];
+  }
+  if (a.prerelease.length === 0 || b.prerelease.length === 0) {
+    if (a.prerelease.length === b.prerelease.length) return 0;
+    return a.prerelease.length === 0 ? 1 : -1;
+  }
+  const length = Math.max(a.prerelease.length, b.prerelease.length);
+  for (let i = 0; i < length; i++) {
+    const left = a.prerelease[i];
+    const right = b.prerelease[i];
+    if (left === undefined) return -1;
+    if (right === undefined) return 1;
+    if (left === right) continue;
+    const leftNumeric = /^\d+$/.test(left);
+    const rightNumeric = /^\d+$/.test(right);
+    if (leftNumeric && rightNumeric) {
+      if (left.length !== right.length) return left.length - right.length;
+      return left < right ? -1 : 1;
+    }
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return left < right ? -1 : 1;
+  }
+  return 0;
 }
 
 /** Semver compare. Numeric comparison keeps 0.1.10 > 0.1.9. */
@@ -107,7 +221,9 @@ function readManifest(deps: UpdateCheckDeps): HarnessManifest {
   try {
     const parsed = JSON.parse(raw) as { version?: unknown; repository?: unknown };
     const version =
-      typeof parsed.version === "string" && parseSemver(parsed.version) ? parsed.version : null;
+      typeof parsed.version === "string" && parsePackageSemver(parsed.version)
+        ? parsed.version
+        : null;
     return { version, repositoryUrl: normalizeRepositoryUrl(parsed.repository), readable: true };
   } catch {
     return { version: null, repositoryUrl: null, readable: false };
@@ -115,7 +231,7 @@ function readManifest(deps: UpdateCheckDeps): HarnessManifest {
 }
 
 function readCache(deps: UpdateCheckDeps): UpdateCheckCache | null {
-  const raw = deps.readText(join(deps.harnessRoot, UPDATE_CHECK_CACHE_PATH));
+  const raw = deps.readText(cachePath(deps));
   if (raw === null) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<UpdateCheckCache>;
@@ -128,6 +244,10 @@ function readCache(deps: UpdateCheckDeps): UpdateCheckCache | null {
   } catch {
     return null;
   }
+}
+
+function cachePath(deps: UpdateCheckDeps): string {
+  return join(deps.cacheRoot?.() ?? deps.harnessRoot, UPDATE_CHECK_CACHE_PATH);
 }
 
 function failOpen(localVersion: string | null, detail: string): UpdateCheckResult {
@@ -193,19 +313,28 @@ export function checkForUpdate(deps: UpdateCheckDeps): UpdateCheckResult {
       source = "remote";
       const next: UpdateCheckCache = { checkedAtMs: deps.nowMs(), latestVersion, remote };
       try {
-        deps.writeText(join(deps.harnessRoot, UPDATE_CHECK_CACHE_PATH), JSON.stringify(next));
+        deps.writeText(cachePath(deps), JSON.stringify(next));
       } catch {
         // Fail-open: cache write failure only means the next status run checks remote again.
       }
     }
 
-    const local = parseSemver(localVersion);
-    const latest = latestVersion ? parseSemver(latestVersion) : null;
+    const local = parsePackageSemver(localVersion);
+    const latestStable = latestVersion ? parseSemver(latestVersion) : null;
+    const latest = latestStable
+      ? {
+          major: latestStable[0],
+          minor: latestStable[1],
+          patch: latestStable[2],
+          prerelease: [],
+          build: [],
+        }
+      : null;
     return {
       checked: true,
       localVersion,
       latestVersion,
-      updateAvailable: Boolean(local && latest && compareSemver(latest, local) > 0),
+      updateAvailable: Boolean(local && latest && comparePackageSemver(latest, local) > 0),
       source,
       detail: null,
     };
@@ -259,6 +388,7 @@ export function nodeUpdateCheckDeps(
       writeText: () => {},
       hasOwnGit: () => false,
       remoteOverride: () => process.env[UPDATE_CHECK_REMOTE_ENV]?.trim() || null,
+      cacheRoot: () => process.env[UPDATE_CHECK_CACHE_DIR_ENV]?.trim() || null,
       listRemoteTags: () => null,
     };
   }
@@ -273,17 +403,21 @@ export function nodeUpdateCheckDeps(
       }
     },
     writeText: (p, c) => {
-      mkdirSync(dirname(p), { recursive: true });
+      ensureDir(dirname(p), { recursive: true });
       writeFileSync(p, c);
     },
     hasOwnGit: () => existsSync(join(harnessRoot, ".git")),
     remoteOverride: () => process.env[UPDATE_CHECK_REMOTE_ENV]?.trim() || null,
+    cacheRoot: () => process.env[UPDATE_CHECK_CACHE_DIR_ENV]?.trim() || null,
     listRemoteTags: (remote) => {
-      const res = spawnSync("git", ["ls-remote", "--tags", remote], {
+      const invocation = gitLsRemoteInvocation(remote);
+      const res = spawnSync(invocation.command, invocation.args, {
         cwd: harnessRoot,
         encoding: "utf8",
         timeout: LS_REMOTE_TIMEOUT_MS,
         stdio: ["ignore", "pipe", "ignore"],
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+        windowsHide: true,
       });
       if (res.error || res.status !== 0 || typeof res.stdout !== "string") return null;
       const tags: string[] = [];

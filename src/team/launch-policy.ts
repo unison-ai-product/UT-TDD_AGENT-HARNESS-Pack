@@ -1,10 +1,10 @@
-import type { ExecutionMode } from "../runtime/detect";
-import type { TeamDefinition, TeamMember } from "../schema/team";
+import type { ExecutionMode } from "../runtime/detect.ts";
+import type { TeamDefinition, TeamMember } from "../schema/team.ts";
 import {
   inferTaskDifficulty,
   type ProposalSubagentLaneName,
   type TaskDifficulty,
-} from "./model-policy";
+} from "./model-policy.ts";
 
 export type TeamLaunchTrigger = "difficulty" | "risk" | "simple" | "unavailable";
 

@@ -6,7 +6,7 @@ import {
   checkChangeImpact,
   checkChangeSetIntegrity,
   checkModuleDrift,
-} from "../src/doctor/lint-gates";
+} from "../src/doctor/lint-gates.ts";
 
 describe("doctor lint gate direct checks", () => {
   it("fails closed when the repo root cannot be read", () => {

@@ -1,5 +1,5 @@
-import { checkCrossAgentModelPair } from "../schema";
-import { isSecretLike } from "./index";
+import { checkCrossAgentModelPair } from "../schema/index.ts";
+import { isSecretLike } from "./index.ts";
 
 // Pure guardrail-decision invariant logic. Lives in state-db (next to the
 // guardrail_decisions table + the isSecretLike/upsert primitives it relies on)

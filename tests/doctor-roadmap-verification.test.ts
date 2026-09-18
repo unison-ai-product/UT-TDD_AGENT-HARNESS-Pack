@@ -1,8 +1,8 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkRoadmap as checkRoadmapFromIndex } from "../src/doctor/index";
-import { checkRoadmap, checkVerificationGroupsResult } from "../src/doctor/roadmap-verification";
+import { checkRoadmap as checkRoadmapFromIndex } from "../src/doctor/index.ts";
+import { checkRoadmap, checkVerificationGroupsResult } from "../src/doctor/roadmap-verification.ts";
 
 describe("doctor roadmap verification checks", () => {
   it("fails closed when roadmap and verification inputs cannot read the repo root", () => {

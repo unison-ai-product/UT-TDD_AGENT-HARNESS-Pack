@@ -16,6 +16,39 @@ applies_to:
     - Forward
     - Add-feature
     - Reverse
+decision_points:
+  - when: "A command (ut-tdd doctor, npm run test, etc.) fails and produces long output"
+    choose: "Read the full output"
+    over: "Truncating with | head or | tail"
+    because: "Truncation has caused repeated false-diagnoses where a downstream error message was treated as the root cause"
+  - when: "The failure class (environmental / governance / implementation / test oracle) is not yet clear"
+    choose: "Complete Step 1 classification before touching code"
+    over: "Jumping straight to an implementation fix because the symptom looks like a logic error"
+    because: "Misclassifying environmental as implementation is named as a common source of wasted work"
+  - when: "The user forces a stop or an unexpected session termination occurs"
+    choose: "Classify it as Incident-level Recovery regardless of apparent technical severity"
+    over: "Treating it as a low-severity environmental hiccup"
+    because: "A forced stop is explicitly classified as Incident-level Recovery regardless of apparent technical severity"
+  - when: "The same subject (file, gate, or test) has failed 3 consecutive times"
+    choose: "Stop fixing and escalate one level up (design/contract/baseline) or open a Recovery PLAN"
+    over: "Attempting a 4th tweak based on the same working hypothesis"
+    because: "Three failed attempts mean the working hypothesis or architecture is wrong, not that the next tweak will land (Iron Law / 3-attempt escalation, mechanized by evaluateAttemptEscalation)"
+  - when: "ut-tdd doctor exits 0"
+    choose: "Treat it as structural governance passing only, not proof the system is defect-free"
+    over: "Treating a green doctor run as 'nothing is wrong'"
+    because: "A false-green gate (coverage without substance) can co-exist with a real defect"
+  - when: "A command fails on native Windows and the error mentions syntax, paths, or unrecognized tokens"
+    choose: "First check for a shell-dialect mismatch (POSIX syntax in PowerShell, `/dev/null` vs `$null`, `$VAR` vs `$env:VAR`, backtick vs backslash escaping) before suspecting the code under test"
+    over: "Treating the failure as an implementation defect and editing source"
+    because: "This repo is native-Windows first-class with two shells (PowerShell primary, Bash POSIX-only); dialect mismatch reproduces as a hard failure that disappears when the command is run in its intended shell"
+  - when: "Diagnosing a PowerShell step that 'succeeded' visually but the pipeline reports exit 1"
+    choose: "Check `$LASTEXITCODE` semantics: `-ErrorAction SilentlyContinue` suppresses the message but the cmdlet failure still yields a non-zero exit; use `try { ... -ErrorAction Stop } catch {}` when the failure is genuinely non-fatal"
+    over: "Adding `-ErrorAction SilentlyContinue` and assuming the step is now green"
+    because: "SilentlyContinue hides output only; the recorded exit code still fails CI/hook gates and the silent step becomes an undiagnosable false-red"
+  - when: "A subagent's narrative claims a task is complete or a state is correct"
+    choose: "Verify with git status, direct file reads, and ut-tdd status against actual harness state"
+    over: "Trusting the subagent's narrative output as ground truth"
+    because: "Diagnosing from agent narrative output is listed as an anti-pattern; actual state must be checked"
 ---
 
 # debugging and error recovery
@@ -28,7 +61,7 @@ and a PLAN is open, apply the error-fix skill for the fix itself.
 ## When to load this skill
 
 - `ut-tdd doctor` exits non-zero and the root cause is not obvious.
-- `bun run test`, `bun run typecheck`, or `bun run lint` fails on CI or locally.
+- `npm run test`, `npm run typecheck`, or `npm run lint` fails on CI or locally.
 - A runtime error appears in `.ut-tdd/` state or a hook entrypoint.
 - An agent subagent output is inconsistent with expected harness state.
 - A forced stop or unexpected session termination occurred (highest-severity
@@ -58,7 +91,7 @@ Determine whether the failure is:
   `CLAUDE_PROJECT_DIR` not set. Check `ut-tdd doctor` environment checks first.
 - **Governance** — orphaned PLAN, missing design doc, broken dependency link,
   schema mismatch. Check `ut-tdd doctor` governance checks and `ut-tdd plan lint`.
-- **Implementation** — a logic error in `src/`. Confirm with `bun run test` and
+- **Implementation** — a logic error in `src/`. Confirm with `npm run test` and
   a targeted test run.
 - **Test oracle** — a test is asserting the wrong thing, or a false-green was
   accepted. Confirm by reading the test and the spec it should be testing.
@@ -83,9 +116,9 @@ of apparent technical severity.
 Before opening a PLAN, confirm the failure is reproducible:
 
 ```
-bun run typecheck
-bun run lint
-bun run test
+npm run typecheck
+npm run lint
+npm run test
 ut-tdd doctor
 ut-tdd status
 ```

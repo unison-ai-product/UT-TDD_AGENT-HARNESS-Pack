@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import ts from "typescript";
-import { importedSourceModule, lineOf, normalizePath, sourceModule } from "./shared";
+import { importedSourceModule, lineOf, normalizePath, sourceModule } from "./shared.ts";
 
 export type CodingRulesScope = "source" | "test";
 
@@ -174,8 +174,18 @@ function isFunctionLike(node: ts.Node): node is ts.FunctionLikeDeclaration {
   );
 }
 
-function catchHasOnlyThrow(block: ts.Block): boolean {
-  return block.statements.length === 1 && ts.isThrowStatement(block.statements[0]);
+function catchOnlyRethrowsCapturedError(node: ts.CatchClause): boolean {
+  if (node.block.statements.length !== 1 || !ts.isThrowStatement(node.block.statements[0])) {
+    return false;
+  }
+  const captured = node.variableDeclaration?.name;
+  const thrown = node.block.statements[0].expression;
+  return Boolean(
+    captured &&
+      ts.isIdentifier(captured) &&
+      ts.isIdentifier(thrown) &&
+      captured.text === thrown.text,
+  );
 }
 
 function catchHasComment(block: ts.Block, sourceFile: ts.SourceFile): boolean {
@@ -392,7 +402,7 @@ export function analyzeCodingRules(
         doc.scope === "source" &&
         ts.isCatchClause(node) &&
         ((node.block.statements.length === 0 && !catchHasComment(node.block, sourceFile)) ||
-          catchHasOnlyThrow(node.block))
+          catchOnlyRethrowsCapturedError(node))
       ) {
         violations.push({
           path: doc.path,

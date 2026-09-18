@@ -16,6 +16,27 @@ applies_to:
     - Reverse
     - Recovery
     - Refactor
+decision_points:
+  - when: "The pre-review checklist (typecheck/lint/test/doctor/review) has any failing command."
+    choose: "Surface the failure to the author before opening any file for review."
+    over: "Reviewing the code anyway and noting the build failure alongside design findings."
+    because: "The skill states reviewing broken code conflates build errors with review findings, muddying which issues are genuine review defects."
+  - when: "Axis 1 review finds implementation behavior that diverges from the documented L5/L6 design doc contract."
+    choose: "Record it as a defect."
+    over: "Treating it as an acceptable judgement call by the implementer."
+    because: "The skill explicitly states a deviation from the design doc is a defect, not a judgement call — design docs are the contract, not a suggestion."
+  - when: "An FR cited in the PLAN's `review_evidence` has no design-doc section or test file tracing to it (Axis 3)."
+    choose: "Mark it as an open obligation."
+    over: "Treating the FR as completed because it is listed in review_evidence."
+    because: "Listing an FR in review_evidence is a claim, not proof; the skill requires an actual downstream artifact to close the trace."
+  - when: "A reviewer wants to record a CONDITIONAL outcome for a review finding."
+    choose: "Include a follow-up PLAN reference alongside the CONDITIONAL outcome."
+    over: "Recording CONDITIONAL alone without a linked follow-up."
+    because: "The skill states a CONDITIONAL outcome without a follow-up PLAN reference is treated as FAIL — unlinked conditions have no enforcement path."
+  - when: "Running in hybrid mode versus single-runtime mode for the review step."
+    choose: "Dispatch to a separate code-reviewer subagent via `ut-tdd claude --role code-reviewer` in hybrid mode."
+    over: "Performing the five-axis review in the same session/runtime that implemented the change."
+    because: "Cross-agent review evidence (FR-L1-21) requires an independent check; single-runtime mode is only the fallback, recorded explicitly as `intra_runtime_subagent`."
 ---
 
 # code review
@@ -27,6 +48,11 @@ gate requires recorded review findings.
 
 ## When to load this skill
 
+Boundary: this skill owns the general five-axis review at trace-freeze / accept.
+W-gate (design <-> test) pair closure and Refactor/Retrofit quality-bar
+judgement are owned by `code-review-and-quality.md` — non-overlapping
+responsibilities; load both when a PLAN needs both.
+
 - Entering the trace-freeze gate of any Forward or Add-feature PLAN.
 - A Recovery or Refactor PLAN requires evidence that the change does not
   introduce new defects.
@@ -37,9 +63,9 @@ gate requires recorded review findings.
 Run these before opening any file:
 
 ```
-bun run typecheck
-bun run lint
-bun run test
+npm run typecheck
+npm run lint
+npm run test
 ut-tdd doctor
 ut-tdd review --uncommitted
 ```

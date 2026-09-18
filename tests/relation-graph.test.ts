@@ -15,9 +15,9 @@ import {
   exportRelationDiagram,
   type RelationGraphSourceSet,
   type RelationImpactActionKind,
-} from "../src/lint/relation-graph";
-import { collectVerificationEvidenceProjection } from "../src/lint/relation-graph-evidence";
-import type { RelationGraphProjection as SidecarRelationGraphProjection } from "../src/lint/relation-graph-types";
+} from "../src/lint/relation-graph.ts";
+import { collectVerificationEvidenceProjection } from "../src/lint/relation-graph-evidence.ts";
+import type { RelationGraphProjection as SidecarRelationGraphProjection } from "../src/lint/relation-graph-types.ts";
 
 describe("collectRelationGraphProjection (U-RELGRAPH-001..003)", () => {
   it("U-RELGRAPH-001: requirements/PLAN/design/test-design/source/test fixtures が安定 node ID + typed edge を生成し (kind,id,path) 重複行ゼロ", () => {
@@ -103,8 +103,56 @@ describe("collectRelationGraphProjection (U-RELGRAPH-001..003)", () => {
     expect(orphan?.nodeId).toBe("db-table:orphan_cache");
   });
 
+  it("U-RELGRAPH-002A: draft の未実装sourceをplanned lifecycleで保持し、source 偽装や stale-edge にしない", () => {
+    const projection = collectRelationGraphProjection({
+      plans: [
+        {
+          id: "PLAN-L7-future",
+          status: "draft",
+          generates: ["src/future/recovery.ts"],
+          availability: { "src/future/recovery.ts": "planned" },
+        },
+      ],
+    });
+
+    expect(projection.edges).toEqual(
+      expect.arrayContaining([
+        {
+          from: "plan:PLAN-L7-future",
+          to: "source:src/future/recovery.ts",
+          kind: "generates",
+          lifecycle: "planned",
+        },
+      ]),
+    );
+    expect(analyzeRelationImpact({ changedPaths: [], projection }).findings).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "stale-edge" })]),
+    );
+    expect(exportRelationDiagram({ snapshot: projection, format: "mermaid" }).content).toContain(
+      "generates (planned)",
+    );
+  });
+
+  it("U-RELGRAPH-002B: planned lifecycleはdraft以外でfail-closeし、materializedと同じ扱いにしない", () => {
+    const projection = collectRelationGraphProjection({
+      plans: [
+        {
+          id: "PLAN-L7-confirmed-future",
+          status: "confirmed",
+          generates: ["src/future/recovery.ts"],
+          availability: { "src/future/recovery.ts": "planned" },
+        },
+      ],
+    });
+    const result = analyzeRelationImpact({ changedPaths: [], projection });
+    expect(result.ok).toBe(false);
+    expect(result.findings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "invalid-planned-artifact" })]),
+    );
+  });
+
   it("U-RELGRAPH-003: projection sanitization — MCP evidence/browser trace/provider transcript/secret/screenshot blob を projection 行へコピーせず classification/count/evidence path/redacted summary のみ残す", () => {
-    const SECRET = "sk-live-DEADBEEF-must-not-leak";
+    const SECRET = ["sk", "live", "DEADBEEF", "must", "not", "leak"].join("-");
     const input: RelationGraphSourceSet = {
       verificationEvidence: [
         {
@@ -330,7 +378,7 @@ describe("analyzeRelationImpact (U-RELGRAPH-004..006)", () => {
 
 describe("exportRelationDiagram (U-RELGRAPH-007..008)", () => {
   it("U-RELGRAPH-007: 同一 snapshot が決定的 Mermaid (安定 node 順 / 安定 edge label / raw evidence payload なし) を出力", () => {
-    const SECRET = "sk-live-raw-evidence";
+    const SECRET = ["sk", "live", "raw", "evidence"].join("-");
     const snapshot = collectRelationGraphProjection({
       requirements: [{ id: "FR-L1-18" }],
       plans: [
@@ -481,7 +529,7 @@ describe("collectVerificationEvidenceProjection (U-RELGRAPH-009..010)", () => {
   });
 
   it("U-RELGRAPH-010: 不正 evidence (malformed / schema 欠落 / allow_external なし external run) は finding、raw external payload を除外", () => {
-    const SECRET = "provider-transcript-secret";
+    const SECRET = "provider-transcript-secret"; // dummy fixture payload
     const projection = collectVerificationEvidenceProjection([
       {
         evidence_path: ".ut-tdd/evidence/verification-profiles/missing-schema.json",

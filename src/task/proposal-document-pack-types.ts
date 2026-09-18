@@ -1,4 +1,4 @@
-import type { DesignDocGranularity, RequiredDocument } from "./classify";
+import type { DesignDocGranularity, RequiredDocument } from "./classify.ts";
 
 export interface DocumentPack {
   pattern: string;

@@ -6,8 +6,8 @@ import {
   normalizeModelFamily,
   type ResolvedFamily,
   SUBAGENT_ALLOWLIST,
-} from "../src/runtime/agent-guard";
-import { AGENT_GUARD_BYPASS_HINT, AGENT_TOOL_NAME } from "../src/runtime/agent-guard-policy";
+} from "../src/runtime/agent-guard.ts";
+import { AGENT_GUARD_BYPASS_HINT, AGENT_TOOL_NAME } from "../src/runtime/agent-guard-policy.ts";
 
 const FAMILIES: Record<string, ResolvedFamily> = {
   "be-api": "sonnet",
@@ -19,6 +19,7 @@ const FAMILIES: Record<string, ResolvedFamily> = {
   "refactor-scout": "haiku",
   "pdm-tech-innovation": "opus",
   "code-reviewer": "sonnet",
+  "blind-reviewer": "opus",
   "ut-tdd-tl": "sonnet",
 };
 const legacyRuntimeCommand = `${["he", "lix"].join("")} codex`;
@@ -40,6 +41,8 @@ describe("normalizeModelFamily", () => {
     expect(normalizeModelFamily("claude-sonnet-4-6")).toBe("sonnet");
     expect(normalizeModelFamily("claude-haiku-4-5-20251001")).toBe("haiku");
     expect(normalizeModelFamily("claude-opus-4-7")).toBe("opus");
+    expect(normalizeModelFamily("fable")).toBe("fable");
+    expect(normalizeModelFamily("claude-fable-5")).toBe("fable");
   });
   it("returns null for empty / non-Claude models", () => {
     expect(normalizeModelFamily("")).toBeNull();
@@ -139,10 +142,33 @@ describe("evaluateAgentGuard", () => {
     ).toBe(0);
   });
 
-  it("blocks opus override on a sonnet-family agent", () => {
+  // PLAN-L7-399: model family is a capability *floor*, not an exact pin. An opus-tier
+  // orchestrator must be able to escalate a review-critical subagent to its own tier
+  // (review >= orchestrator, matching tier-router's tierFor() T0-for-consult/verify
+  // invariant) instead of being stuck asking a permanently-lower-tier subagent to
+  // review its work.
+  it("allows escalating a sonnet-family agent to opus (upgrade, not a downgrade)", () => {
     const d = evaluateAgentGuard(agent({ subagent_type: "pmo-sonnet", model: "opus" }), ctx());
+    expect(d.code).toBe(0);
+  });
+
+  it("blocks haiku on a sonnet-family agent (downgrade)", () => {
+    const d = evaluateAgentGuard(agent({ subagent_type: "pmo-sonnet", model: "haiku" }), ctx());
     expect(d.code).toBe(2);
-    expect(d.message).toContain("override");
+    expect(d.message).toContain("downgrade");
+  });
+
+  it("blocks sonnet or haiku on an opus-family agent (downgrade)", () => {
+    const sonnetDowngrade = evaluateAgentGuard(
+      agent({ subagent_type: "pdm-tech-innovation", model: "sonnet" }),
+      ctx(),
+    );
+    expect(sonnetDowngrade.code).toBe(2);
+    expect(sonnetDowngrade.message).toContain("downgrade");
+    expect(
+      evaluateAgentGuard(agent({ subagent_type: "pdm-tech-innovation", model: "haiku" }), ctx())
+        .code,
+    ).toBe(2);
   });
 
   it("allows opus for an opus-frontmatter agent (pdm-*)", () => {
@@ -150,6 +176,46 @@ describe("evaluateAgentGuard", () => {
       evaluateAgentGuard(agent({ subagent_type: "pdm-tech-innovation", model: "opus" }), ctx())
         .code,
     ).toBe(0);
+  });
+
+  it("allows escalating review-critical subagents (code-reviewer/ut-tdd-tl) to opus", () => {
+    expect(
+      evaluateAgentGuard(agent({ subagent_type: "code-reviewer", model: "opus" }), ctx()).code,
+    ).toBe(0);
+    expect(
+      evaluateAgentGuard(agent({ subagent_type: "ut-tdd-tl", model: "opus" }), ctx()).code,
+    ).toBe(0);
+  });
+
+  it("allows fable only for quality-check subagents", () => {
+    expect(
+      evaluateAgentGuard(agent({ subagent_type: "code-reviewer", model: "fable" }), ctx()).code,
+    ).toBe(0);
+    expect(
+      evaluateAgentGuard(agent({ subagent_type: "blind-reviewer", model: "fable" }), ctx()).code,
+    ).toBe(0);
+  });
+
+  it("blocks fable for worker subagents even when it satisfies their capability floor", () => {
+    const d = evaluateAgentGuard(agent({ subagent_type: "be-logic", model: "fable" }), ctx());
+    expect(d.code).toBe(2);
+    expect(d.message).toContain("apex-tier policy");
+  });
+
+  it("allows opus on the blind-reviewer gate subagent and blocks any downgrade", () => {
+    expect(SUBAGENT_ALLOWLIST.has("blind-reviewer")).toBe(true);
+    expect(
+      evaluateAgentGuard(agent({ subagent_type: "blind-reviewer", model: "opus" }), ctx()).code,
+    ).toBe(0);
+    const sonnetDowngrade = evaluateAgentGuard(
+      agent({ subagent_type: "blind-reviewer", model: "sonnet" }),
+      ctx(),
+    );
+    expect(sonnetDowngrade.code).toBe(2);
+    expect(sonnetDowngrade.message).toContain("downgrade");
+    expect(
+      evaluateAgentGuard(agent({ subagent_type: "blind-reviewer", model: "haiku" }), ctx()).code,
+    ).toBe(2);
   });
 
   it("blocks an allowlisted subagent whose definition file is missing", () => {

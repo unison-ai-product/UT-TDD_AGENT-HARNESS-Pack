@@ -18,7 +18,7 @@ Forward (本体) は `../forward/` に定義する。本 dir は **Forward 以�
 
 > **4 軸 (kind / layer / drive / workflow_phase) の意味**は [../README.md §1](../README.md) を参照 (drive = 「どの技術軸で作るか」等)。本台帳の列はこの 4 軸 + owner/承認者/Forward 合流。
 >
-> **重要 (なぞらず翻案)**: source process reference の workflow ファイル名と UT-TDD の `kind` (§1.3 12 種) は **1:1 でない**。Incident / Add-feature は独立 kind を持たず複数 kind を内包し、Discovery / Scrum は同一 `kind=poc` だが **mode (入口) が異なる** (drive ではなく mode で区別。drive は両者とも対象 work の専門職)。本台帳が mode と frontmatter taxonomy の対応の正本。
+> **重要 (なぞらず翻案)**: source process reference の workflow ファイル名と UT-TDD の `kind` (§1.3 13 種) は **1:1 でない**。Incident / Add-feature は独立 kind を持たず複数 kind を内包し、Discovery / Scrum は同一 `kind=poc` だが **mode (入口) が異なる** (drive ではなく mode で区別。drive は両者とも対象 work の専門職)。本台帳が mode と frontmatter taxonomy の対応の正本。
 >
 > **drive 列について (V7 再設計済、§1.6)**: drive = 専門職 5 種 (be/fe/fullstack/db/agent) のみ。横断駆動 (Discovery/Scrum/Reverse/Recovery/Incident) は **対象 work の専門職を継承**する (旧 `poc/scrum/reverse/troubleshoot` を drive にする運用は廃止 = V7)。
 
@@ -34,6 +34,7 @@ Forward (本体) は `../forward/` に定義する。本 dir は **Forward 以�
 | **Retrofit** | [retrofit.md](retrofit.md) | `retrofit` | `be/fe/fullstack/db/agent` | `L7` | 禁止 | se + tl | config_drift は tl 単独 | upgrade 後 → L4 / 影響範囲 L4-L7 / 要件変更 → L1/L3 |
 | **Add-feature** | [add-feature.md](add-feature.md) | `add-design` + `add-impl` (内包) | 親 PLAN と一致 | `L3-L7` | 禁止 | aim + tl | — | 既存維持 + L3/L7 差分 (影響範囲へ直接接続) |
 | **version-up** | [version-up.md](version-up.md) | 親 kind 維持 + `version_target` (新 kind なし) | 対象 work 継承 | 対象実 layer | 禁止 | aim + tl + po | po (将来版活性化) | 将来版活性化時 → add-feature で L2/L3→L7 合流 |
+| **Verify** | [verify.md](verify.md) | `verify` | `be/fe/fullstack/db/agent` | `L8-L14` | 禁止 | qa + tl | — | 検証結果 → Forward / Reverse / Refactor / Recovery |
 | **Research** | [research.md](research.md) | `research` | `be/fe/fullstack/db/agent` | `L1-L4` | 禁止 | tl | — | ADR が L1 要求 / L4 基本設計の判断材料 |
 
 > **multi-kind セルの読み方 (§1.10 排他制約と整合)**: Incident の `L7 (troubleshoot) / cross (recovery)` や Add-feature の `add-design + add-impl` のように 2 kind を内包する mode は、**1 PLAN = 1 kind = 1 layer** が原則 (§1.10 排他: 横断駆動 kind→layer=cross / それ以外→単一実 layer)。Incident は **troubleshoot として起票するなら layer=L7、recovery として起票するなら layer=cross** であり、両者を 1 PLAN に同居させない (障害対応の中で復旧が必要なら recovery PLAN を別途起こす)。表の「/」は OR (kind に応じた択一) であって 1 PLAN への両載せではない。
@@ -52,7 +53,7 @@ concept §2.5 の **9-mode** は legacy framing として **Forward + 上表 8 m
 | 補助 1 系 | Recovery / Incident |
 | v3.1 新規 | Refactor / Retrofit |
 | 前段調査 | Research (§2.5 9-mode 外。kind/branch として正本) |
-| 9-mode 後の追加 | Design-bottomup / version-up |
+| 9-mode 後の追加 | Design-bottomup / version-up / Verify |
 | **工程専門** (mode でない) | screen-design (Forward L2 内) / frontend-design (Forward L10 内) — concept §2.5、独立経路にせず Forward 設計文脈の工程専門として運用 |
 
 ---
@@ -68,6 +69,7 @@ concept §2.5 の **9-mode** は legacy framing として **Forward + 上表 8 m
 | `production_incident` / `hotfix_required` / `regression_prod` (env=prod) | Incident (承認必須) |
 | `feature_addition` / `scope_extension` | Add-feature |
 | `version_deferral` (将来版へ保全) | version-up |
+| `verification_plan` / `quality_assurance` / `test_plan` / `right_lung` / `verify` | Verify |
 | `screen_addition_to_backend` / `design_bottomup` / `backend_derived_screen` / `add_ui_to_backend` | Design-bottomup |
 | `user_feedback_iteration` / `requirement_continuous_refinement` | Scrum |
 | 要件未確定 / 実現性不透明 | Discovery |
@@ -88,23 +90,25 @@ concept §2.5 の **9-mode** は legacy framing として **Forward + 上表 8 m
 
 ---
 
-## 6. git ライフサイクル (Issue 起点スパイン、利用者チーム向け仕様)
+## 6. git ライフサイクル (Execution Ledger起点、Forward escapeだけIssue、利用者チーム向け仕様)
 
 > **正本 = requirements §6.8 / §6.9**。本節はその mode 別要約。**harness 利用者チームに課す製品仕様**であり、harness 開発者 (solo/main 直) の手順ではない (Phase 0-A では緩和、Phase 0-B で有効化、§6.5)。
 
-全 mode は **問題/signal 起点 → Issue → PLAN → branch → PR+CI → merge+close** の一本道に乗る (§6.8.1)。Forward も「発注元 Issue (要件)」起点。
+通常Forwardは **PLAN Asset / Execution Ledger → branch → PR+CI → merge** で進み、Issueを必須にしない。
+正規Forward辺を外れる場合だけ **escape観測 → drive選択 → Issue projection → 駆動PLAN/branch → 再合流test → PR+CI → merge+close** を通る (§6.8.1)。
 
 | mode | 起点 (Issue 化する signal) | branch prefix (§6.1) | merge/CI 単位 (§6.9) | close |
 |------|---------------------------|----------------------|----------------------|-------|
-| Forward (design) | 発注元要件 Issue | `design/*` | 設計 PLAN/hub 完了 PR で vmodel-lint CI | hub merge |
+| Forward (design) | PLAN Asset / Execution Ledger (Issue任意) | `design/*` | 設計 PLAN/hub 完了 PR で vmodel-lint CI | hub merge |
 | Forward (impl) | 同上 | `feature/*` | **G7 trace freeze で全量 CI (本命アンカー)** | G7 merge |
 | Discovery / Scrum | requirement_undefined / user_feedback | `poc/*` | **CI 回さない** (使い捨て)。confirmed→Reverse→`feature/*` | Reverse 合流時 |
 | Reverse | drift / fullback | `reverse/*` | R4 routing 先 `feature/*` の G7 | Forward 合流時 |
 | Incident / Recovery | regression_prod / regression_dev | `hotfix/*` | 緊急 harness-check サブセット | hotfix merge + 恒久対策は別 Issue |
 | Add-feature | feature_addition | `add/*` | 親 PLAN と同 PR | merge → **最頻は後段 `reverse/*` で L3 要件 back-fill** (§1.1 経路 B) |
 | Refactor / Retrofit | debt_degradation / dependency_outdated **or improvement-backlog** | `refactor/*` | L7 内 G7 | merge |
+| Verify | verification_plan / quality_assurance | `verify/*` | harness-check + 対象 profile/gate evidence | 検証証跡 + defect routing |
 
-**右腕 (L8-L14) は post-merge/scheduled CI** で、失敗時は §6.8.4 に従い **Issue を自動起票 → Recovery/Incident/Add-feature で差し戻し**。poc/* は merge せず CI 分を浪費しない (§6.4)。粒度は **1 Issue = 1 PLAN/hub = 1 branch** (§6.8.2)、PLAN frontmatter `github_issue_id` で close 漏れ機械検知。
+**右腕 (L8-L14) は post-merge/scheduled CI** で、失敗時は §6.8.4 に従い **escape episodeとIssueを自動起票 → Recovery/Incident/Add-feature で差し戻し**。poc/* は merge せず CI 分を浪費しない (§6.4)。粒度は **1 escape episode = 1 Issue = 1駆動entry branch** (§6.8.2)。通常Forwardへ空Issueを作らない。
 
 ## 7. このドキュメントの位置付け
 

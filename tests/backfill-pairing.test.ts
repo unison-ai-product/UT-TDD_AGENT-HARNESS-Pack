@@ -12,7 +12,7 @@ import {
   parseGlossaryTerms,
   parsePlan,
   parseRequires,
-} from "../src/lint/backfill-pairing";
+} from "../src/lint/backfill-pairing.ts";
 
 function plan(over: Partial<ParsedPlan> = {}): ParsedPlan {
   return {

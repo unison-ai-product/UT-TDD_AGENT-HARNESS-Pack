@@ -9,7 +9,7 @@ import {
   extractL3DerivedEntities,
   extractPrimaryEntities,
   loadBusiness,
-} from "../src/lint/entity-coverage";
+} from "../src/lint/entity-coverage.ts";
 
 describe("Entity coverage (DDD entity 整合の機械検証)", () => {
   const business = loadBusiness();

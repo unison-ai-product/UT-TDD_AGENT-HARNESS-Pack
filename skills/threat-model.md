@@ -14,6 +14,27 @@ applies_to:
     - Add-feature
     - Reverse
     - Recovery
+decision_points:
+  - when: "a surface is described as \"internal-only\""
+    choose: "threat-model it with the same rigor as an external-facing surface"
+    over: "skipping threat modelling because it is internal"
+    because: "internal surfaces are equally exploitable via prompt injection; the agent guard only catches external bypass attempts"
+  - when: "deciding where to record threat model output"
+    choose: "docs/design/L3/<plan-id>-threat-model.md"
+    over: "writing the threat model directly into handover files"
+    because: "docs/design/L3/ is versioned and discoverable by ut-tdd doctor; handover files are transient"
+  - when: "`ut-tdd guardrail` reports no findings"
+    choose: "treat it as one input and still manually enumerate novel attack surfaces"
+    over: "treating guardrail-green as a complete threat model"
+    because: "guardrail checks secrets and known patterns only; it does not enumerate new attack surfaces"
+  - when: "the agent-guard hook receives an unknown subagent_type or missing model field"
+    choose: "fail closed (exit non-zero)"
+    over: "failing open and allowing the call through"
+    because: "fail-open on an unrecognized agent identity defeats the purpose of the allowlist guard"
+  - when: "a guard bypass occurs via UT_TDD_ALLOW_RAW_AGENT=1"
+    choose: "require a written evidence record in .ut-tdd/audit/"
+    over: "allowing a silent bypass with no trace"
+    because: "an unrecorded bypass cannot be reviewed or attributed after the fact"
 ---
 
 # threat model

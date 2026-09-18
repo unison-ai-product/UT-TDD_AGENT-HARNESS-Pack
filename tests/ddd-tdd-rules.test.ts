@@ -4,7 +4,7 @@ import {
   type DddTddInputs,
   dddTddRulesMessages,
   loadDddTddInputs,
-} from "../src/lint/ddd-tdd-rules";
+} from "../src/lint/ddd-tdd-rules.ts";
 
 function baseInputs(overrides: Partial<DddTddInputs> = {}): DddTddInputs {
   return {

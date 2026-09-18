@@ -5,8 +5,8 @@ import {
   changeImpactMessages,
   changeSetIntegrityMessages,
   parseGitPorcelain,
-} from "../src/lint/change-impact";
-import { analyzeDependencyDrift } from "../src/lint/dependency-drift";
+} from "../src/lint/change-impact.ts";
+import { analyzeDependencyDrift } from "../src/lint/dependency-drift.ts";
 
 describe("change-impact lint", () => {
   it("src changes require both design and test/test-design updates", () => {
@@ -88,7 +88,7 @@ describe("change-impact lint", () => {
         { path: "tests/lint-rule.test.ts", text: 'import { rule } from "../src/lint/rule"; rule;' },
         {
           path: "tests/doctor.test.ts",
-          text: 'import { doctor } from "../src/doctor/index"; doctor;',
+          text: 'import { doctor } from "../src/doctor/index.ts"; doctor;',
         },
       ],
     });
@@ -117,7 +117,7 @@ describe("change-impact lint", () => {
         { path: "tests/lint-rule.test.ts", text: 'import { rule } from "../src/lint/rule"; rule;' },
         {
           path: "tests/doctor.test.ts",
-          text: 'import { doctor } from "../src/doctor/index"; doctor;',
+          text: 'import { doctor } from "../src/doctor/index.ts"; doctor;',
         },
       ],
     });

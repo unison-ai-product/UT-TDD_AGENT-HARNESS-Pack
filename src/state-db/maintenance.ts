@@ -6,9 +6,15 @@
  * 本モジュールは充填しない (foundation の rebuild は schema 整備までを deterministic に行う)。
  */
 import { existsSync } from "node:fs";
-import { SCHEMA_VERSION } from "../schema/harness-db";
-import { defaultHarnessDbPath, type HarnessDb, openHarnessDb } from "./index";
-import { type MigrationResult, migrate, missingTables, rowCounts, tableNames } from "./migration";
+import { SCHEMA_VERSION } from "../schema/harness-db.ts";
+import { defaultHarnessDbPath, type HarnessDb, openHarnessDb } from "./index.ts";
+import {
+  type MigrationResult,
+  migrate,
+  missingTables,
+  rowCounts,
+  tableNames,
+} from "./migration.ts";
 
 export interface HarnessDbStatus {
   path: string;

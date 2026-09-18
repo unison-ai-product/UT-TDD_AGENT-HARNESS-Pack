@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .ut-tdd/bin/ut-tdd.mjs hook agent-guard",
+            "command": "node",
+            "args": [".ut-tdd/bin/ut-tdd.mjs","hook","agent-guard"],
             "timeout": 5,
             "blockOnFailure": true,
             "statusMessage": "agent-guard: subagent allowlist/model enforcement"
@@ -18,7 +19,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .ut-tdd/bin/ut-tdd.mjs hook work-guard",
+            "command": "node",
+            "args": [".ut-tdd/bin/ut-tdd.mjs","hook","work-guard"],
             "timeout": 5,
             "blockOnFailure": true,
             "statusMessage": "work-guard: foreign edit protection"
@@ -31,7 +33,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .ut-tdd/bin/ut-tdd.mjs session start",
+            "command": "node",
+            "args": [".ut-tdd/bin/ut-tdd.mjs","session","start"],
             "timeout": 5,
             "statusMessage": "session-log: session start (fail-open)"
           }
@@ -40,11 +43,12 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|Bash",
+        "matcher": "Edit|Write|MultiEdit|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "bun .ut-tdd/bin/ut-tdd.mjs hook post-tool-use",
+            "command": "node",
+            "args": [".ut-tdd/bin/ut-tdd.mjs","hook","post-tool-use"],
             "timeout": 5,
             "statusMessage": "session-log: post tool use (fail-open)"
           }
@@ -56,9 +60,22 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .ut-tdd/bin/ut-tdd.mjs session summary",
+            "command": "node",
+            "args": [".ut-tdd/bin/ut-tdd.mjs","session","summary"],
             "timeout": 5,
             "statusMessage": "session-log: PLAN digest summary (fail-open)"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [".ut-tdd/bin/ut-tdd.mjs","hook","claude-memory-wake"],
+            "timeout": 930,
+            "asyncRewake": true,
+            "statusMessage": "HARNESS memory: Claude宛て通知を待機"
           }
         ]
       }
@@ -68,7 +85,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .ut-tdd/bin/ut-tdd.mjs hook subagent-stop",
+            "command": "node",
+            "args": [".ut-tdd/bin/ut-tdd.mjs","hook","subagent-stop"],
             "timeout": 5,
             "statusMessage": "agent-slots: release oldest guard slot (fail-open)"
           }

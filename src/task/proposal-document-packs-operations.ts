@@ -1,4 +1,4 @@
-import { type DocumentPack, doc } from "./proposal-document-pack-types";
+import { type DocumentPack, doc } from "./proposal-document-pack-types.ts";
 
 export const DOCUMENT_PACKS_OPERATIONS: DocumentPack[] = [
   {
@@ -104,7 +104,7 @@ export const DOCUMENT_PACKS_OPERATIONS: DocumentPack[] = [
     testDocs: [
       doc(
         "acceptance-test-design",
-        "docs/test-design/harness/L3-acceptance-test-design.md",
+        "docs/test-design/harness/L12-acceptance-test-design.md",
         "security acceptance",
       ),
       doc(
@@ -237,7 +237,7 @@ export const DOCUMENT_PACKS_OPERATIONS: DocumentPack[] = [
     testDocs: [
       doc(
         "operational-test-design",
-        "docs/test-design/harness/L1-operational-test-design.md",
+        "docs/test-design/harness/L14-operational-test-design.md",
         "operation test plan",
       ),
       doc(
@@ -292,7 +292,7 @@ export const DOCUMENT_PACKS_OPERATIONS: DocumentPack[] = [
     testDocs: [
       doc(
         "acceptance-test-design",
-        "docs/test-design/harness/L3-acceptance-test-design.md",
+        "docs/test-design/harness/L12-acceptance-test-design.md",
         "quality acceptance",
       ),
       doc(
@@ -337,12 +337,12 @@ export const DOCUMENT_PACKS_OPERATIONS: DocumentPack[] = [
     testDocs: [
       doc(
         "operational-test-design",
-        "docs/test-design/harness/L1-operational-test-design.md",
+        "docs/test-design/harness/L14-operational-test-design.md",
         "overall test strategy",
       ),
       doc(
         "acceptance-test-design",
-        "docs/test-design/harness/L3-acceptance-test-design.md",
+        "docs/test-design/harness/L12-acceptance-test-design.md",
         "acceptance criteria and UAT",
       ),
       doc(
@@ -513,7 +513,7 @@ export const DOCUMENT_PACKS_OPERATIONS: DocumentPack[] = [
     testDocs: [
       doc(
         "acceptance-test-design",
-        "docs/test-design/harness/L3-acceptance-test-design.md",
+        "docs/test-design/harness/L12-acceptance-test-design.md",
         "success condition",
       ),
     ],

@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import type { HarnessDb } from "../state-db/index";
-import { upsertRow } from "../state-db/index";
-import { DRIVE_TDD_FITS, type DriveTddFit } from "./contracts-policy";
+import { stableId } from "../stable-id.ts";
+import type { HarnessDb } from "../state-db/index.ts";
+import { upsertRow } from "../state-db/index.ts";
+import { DRIVE_TDD_FITS, type DriveTddFit } from "./contracts-policy.ts";
 import type {
   CommandEvidence,
   ContractResult,
@@ -9,9 +10,9 @@ import type {
   ProjectionRef,
   Severity,
   TestRunEvidenceInput,
-} from "./contracts-types";
+} from "./contracts-types.ts";
 
-export type { DriveTddFit, TddCompatibility } from "./contracts-policy";
+export type { DriveTddFit, TddCompatibility } from "./contracts-policy.ts";
 export type {
   CommandEvidence,
   ContractResult,
@@ -20,7 +21,7 @@ export type {
   Severity,
   TestCaseEvidence,
   TestRunEvidenceInput,
-} from "./contracts-types";
+} from "./contracts-types.ts";
 
 function finding(
   code: string,
@@ -37,10 +38,6 @@ function finding(
 
 function result(findings: Finding[], evidence_paths: string[] = []): ContractResult {
   return { ok: findings.every((f) => f.severity !== "error"), findings, evidence_paths };
-}
-
-function stableId(prefix: string, value: string): string {
-  return `${prefix}:${value || "unknown"}`.replace(/[^A-Za-z0-9._:-]+/g, "-");
 }
 
 function stableHash(value: string): string {
@@ -267,20 +264,23 @@ export function computeUtHistorySignals(input: {
 }
 
 export type {
+  FilingTarget,
   RouteApprovalPolicy,
   RouteApprovalResult,
   RouteConfigViolation,
   RouteEscalationBoundary,
   RouteEvalResult,
+  RouteFilingResult,
   RouteSignalEntry,
-} from "./routing-contracts";
+} from "./routing-contracts.ts";
 export {
   detectRouteEscalationBoundaries,
   evaluateRouteCommand,
+  routeFiling,
   routeSignalToMode,
   validateDContractDsl,
   validateRouteConfigText,
-} from "./routing-contracts";
+} from "./routing-contracts.ts";
 export function recordCrossCuttingEvent(input: {
   type: string;
   subject_id: string;
@@ -320,7 +320,7 @@ export {
   scoreTaskComplexity,
   suggestSkillInjection,
   validateFolderRules,
-} from "./contracts-extras";
+} from "./contracts-extras.ts";
 export function enforceForwardOrder(input: {
   layer: string;
   gate: string;

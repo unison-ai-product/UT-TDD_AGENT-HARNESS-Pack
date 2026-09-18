@@ -1,0 +1,212 @@
+schema_version: ut-tdd.vmodel-contract/v1
+status: draft
+owner: PO/TL
+source_plan: PLAN-L4-24-declarative-vmodel-contract-right-arm
+principles:
+  authoring_source_precedes_detector: true
+  projection_is_not_authoring_source: true
+  silent_omission_allowed: false
+  right_arm_requires_executable_evidence: true
+forward_workflow:
+  states:
+    - proposed
+    - planned
+    - pair_freeze_ready
+    - pair_frozen
+    - red_frozen
+    - implementing
+    - implementation_complete
+    - trace_freeze_ready
+    - trace_frozen
+    - review_ready
+    - reviewed
+    - accepted
+    - archived
+  exception_states: [blocked, superseded, rejected, reopened]
+  pair_reciprocity_exceptions: [L11, L13]
+  pair_reciprocity_exception_contracts:
+    - layer: L11
+      reason: UAT/trace review is a cross-layer process evidence aggregation, not a single left-layer test-design pair
+      allowed_pair_layers: [L1, L3, L4, L5, L6, L7]
+      required_backlinks: [PLAN-L1-07-vmodel-engine-swap-requirements-delta, PLAN-L4-24-declarative-vmodel-contract-right-arm]
+    - layer: L13
+      reason: production observation follows deploy/acceptance and owns process evidence instead of a test-design pair
+      allowed_pair_layers: [L12]
+      required_backlinks: [PLAN-L12-01-engine-swap-acceptance-deploy, PLAN-L4-24-declarative-vmodel-contract-right-arm]
+layers:
+  - layer: L0
+    gate: G0.5
+    role: charter
+    pair_layers: [L14]
+    required_artifacts: [engine_swap_charter, value_hypothesis]
+    evidence_families: [charter_approval, value_feedback_contract]
+    exit_criteria: charter_confirmed_and_program_transition_open
+    defect_routing: requires_concept_policy
+    approval_role: PO
+  - layer: L1
+    gate: G1
+    role: requirements
+    pair_layers: [L14]
+    required_artifacts: [business_requirements, functional_requirements, nfr, constraints, requirements_trace]
+    evidence_families: [requirements_review, operational_test_design]
+    exit_criteria: all_requirements_traced_to_operational_or_value_evidence
+    defect_routing: requires_requirement_backprop
+    approval_role: PO/TL
+  - layer: L2
+    gate: G2
+    role: screen_design
+    pair_layers: [L10]
+    required_artifacts: [screen_list, navigation, mock]
+    evidence_families: [mock_freeze, ux_validation_contract]
+    exit_criteria: mock_and_screen_requirements_frozen
+    defect_routing: requires_design_normalization
+    approval_role: PO/TL
+  - layer: L3
+    gate: G3
+    role: functional_requirements
+    pair_layers: [L12]
+    required_artifacts: [fr, ac, acceptance_test_design]
+    evidence_families: [fr_ac_trace, acceptance_design_review]
+    exit_criteria: every_fr_has_ac_and_acceptance_oracle
+    defect_routing: requires_requirement_backprop
+    approval_role: PO/TL
+  - layer: L4
+    gate: G4
+    role: basic_design
+    pair_layers: [L9]
+    required_artifacts: [data, architecture, external_if, function, security]
+    evidence_families: [basic_design_review, system_test_design]
+    exit_criteria: architecture_and_system_pair_frozen
+    defect_routing: requires_design_normalization
+    approval_role: TL
+  - layer: L5
+    gate: G5
+    role: detailed_design
+    pair_layers: [L8]
+    required_artifacts: [physical_data, module_decomposition, internal_processing, contracts]
+    evidence_families: [api_schema_freeze, integration_test_design]
+    exit_criteria: detailed_contract_and_integration_pair_frozen
+    defect_routing: requires_design_normalization
+    approval_role: TL
+  - layer: L6
+    gate: G6
+    role: function_design
+    pair_layers: [L7]
+    required_artifacts: [function_spec, unit_test_design, wbs]
+    evidence_families: [signature_freeze, red_test_contract]
+    exit_criteria: function_and_unit_pair_frozen
+    defect_routing: requires_design_normalization
+    approval_role: TL
+  - layer: L7
+    gate: G7
+    role: implementation_valley
+    pair_layers: [L6]
+    required_artifacts: [source_code, test_code, four_artifact_trace]
+    evidence_families: [red_freeze, implementation_tests, trace_freeze, review]
+    exit_criteria: latest_revision_has_all_required_evidence
+    defect_routing: local_impl_only_or_reverse
+    approval_role: TL/reviewer
+  - layer: L8
+    gate: G8
+    role: integration_verification
+    pair_layers: [L5]
+    required_artifacts: [integration_manifest, integration_results]
+    evidence_families: [IT]
+    exit_criteria: mandatory_integration_cases_green_and_defects_routed
+    defect_routing: reverse_to_L5_or_L6
+    approval_role: QA/TL
+    verification_plan_id: PLAN-L8-01-engine-swap-integration-verification
+    governance_artifact: docs/test-design/harness/L8-integration-test-design.md
+    case_id_prefix: IT-
+    evidence_manifest: .ut-tdd/evidence/g8-integration/engine-swap.json
+  - layer: L9
+    gate: G9
+    role: system_verification
+    pair_layers: [L4]
+    required_artifacts: [system_manifest, system_results]
+    evidence_families: [ST, performance, security]
+    exit_criteria: mandatory_system_cases_green_and_design_intent_verified
+    defect_routing: reverse_to_L4
+    approval_role: QA/TL
+    verification_plan_id: PLAN-L9-01-engine-swap-system-verification
+    governance_artifact: docs/test-design/harness/L9-system-test-design.md
+    case_id_prefix: ST-
+    evidence_manifest: .ut-tdd/evidence/g9-system/engine-swap.json
+  - layer: L10
+    gate: G10
+    role: ux_validation
+    pair_layers: [L2]
+    required_artifacts: [ux_manifest, browser_visual_a11y_results]
+    evidence_families: [UXV]
+    exit_criteria: real_data_ux_cases_green_and_findings_routed
+    defect_routing: reverse_to_L2_or_L4
+    approval_role: PO/QA
+    verification_plan_id: PLAN-L10-01-engine-swap-ux-validation
+    governance_artifact: docs/test-design/harness/L10-ux-validation-test-design.md
+    case_id_prefix: UXV-
+    evidence_manifest: .ut-tdd/evidence/g10-ux/engine-swap.json
+  - layer: L11
+    gate: G11
+    role: trace_and_uat_review
+    pair_layers: [L1, L3, L4, L5, L6, L7]
+    required_artifacts: [end_to_end_trace_review, po_uat_decision]
+    evidence_families: [TRACE, UAT]
+    exit_criteria: no_unresolved_trace_or_uat_blocker
+    defect_routing: reverse_to_owning_layer
+    approval_role: PO/TL
+    verification_plan_id: PLAN-L11-01-engine-swap-uat-review
+    governance_artifact: docs/process/evidence/g11-uat-review-design.md
+    case_id_prefix: UAT-
+    evidence_manifest: .ut-tdd/evidence/g11-uat/engine-swap.json
+  - layer: L12
+    gate: G12
+    role: deploy_and_acceptance
+    pair_layers: [L3]
+    required_artifacts: [deploy_receipt, acceptance_results, rollback_readiness]
+    evidence_families: [AT, DEPLOY]
+    exit_criteria: deployment_verified_and_all_mandatory_acceptance_cases_green
+    defect_routing: rollback_or_reverse_to_L3_L7
+    approval_role: PO/TL
+    verification_plan_id: PLAN-L12-01-engine-swap-acceptance-deploy
+    governance_artifact: docs/test-design/harness/L12-acceptance-test-design.md
+    case_id_prefix: AT-
+    evidence_manifest: .ut-tdd/evidence/g12-acceptance/engine-swap.json
+  - layer: L13
+    gate: G13
+    role: production_observation
+    pair_layers: [L12]
+    required_artifacts: [production_smoke, sli_slo_observation, rollback_decision]
+    evidence_families: [SMOKE, SLI, SLO]
+    exit_criteria: observation_window_closed_without_unrouted_blocker
+    defect_routing: incident_recovery_or_rollback
+    approval_role: PO/TL
+    verification_plan_id: PLAN-L13-01-engine-swap-post-deploy-verification
+    governance_artifact: docs/process/evidence/g13-post-deploy-verification-design.md
+    case_id_prefix: SMOKE-
+    evidence_manifest: .ut-tdd/evidence/g13-post-deploy/engine-swap.json
+  - layer: L14
+    gate: G14
+    role: operational_and_value_verification
+    pair_layers: [L1, L0]
+    required_artifacts: [operational_results, value_results, improvement_feedback]
+    evidence_families: [OT, VALUE]
+    exit_criteria: operational_cases_green_and_value_feedback_routed
+    defect_routing: requirement_backprop_or_concept_policy
+    approval_role: PO
+    verification_plan_id: PLAN-L14-01-engine-swap-operational-value-verification
+    governance_artifact: docs/test-design/harness/L14-vmodel-engine-swap-operational-test-design.md
+    case_id_prefix: OT-
+    evidence_manifest: .ut-tdd/evidence/g14-operational/engine-swap.json
+invariants:
+  - id: VMC-001
+    rule: every_layer_L0_through_L14_appears_exactly_once
+  - id: VMC-002
+    rule: every_gate_G0_5_and_G1_through_G14_appears_exactly_once
+  - id: VMC-003
+    rule: detector_registry_is_derived_from_this_contract
+  - id: VMC-004
+    rule: L8_through_L14_each_have_verify_plan_and_executable_evidence
+  - id: VMC-005
+    rule: missing_contract_data_fails_closed_without_detector_inference
+  - id: VMC-006
+    rule: every_generated_detector_has_independent_mutation_self_proof_receipt

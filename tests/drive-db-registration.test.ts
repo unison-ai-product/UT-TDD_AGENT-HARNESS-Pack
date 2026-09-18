@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,13 +6,16 @@ import {
   analyzeDriveDbRegistration,
   type DriveDbRegistrationStats,
   driveDbRegistrationMessages,
-} from "../src/lint/drive-db-registration";
+} from "../src/lint/drive-db-registration.ts";
 import {
   collectDriveDbRegistrationStats,
+  loadDriveDbRegistrationStats,
   loadOrBuildDriveDbRegistrationStats,
-} from "../src/state-db/drive-registration";
-import { defaultHarnessDbPath, openHarnessDb, upsertRow } from "../src/state-db/index";
-import { migrate } from "../src/state-db/migration";
+} from "../src/state-db/drive-registration.ts";
+import { defaultHarnessDbPath, openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { migrate } from "../src/state-db/migration.ts";
+import { rebuildHarnessDb } from "../src/state-db/projection-writer.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const compliant: DriveDbRegistrationStats = {
   planCount: 10,
@@ -158,24 +161,85 @@ describe("drive DB registration lint", () => {
     }
   });
 
-  it("U-DDBREG-003: current harness.db has automatic registration evidence", () => {
-    const stats = loadOrBuildDriveDbRegistrationStats(process.cwd());
-    const r = analyzeDriveDbRegistration(stats);
+  it("U-DDBREG-003: persisted fixture has complete automatic registration evidence", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-ddbreg-current-"));
+    const planId = "PLAN-TEST-ddbreg-current";
+    try {
+      const planDir = join(root, "docs", "plans");
+      mkdirSync(planDir, { recursive: true });
+      writeFileSync(
+        join(planDir, `${planId}.md`),
+        [
+          "---",
+          `plan_id: ${planId}`,
+          "kind: impl",
+          "layer: L7",
+          "drive: agent",
+          "status: draft",
+          "route_mode: add-feature",
+          "updated: 2026-07-13",
+          "---",
+          "",
+          "## Body",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const db = openHarnessDb(defaultHarnessDbPath(root), { repoRoot: root });
+      try {
+        migrate(db);
+        rebuildHarnessDb({ repoRoot: root, db });
+        const driveRunId = String(
+          db.prepare("SELECT drive_run_id FROM drive_runs WHERE plan_id = ?").get(planId)
+            ?.drive_run_id,
+        );
+        upsertRow(db, {
+          table: "workflow_runs",
+          primaryKey: "workflow_run_id",
+          row: { workflow_run_id: "workflow-1", plan_id: planId, drive_run_id: driveRunId },
+        });
+        upsertRow(db, {
+          table: "model_runs",
+          primaryKey: "run_id",
+          row: { run_id: "model-1", plan_id: planId, role: "worker" },
+        });
+        upsertRow(db, {
+          table: "skill_recommendations",
+          primaryKey: "skill_recommendation_id",
+          row: { skill_recommendation_id: "recommendation-1", plan_id: planId },
+        });
+        upsertRow(db, {
+          table: "skill_invocations",
+          primaryKey: "skill_invocation_id",
+          row: { skill_invocation_id: "invocation-1", plan_id: planId },
+        });
+        upsertRow(db, {
+          table: "hook_events",
+          primaryKey: "event_id",
+          row: { event_id: "hook-1", plan_id: planId },
+        });
+      } finally {
+        db.close();
+      }
 
-    expect(stats).not.toBeNull();
-    if (!existsSync(join(process.cwd(), "docs", "plans"))) {
-      expect(stats?.expectedPlanCount ?? 0).toBe(0);
-      return;
+      const stats = loadDriveDbRegistrationStats(root);
+      const r = analyzeDriveDbRegistration(stats);
+
+      expect(stats).not.toBeNull();
+      expect(r.ok).toBe(true);
+      expect(stats?.expectedPlanCount).toBe(1);
+      expect(stats?.expectedPlanCount).toBe(stats?.planCount);
+      expect(stats?.expectedPlanRegistryFingerprint).toBe(stats?.planRegistryFingerprint);
+      expect(stats?.driveRuns).toBe(1);
+      expect(stats?.workflowRuns).toBe(1);
+      expect(stats?.workflowOrphans).toBe(0);
+      expect(stats?.modelOrphans).toBe(0);
+      expect(stats?.skillRecommendationOrphans).toBe(0);
+      expect(stats?.skillInvocationOrphans).toBe(0);
+      expect(stats?.registeredHookEvents).toBe(1);
+    } finally {
+      removeTestTree(root);
     }
-    expect(r.ok).toBe(true);
-    expect(stats?.expectedPlanCount).toBe(stats?.planCount);
-    expect(stats?.expectedPlanRegistryFingerprint).toBe(stats?.planRegistryFingerprint);
-    expect(stats?.driveRuns).toBeGreaterThan(0);
-    expect(stats?.workflowOrphans).toBe(0);
-    expect(stats?.modelOrphans).toBe(0);
-    expect(stats?.skillRecommendationOrphans).toBe(0);
-    expect(stats?.skillInvocationOrphans).toBe(0);
-    expect(stats?.registeredHookEvents).toBeGreaterThan(0);
   });
 
   it("U-DDBREG-007: stale persisted plan registry falls back to deterministic memory rebuild", () => {
@@ -214,7 +278,7 @@ describe("drive DB registration lint", () => {
       expect(stats?.expectedPlanCount).toBe(1);
       expect(stats?.planRegistryFingerprint).toBe(stats?.expectedPlanRegistryFingerprint);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

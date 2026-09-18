@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { normalizePath } from "../lint/shared";
-import type { HarnessDb } from "./index";
+import { normalizePath } from "../shared/source-text.ts";
+import { shouldScoreSkillAsset } from "../skill-scoring/scoring.ts";
+import type { HarnessDb } from "./index.ts";
 
 export interface RuntimeSessionLogProjection {
   ts?: string;
@@ -61,8 +62,10 @@ export interface RuntimeSkillInvocationProjectionInput {
 }
 
 function verificationVerbFromSessionTarget(event: RuntimeSessionLogProjection): string | null {
-  if (event.event_type !== "tool_use" || event.tool !== "Bash") return null;
-  const match = String(event.target ?? "").match(/^Bash \(([^)]+)\)$/);
+  if (event.event_type !== "tool_use" || !["Bash", "PowerShell"].includes(event.tool ?? "")) {
+    return null;
+  }
+  const match = String(event.target ?? "").match(/^(?:Bash|PowerShell) \(([^)]+)\)$/);
   if (!match) return null;
   const verb = match[1];
   return ["doctor", "eslint", "lint", "test", "tsc", "vitest"].includes(verb) ? verb : null;
@@ -74,6 +77,7 @@ export function projectRuntimeTestRunFromSessionEvent(input: RuntimeTestRunProje
   const verb = verificationVerbFromSessionTarget(event);
   if (!verb) return;
   const planId = deps.resolvePlanId(event.plan_id);
+  const shell = event.tool === "PowerShell" ? "powershell" : "bash";
   const status = event.outcome === "error" ? "failed" : "passed";
   const testRunId = deps.stableId(
     "test-run-runtime",
@@ -86,11 +90,11 @@ export function projectRuntimeTestRunFromSessionEvent(input: RuntimeTestRunProje
       test_run_id: testRunId,
       session_id: event.session_id,
       plan_id: planId,
-      command: event.target ?? `Bash (${verb})`,
-      runner: verb === "doctor" ? "ut-tdd" : "bun",
+      command: event.target ?? `${event.tool} (${verb})`,
+      runner: "node",
       runtime: "hook-session-log",
       os: "",
-      shell: "bash",
+      shell,
       scope: "runtime-hook",
       started_at: event.ts,
       completed_at: event.ts,
@@ -149,7 +153,7 @@ export function projectRuntimeSkillInvocationFromSessionEvent(
   const assets = db
     .prepare("SELECT * FROM automation_assets WHERE asset_type = ? ORDER BY asset_id")
     .all("skill")
-    .filter((asset) => !String(asset.skill_type ?? "").startsWith("skill-map"));
+    .filter(shouldScoreSkillAsset);
   const ranked = assets
     .map((asset) => ({ asset, score: deps.skillScore(plan, asset) }))
     .filter((entry) => entry.score > 0)

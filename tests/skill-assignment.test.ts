@@ -6,7 +6,7 @@ import {
   analyzeSkillAssignments,
   loadSkillAssignmentDocs,
   type SkillAssignmentDoc,
-} from "../src/lint/skill-assignment";
+} from "../src/lint/skill-assignment.ts";
 
 const doc = (metadata: Record<string, unknown>): SkillAssignmentDoc => ({
   path: "skills/example.yaml",

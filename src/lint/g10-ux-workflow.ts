@@ -92,8 +92,9 @@ type JsonRecord = Record<string, unknown>;
 export function loadG10UxWorkflowInput(repoRoot = process.cwd()): G10UxWorkflowInput {
   return {
     repoRoot,
+    // UXV 正本 = 右腕層テスト設計 doc (旧 visual-design.md 同居は PLAN-RECOVERY-09 で移設)
     l10Design: readFileSync(
-      resolve(repoRoot, "docs/design/harness/L10-ux/visual-design.md"),
+      resolve(repoRoot, "docs/test-design/harness/L10-ux-validation-test-design.md"),
       "utf8",
     ),
     gatesMd: readFileSync(resolve(repoRoot, "docs/process/gates.md"), "utf8"),
@@ -364,7 +365,7 @@ export function g10UxWorkflowMessages(result: G10UxWorkflowResult): string[] {
 
 export function canLoadG10UxWorkflowInput(repoRoot: string): boolean {
   return (
-    existsSync(resolve(repoRoot, "docs/design/harness/L10-ux/visual-design.md")) &&
+    existsSync(resolve(repoRoot, "docs/test-design/harness/L10-ux-validation-test-design.md")) &&
     existsSync(resolve(repoRoot, "docs/process/gates.md"))
   );
 }

@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { DriveDbRegistrationStats } from "../lint/drive-db-registration";
-import { loadReviewPlans } from "../lint/review-evidence";
-import { unmappedModeCatalogDocs, workflowModeForPlan } from "../schema/mode-catalog";
-import { defaultHarnessDbPath, type HarnessDb, openHarnessDb } from "./index";
-import { migrate } from "./migration";
-import { rebuildHarnessDb } from "./projection-writer";
+import type { DriveDbRegistrationStats } from "../lint/drive-db-registration.ts";
+import { loadReviewPlans } from "../lint/review-evidence.ts";
+import { unmappedModeCatalogDocs, workflowModeForPlan } from "../schema/mode-catalog.ts";
+import { defaultHarnessDbPath, type HarnessDb, openHarnessDb } from "./index.ts";
+import { migrate } from "./migration.ts";
+import { rebuildHarnessDb } from "./projection-writer.ts";
 
 function count(db: HarnessDb, sql: string): number {
   const row = db.prepare(sql).get();

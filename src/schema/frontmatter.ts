@@ -25,7 +25,8 @@ import {
   statusSchema,
   subDocSchema,
   workflowPhaseSchema,
-} from "./index";
+} from "./index.ts";
+import { PLAN_ID_PATTERN } from "./plan-id.ts";
 
 /**
  * §1.10 A plan_id 形式 (phase-aware + 駆動モデル legible): `PLAN-<token>-<NN>-slug`。
@@ -34,12 +35,10 @@ import {
  * NN = token 内 2 桁以上連番 (L7 等で 99 到達後は 100+ も許容、`\d{2,}`)、slug = kebab。**旧 flat `PLAN-001..004` は archived 別名前空間** (衝突しない)。
  * 狙い: ID 単体で 工程/駆動モデル + phase を判別 → state(DB) が phase↔PLAN を拾える。
  */
-export const planIdSchema = z
-  .string()
-  .regex(/^PLAN-(L(?:[0-9]|1[0-4])|DISCOVERY|REVERSE|RECOVERY|M)-\d{2,}(-[a-z0-9-]+)?$/, {
-    message:
-      "plan_id は PLAN-<token>-<NN>-slug 形式 (token = L0〜L14 / DISCOVERY / REVERSE / RECOVERY / M、§1.10 A)",
-  });
+export const planIdSchema = z.string().regex(PLAN_ID_PATTERN, {
+  message:
+    "plan_id は PLAN-<token>-<NN>-slug 形式 (token = L0〜L14 / DISCOVERY / REVERSE / RECOVERY / M、§1.10 A)",
+});
 
 /** §1.10 A 駆動モデルトークン ↔ kind 対応 (横断駆動プランの ID legibility 正本) */
 export const DRIVE_TOKEN_TO_KIND: Record<string, string> = {
@@ -68,6 +67,70 @@ export const dependenciesSchema = z.object({
   references: z.array(z.string()).default([]),
 });
 
+/** 正規authoring経路が発行する自己検証可能なAdmission証明。既存PLANへの遡及強制はdiff fence側で行う。 */
+const admissionReceiptSchema = z
+  .object({
+    schema_version: z.literal("v2"),
+    receipt_id: z.string().min(1),
+    command_id: z.string().min(1),
+    admitted_at: z.string().min(1),
+    source_digest: z.string().regex(/^sha256:[a-f0-9]{16,64}$/i),
+    decision_digest: z.string().regex(/^sha256:[a-f0-9]{16,64}$/i),
+    receipt_digest: z.string().regex(/^sha256:[a-f0-9]{16,64}$/i),
+    binding: z
+      .object({
+        path: z.string().regex(/^docs\/plans\/PLAN-[A-Za-z0-9-]+\.md$/),
+        plan_id: planIdSchema,
+        asset_id: z.string().regex(/^plan:[a-z0-9][a-z0-9:-]{2,127}$/),
+        revision: z.number().int().positive(),
+        content_digest: z.string().regex(/^sha256:[a-f0-9]{16,64}$/i),
+      })
+      .strict(),
+    route: z.object({ signal: z.string().min(1), mode: z.string().min(1) }).strict(),
+    issue: z
+      .object({
+        provider: z.literal("github"),
+        issue_id: z.number().int().positive(),
+        episode_id: z.string().min(1),
+        projection_digest: z.string().regex(/^sha256:[a-f0-9]{16,64}$/i),
+      })
+      .strict()
+      .optional(),
+    origin: z
+      .object({
+        plan_id: z.string().min(1),
+        revision: z.number().int().positive(),
+        digest: z.string().regex(/^sha256:[a-f0-9]{16,64}$/i),
+      })
+      .strict()
+      .optional(),
+    transition: z
+      .object({
+        direction: z.enum(["implementation_to_design", "design_to_implementation"]),
+        implementation_disposition: z.enum(["preserved", "discarded", "none"]),
+        implementation_target: z
+          .object({
+            target_plan_id: z.string().min(1),
+            target_revision: z.number().int().positive(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    reentry: z
+      .object({
+        target_plan_id: z.string().min(1),
+        target_revision: z.number().int().positive(),
+        phase: z.literal("forward_merge"),
+      })
+      .strict()
+      .optional(),
+    escape_reason: z.string().min(1).optional(),
+    supersedes: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
 /** §1.1 全 variant 共通フィールド (variant 固有制約は superRefine で fail-close) */
 const frontmatterBaseSchema = z.object({
   plan_id: planIdSchema,
@@ -91,7 +154,7 @@ const frontmatterBaseSchema = z.object({
   /** §6.8.2 Issue 起点スパイン: 解決対象 GitHub Issue 番号 (任意、Phase 0-B で recommended)。
    *  feature/hotfix branch の close 漏れ機械検知 + PR `Closes #NN` 連携に使う。 */
   github_issue_id: z.number().int().positive().nullable().optional(),
-  backprop_decision: z.enum(["not_required"]).optional(),
+  backprop_decision: z.enum(["required", "not_required"]).optional(),
   backprop_decision_reason: z.string().optional(),
   /** PLAN-DISCOVERY-09 version-up: 将来版へ保全 (deferred-but-committed-future) する PLAN のマーカー。
    *  status=draft でのみ有効 (landed には付与不可、Codex Critical: landing-time 除外禁止)。label は
@@ -99,6 +162,9 @@ const frontmatterBaseSchema = z.object({
   version_target: z.string().optional(),
   route_signal: z.string().optional(),
   route_mode: z.string().optional(),
+  admission_receipt: admissionReceiptSchema.optional(),
+  /** 右腕検証 PLAN の gate 結合。kind=verify は layer=L8-L14 と G8-G14 を 1:1 で宣言する。 */
+  verification_gate: z.string().optional(),
   /** migration import trace reference (optional migration ledger path) */
   v2_import: z.string().optional(),
   /** review 前置エビデンス (requirements §7.8.7 / .claude/CLAUDE.md MUST、IMP-071)。
@@ -131,7 +197,9 @@ const frontmatterBaseSchema = z.object({
                 "smoke",
               ]),
               command: z.string().min(1),
-              runner: z.enum(["bun", "powershell", "bash", "ci"]),
+              // node = Node 一本化 (PLAN-L7-462) 後の正規 runner。bun は既存証跡の後方互換
+              // のため残置 (新規記録では使わない)。
+              runner: z.enum(["bun", "node", "powershell", "bash", "ci"]),
               scope: z.enum(["full", "targeted", "changed-files", "gate"]),
               exit_code: z.literal(0),
               completed_at: z.string().optional(),
@@ -147,6 +215,14 @@ const frontmatterBaseSchema = z.object({
          *  供給できないため cross_agent を僭称できない。intra_runtime_subagent/human は任意。 */
         worker_model: z.string().optional(),
         reviewer_model: z.string().optional(),
+        lane: z.enum(["claim-blind", "spec-blind"]).optional(),
+        plan_revision: z.string().min(1).optional(),
+        subject_head: z
+          .string()
+          .regex(/^[0-9a-f]{7,40}$/i)
+          .optional(),
+        attack_trials: z.number().int().min(0).optional(),
+        citations: z.array(z.string().min(1)).optional(),
       }),
     )
     .optional(),
@@ -171,6 +247,17 @@ const ALLOWED_LAYER_BY_KIND: Record<string, readonly string[]> = {
   retrofit: ["L7"],
   troubleshoot: ["L7"],
   research: ["L1", "L2", "L3", "L4"],
+  verify: ["L8", "L9", "L10", "L11", "L12", "L13", "L14"],
+};
+
+const VERIFICATION_GATE_BY_LAYER: Record<string, string> = {
+  L8: "G8",
+  L9: "G9",
+  L10: "G10",
+  L11: "G11",
+  L12: "G12",
+  L13: "G13",
+  L14: "G14",
 };
 
 /**
@@ -179,6 +266,95 @@ const ALLOWED_LAYER_BY_KIND: Record<string, readonly string[]> = {
 export const frontmatterSchema = frontmatterBaseSchema.superRefine((fm, ctx) => {
   const isCrossKind = CROSS_KINDS.has(fm.kind);
   const isWorkflowKind = WORKFLOW_KINDS.has(fm.kind);
+  const receipt = fm.admission_receipt;
+  if (receipt) {
+    if (receipt.binding.plan_id !== fm.plan_id) {
+      ctx.addIssue({
+        code: custom,
+        path: ["admission_receipt", "binding", "plan_id"],
+        message: "receipt binding plan_idはfrontmatterと一致必須",
+      });
+    }
+    if (fm.route_signal !== receipt.route.signal || fm.route_mode !== receipt.route.mode) {
+      ctx.addIssue({
+        code: custom,
+        path: ["admission_receipt", "route"],
+        message: "receipt route はtop-level route宣言と一致必須",
+      });
+    }
+    const declaredSupersedes = fm.supersedes ?? [];
+    const receiptedSupersedes = receipt.supersedes ?? [];
+    if (
+      declaredSupersedes.length !== receiptedSupersedes.length ||
+      declaredSupersedes.some((planId, index) => planId !== receiptedSupersedes[index])
+    ) {
+      ctx.addIssue({
+        code: custom,
+        path: ["supersedes"],
+        message: "top-level supersedesはreceiptと完全一致必須",
+      });
+    }
+    if (receipt.issue && fm.github_issue_id !== receipt.issue.issue_id) {
+      ctx.addIssue({
+        code: custom,
+        path: ["github_issue_id"],
+        message: "github_issue_id はreceipt Issueと一致必須",
+      });
+    }
+    const isForward = receipt.route.mode === "forward";
+    if (
+      isForward &&
+      (receipt.issue ||
+        receipt.origin ||
+        receipt.reentry ||
+        receipt.escape_reason ||
+        receipt.transition)
+    ) {
+      ctx.addIssue({
+        code: custom,
+        path: ["admission_receipt"],
+        message: "通常Forward receiptにescape専用項目は許可しない",
+      });
+    }
+    if (
+      !isForward &&
+      (!receipt.issue || !receipt.origin || !receipt.reentry || !receipt.escape_reason)
+    ) {
+      ctx.addIssue({
+        code: custom,
+        path: ["admission_receipt"],
+        message: "Forward外receiptはIssue/origin/reentry/escape_reason必須",
+      });
+    }
+    if (receipt.route.mode === "reverse") {
+      const transition = receipt.transition;
+      if (
+        transition?.direction !== "implementation_to_design" ||
+        transition.implementation_disposition !== "preserved"
+      ) {
+        ctx.addIssue({
+          code: custom,
+          path: ["admission_receipt", "transition"],
+          message: "reverseは実装→設計かつpreserved必須",
+        });
+      }
+    }
+    if (receipt.route.mode === "redesign") {
+      const transition = receipt.transition;
+      if (
+        transition?.direction !== "design_to_implementation" ||
+        !["discarded", "none"].includes(transition.implementation_disposition) ||
+        !transition.implementation_target ||
+        receipt.supersedes?.length !== 1
+      ) {
+        ctx.addIssue({
+          code: custom,
+          path: ["admission_receipt"],
+          message: "redesignは設計→実装、discarded/none、target、supersedes一件必須",
+        });
+      }
+    }
+  }
 
   if (isCrossKind) {
     // §1.1: 横断駆動 (poc/reverse/recovery) → layer は cross のみ
@@ -250,6 +426,36 @@ export const frontmatterSchema = frontmatterBaseSchema.superRefine((fm, ctx) => 
       code: custom,
       path: ["plan_id"],
       message: `plan_id token=${driveTok} は kind=${DRIVE_TOKEN_TO_KIND[driveTok]} のみ (現 kind=${fm.kind}、§1.10 A)`,
+    });
+  }
+  const layerTok = fm.plan_id.match(/^PLAN-(L(?:[0-9]|1[0-4]))-/)?.[1];
+  if (layerTok && fm.layer && fm.layer !== layerTok) {
+    ctx.addIssue({
+      code: custom,
+      path: ["layer"],
+      message: `plan_id token=${layerTok} は layer=${layerTok} のみ (現 layer=${fm.layer}、§1.10 A)`,
+    });
+  }
+  if (fm.kind === "verify") {
+    const expectedGate = fm.layer ? VERIFICATION_GATE_BY_LAYER[fm.layer] : undefined;
+    if (expectedGate && !fm.verification_gate) {
+      ctx.addIssue({
+        code: custom,
+        path: ["verification_gate"],
+        message: `kind=verify + layer=${fm.layer} は verification_gate=${expectedGate} 必須 (§1.10 A / right-arm gate binding)`,
+      });
+    } else if (expectedGate && fm.verification_gate !== expectedGate) {
+      ctx.addIssue({
+        code: custom,
+        path: ["verification_gate"],
+        message: `kind=verify + layer=${fm.layer} は verification_gate=${expectedGate} のみ (現 ${fm.verification_gate})`,
+      });
+    }
+  } else if (fm.verification_gate) {
+    ctx.addIssue({
+      code: custom,
+      path: ["verification_gate"],
+      message: "verification_gate は kind=verify のみ (§1.10 A / right-arm gate binding)",
     });
   }
 

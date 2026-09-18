@@ -10,6 +10,27 @@ applies_to:
   drive_models:
     - Reverse
     - Retrofit
+decision_points:
+  - when: "The kind=reverse PLAN has reverse_type=design or reverse_type=normalization"
+    choose: "Skip R1 entirely and move directly from R0 to R2"
+    over: "Running contract extraction anyway"
+    because: "R1 is explicitly skipped for design and normalization types per the reverse type table"
+  - when: "A contract is only inferable from its callers, with no explicit schema"
+    choose: "Flag it implicit: true and treat it as a high-priority gap candidate"
+    over: "Recording it as adequately documented because callers reveal its shape"
+    because: "Implicit contracts are exactly the high-priority gaps that R3 must hypothesize about"
+  - when: "Contract extraction requires reading a file outside the PLAN's declared scope"
+    choose: "Note the scope expansion explicitly in r1_notes"
+    over: "Silently reading the extra file without recording the expansion"
+    because: "The gate to R2 requires that no contract extraction happened outside declared scope without a note"
+  - when: "An observed contract conflicts with an existing design doc"
+    choose: "Record the conflict in drift_vs_design for that contract entry"
+    over: "Leaving drift_vs_design blank because the design doc still nominally exists"
+    because: "R3 needs the drift_vs_design signal to classify the hypothesis as conflict rather than confirmed"
+  - when: "Contract extraction is incomplete for an in-scope external surface at the R1-to-R2 boundary"
+    choose: "Block the advance to R2"
+    over: "Proceeding to R2 with partial contract coverage"
+    because: "The R2 gate requires every external surface identified in R0 to have a contract entry"
 ---
 
 # reverse r1

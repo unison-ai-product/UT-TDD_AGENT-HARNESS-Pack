@@ -11,15 +11,15 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { analyzeDriveDbRegistration } from "../src/lint/drive-db-registration";
+import { analyzeDriveDbRegistration } from "../src/lint/drive-db-registration.ts";
 import {
   MODE_CATALOG_DOC_FILES,
   ROUTE_MODE_DISPLAY,
   routeModesWithoutCatalogDoc,
   unmappedModeCatalogDocs,
   workflowModeForPlan,
-} from "../src/schema/mode-catalog";
-import { ROUTE_SIGNAL_MAP } from "../src/schema/route-map";
+} from "../src/schema/mode-catalog.ts";
+import { ROUTE_SIGNAL_MAP } from "../src/schema/route-map.ts";
 
 describe("PLAN-L7-243: mode catalog derivation", () => {
   it("route_mode frontmatter wins over plan_id prefix and kind", () => {
@@ -32,6 +32,12 @@ describe("PLAN-L7-243: mode catalog derivation", () => {
     expect(
       workflowModeForPlan({ planId: "PLAN-L7-902-x", routeMode: "version-up", kind: "impl" }),
     ).toBe("Version-up");
+    expect(
+      workflowModeForPlan({ planId: "PLAN-L9-903-x", routeMode: "verify", kind: "verify" }),
+    ).toBe("Verify");
+    expect(
+      workflowModeForPlan({ planId: "PLAN-L4-904-x", routeMode: "redesign", kind: "design" }),
+    ).toBe("Redesign");
   });
 
   it("legacy plans without route_mode fall back to plan_id prefix then kind", () => {
@@ -43,6 +49,7 @@ describe("PLAN-L7-243: mode catalog derivation", () => {
     expect(workflowModeForPlan({ planId: "PLAN-L7-230-x", kind: "refactor" })).toBe("Refactor");
     expect(workflowModeForPlan({ planId: "PLAN-L7-231-x", kind: "troubleshoot" })).toBe("Incident");
     expect(workflowModeForPlan({ planId: "PLAN-L7-232-x", kind: "retrofit" })).toBe("Retrofit");
+    expect(workflowModeForPlan({ planId: "PLAN-L9-233-x", kind: "verify" })).toBe("Verify");
     expect(workflowModeForPlan({ planId: "PLAN-L4-01-x", kind: "design" })).toBe("Forward");
     expect(workflowModeForPlan({ planId: "PLAN-L7-01-x", kind: "impl" })).toBe("Forward");
   });

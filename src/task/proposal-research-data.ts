@@ -1,4 +1,4 @@
-import type { ResearchAdoptionDecision } from "./classify";
+import type { ResearchAdoptionDecision } from "./classify.ts";
 
 const SOURCE_NABLARCH_FINTAN = "Nablarch/Fintan";
 const SOURCE_NABLARCH_STANDARDS = "Nablarch development standards";

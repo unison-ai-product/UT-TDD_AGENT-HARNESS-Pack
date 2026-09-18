@@ -6,7 +6,7 @@ import {
   analyzeImplPlanTrace,
   IMPL_PLAN_TRACE_BASELINE,
   loadImplPlanTraceInput,
-} from "../src/lint/impl-plan-trace";
+} from "../src/lint/impl-plan-trace.ts";
 
 describe("analyzeImplPlanTrace (U-IPT-001..003)", () => {
   const base = {
@@ -40,6 +40,9 @@ describe("loadImplPlanTraceInput real repo (U-IPT-004/005)", () => {
 
   it("U-IPT-005: baseline は 8 件 (IMP-087 の 4 は back-fill で trace = baseline に含めない)", () => {
     expect(IMPL_PLAN_TRACE_BASELINE.size).toBe(8);
+    // 縮小のみ可の回帰網: 新規モジュールを baseline へ足して gate を黙らせない
+    // (2026-08-05 に一度 9 件化した実例の再発防止。trace は PLAN 側で持つ)。
+    expect(IMPL_PLAN_TRACE_BASELINE.has("src/plan/parent-drive-mismatch-baseline.ts")).toBe(false);
     // IMP-087 orphan は baseline でなく back-fill (trace) で解消
     expect(IMPL_PLAN_TRACE_BASELINE.has("src/lint/rule-drift.ts")).toBe(false);
     expect(IMPL_PLAN_TRACE_BASELINE.has("src/gate/review-tier.ts")).toBe(false);

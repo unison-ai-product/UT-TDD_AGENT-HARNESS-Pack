@@ -12,6 +12,27 @@ applies_to:
     - Reverse
     - Retrofit
     - Recovery
+decision_points:
+  - when: "R3 hypothesis shows the requirement itself is ambiguous, not just the design."
+    choose: "route forward_routing to L1 or L3"
+    over: "routing straight to L4"
+    because: "reverse.md §4 routing table maps requirement ambiguity to L1/L3, not to design layers; misrouting hides the real gap at the wrong layer."
+  - when: "Implementation (design artifact) exists at a layer but the paired test-design (③) is absent."
+    choose: "record the layer in missing_pair_artifacts and block the routing destination's pair-freeze gate on it"
+    over: "treating the layer as closed because code/design exists"
+    because: "reverse.md §2.1 requires the test-design pair before G3/G4/G5 can be crossed; skipping this silently reintroduces an untested layer into Forward."
+  - when: "A gap cannot be closed within the current Reverse cycle."
+    choose: "route it to debt or readiness-defer with a new PLAN reference or backlog entry"
+    over: "leaving it unresolved in the gap-register"
+    because: "the R4 exit conditions require every hypothesis to have a resolution entry; an unresolved gap blocks the reverse.md §3 exit checklist from ever going green."
+  - when: "An R3 hypothesis is classified `conflict` (observed behaviour contradicts intended design)."
+    choose: "mark the relevant Forward gate as needing re-evaluation and record the gate ID/rationale manually in the PLAN"
+    over: "silently promoting to Forward without flagging the invalidated gate"
+    because: "`--invalidate-forward` is not yet a machine-enforced gate mechanism, so the manual record is the only safeguard against carrying a stale gate pass into Forward."
+  - when: "Deciding promotion_strategy for a routed gap."
+    choose: "`amend-existing` when a Forward PLAN already covers the routing destination, `new-plan` only when none exists"
+    over: "defaulting to new-plan for every gap"
+    because: "creating redundant PLANs at the same layer/scope fragments ownership and violates the PLAN-overlap discipline in `.claude/CLAUDE.md`."
 ---
 
 # reverse r4

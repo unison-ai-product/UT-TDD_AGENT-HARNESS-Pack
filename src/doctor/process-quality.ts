@@ -4,84 +4,92 @@ import {
   analyzeCycleP4Verification,
   cycleP4VerificationMessages,
   loadCycleP4VerificationDocs,
-} from "../lint/cycle-p4-verification";
-import { analyzeDbCurrency, dbCurrencyMessages } from "../lint/db-currency";
+} from "../lint/cycle-p4-verification.ts";
+import { analyzeDbCurrency, dbCurrencyMessages } from "../lint/db-currency.ts";
 import {
   analyzeDriveDbRegistration,
   driveDbRegistrationMessages,
-} from "../lint/drive-db-registration";
+} from "../lint/drive-db-registration.ts";
 import {
   analyzeDriveModelPassage,
   driveModelPassageMessages,
   loadDriveModelPassageDocs,
-} from "../lint/drive-model-passage";
+} from "../lint/drive-model-passage.ts";
 import {
   analyzeFeedbackLog,
   feedbackLogMessages,
   loadFeedbackLogInput,
-} from "../lint/feedback-log";
+} from "../lint/feedback-log.ts";
 import {
   analyzeFrRoadmapCoverageWithRoot,
   frRoadmapCoverageMessages,
   loadFrRoadmapCoverageDocs,
-} from "../lint/fr-roadmap-coverage";
+} from "../lint/fr-roadmap-coverage.ts";
+import { analyzeGateRunCoverage, gateRunCoverageMessages } from "../lint/gate-run-coverage.ts";
 import {
   analyzeL6Completion,
   canLoadL6CompletionInputs,
   l6CompletionMessages,
   loadL6CompletionInputs,
-} from "../lint/l6-completion";
+} from "../lint/l6-completion.ts";
 import {
   analyzeL6FrCoverage,
   l6FrCoverageMessages,
   loadL6FrCoverageDocs,
-} from "../lint/l6-fr-coverage";
+} from "../lint/l6-fr-coverage.ts";
 import {
   analyzeL7Completion,
   l7CompletionMessages,
   loadL7CompletionDocs,
-} from "../lint/l7-completion";
+} from "../lint/l7-completion.ts";
 import {
   analyzeL14CloseAudit,
   l14CloseAuditMessages,
   loadL14CloseAuditDocs,
-} from "../lint/l14-close-audit";
+} from "../lint/l14-close-audit.ts";
 import {
   analyzePlaceholderDeps,
   loadPlaceholderDepsDocs,
   placeholderDepsMessages,
-} from "../lint/placeholder-deps";
-import { analyzePlanDod, loadPlanDodDocs, planDodMessages } from "../lint/plan-dod";
+} from "../lint/placeholder-deps.ts";
+import { analyzePlanDod, loadPlanDodDocs, planDodMessages } from "../lint/plan-dod.ts";
 import {
   analyzeRuleAutomationClosure,
   loadRuleAutomationClosureDocs,
   ruleAutomationClosureMessages,
-} from "../lint/rule-automation-closure";
+} from "../lint/rule-automation-closure.ts";
 import {
   analyzeScreenImplPairFreeze,
   loadScreenImplPairFreezeInput,
   screenImplPairFreezeMessages,
-} from "../lint/screen-impl-pair-freeze";
+} from "../lint/screen-impl-pair-freeze.ts";
 import {
   analyzeSubDocCatalogDrift,
   loadSubDocCatalogDriftInput,
   subDocCatalogDriftMessages,
-} from "../lint/sub-doc-catalog-drift";
+} from "../lint/sub-doc-catalog-drift.ts";
+import {
+  analyzeSubDocSchemaIntegrity,
+  loadSubDocSchemaIntegrityInput,
+  subDocSchemaIntegrityMessages,
+} from "../lint/sub-doc-schema-integrity.ts";
 import {
   analyzeSubDocSectionStructure,
   loadSubDocSectionStructureInput,
   subDocSectionStructureMessages,
-} from "../lint/sub-doc-section-structure";
+} from "../lint/sub-doc-section-structure.ts";
 import {
   analyzeTelemetryClosure,
   loadTelemetryClosureDocs,
   telemetryClosureMessages,
-} from "../lint/telemetry-closure";
-import { lintPlanWithGate } from "../plan/lint";
+} from "../lint/telemetry-closure.ts";
+import { lintPlanWithGate } from "../plan/lint.ts";
 import {
   loadDriveDbRegistrationStats,
   loadOrBuildDriveDbRegistrationStats,
-} from "../state-db/drive-registration";
+} from "../state-db/drive-registration.ts";
+import { defaultHarnessDbPath, type HarnessDb, openHarnessDb } from "../state-db/index.ts";
+import { rebuildHarnessDb } from "../state-db/projection-writer.ts";
 
 export function checkPlanDod(repoRoot: string): { messages: string[]; ok: boolean } {
   if (!existsSync(repoRoot)) {
@@ -197,6 +205,79 @@ export function checkDbCurrency(repoRoot: string): { messages: string[]; ok: boo
       ok: false,
     };
   }
+}
+
+export function checkGateRunCoverage(repoRoot: string): { messages: string[]; ok: boolean } {
+  if (!existsSync(repoRoot)) {
+    return {
+      messages: ["gate-run-coverage - violation: repo root could not be read"],
+      ok: false,
+    };
+  }
+  try {
+    const r = analyzeGateRunCoverage(loadOrBuildGateRunCoverageStats(repoRoot));
+    return { messages: gateRunCoverageMessages(r), ok: r.ok };
+  } catch {
+    return {
+      messages: ["gate-run-coverage - violation: harness.db gate run coverage could not be read"],
+      ok: false,
+    };
+  }
+}
+
+function loadOrBuildGateRunCoverageStats(repoRoot: string) {
+  const dbPath = defaultHarnessDbPath(repoRoot);
+  const needsRebuild = !existsSync(dbPath);
+  const db = openHarnessDb(dbPath, { repoRoot });
+  try {
+    if (needsRebuild) rebuildHarnessDb({ repoRoot, db });
+    const gateRuns = count(db, "SELECT COUNT(*) AS value FROM gate_runs");
+    const workflowRuns = count(db, "SELECT COUNT(*) AS value FROM workflow_runs");
+    const workflowPlansWithoutGateRun = count(
+      db,
+      `SELECT COUNT(*) AS value
+       FROM (
+         SELECT DISTINCT w.plan_id
+         FROM workflow_runs w
+         WHERE COALESCE(w.plan_id, '') <> ''
+           AND NOT EXISTS (
+             SELECT 1 FROM gate_runs g WHERE g.plan_id = w.plan_id
+           )
+       )`,
+    );
+    const orphanGateRuns = count(
+      db,
+      `SELECT COUNT(*) AS value
+       FROM gate_runs g
+       WHERE COALESCE(g.plan_id, '') <> ''
+         AND NOT EXISTS (
+           SELECT 1 FROM plan_registry p WHERE p.plan_id = g.plan_id
+         )`,
+    );
+    const blankPlanGateRuns = count(
+      db,
+      "SELECT COUNT(*) AS value FROM gate_runs WHERE COALESCE(plan_id, '') = ''",
+    );
+    const invalidEvidenceFindings = count(
+      db,
+      "SELECT COUNT(*) AS value FROM findings WHERE kind = 'invalid-gate-run-evidence' AND status = 'open'",
+    );
+    return {
+      gateRuns,
+      workflowRuns,
+      workflowPlansWithoutGateRun,
+      orphanGateRuns,
+      blankPlanGateRuns,
+      invalidEvidenceFindings,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+function count(db: HarnessDb, sql: string): number {
+  const row = db.prepare(sql).get() as { value?: number } | undefined;
+  return Number(row?.value ?? 0);
 }
 
 export function checkFrRoadmapCoverage(repoRoot: string): { messages: string[]; ok: boolean } {
@@ -338,6 +419,24 @@ export function checkSubDocCatalogDrift(repoRoot: string): { messages: string[];
   } catch {
     return {
       messages: ["sub-doc-catalog-drift - violation: requirements doc could not be read"],
+      ok: false,
+    };
+  }
+}
+
+export function checkSubDocSchemaIntegrity(repoRoot: string): { messages: string[]; ok: boolean } {
+  if (!existsSync(repoRoot)) {
+    return {
+      messages: ["sub-doc-schema-integrity - violation: repo root could not be read"],
+      ok: false,
+    };
+  }
+  try {
+    const r = analyzeSubDocSchemaIntegrity(loadSubDocSchemaIntegrityInput(repoRoot));
+    return { messages: subDocSchemaIntegrityMessages(r), ok: r.ok };
+  } catch {
+    return {
+      messages: ["sub-doc-schema-integrity - violation: design docs could not be read"],
       ok: false,
     };
   }

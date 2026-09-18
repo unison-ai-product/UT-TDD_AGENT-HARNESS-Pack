@@ -11,6 +11,31 @@ applies_to:
     - Reverse
     - Retrofit
     - Recovery
+decision_points:
+  - when: "A structural gap from R2 is already clearly covered by an existing Forward FR or ADR"
+    choose: "Classify the hypothesis as confirmed and wire the trace to the existing artifact"
+    over: "Classifying it as gap and drafting a new Forward document"
+    because: "confirmed means Reverse only needs to connect the existing artifact, not author a new one"
+  - when: "A structural gap from R2 has no Forward artifact covering it at all"
+    choose: "Classify the hypothesis as gap with a draft_routing destination"
+    over: "Classifying it as confirmed on the assumption that coverage exists elsewhere"
+    because: "gap explicitly signals that a new or updated Forward document is needed at the routing destination"
+  - when: "Observed behavior contradicts an existing Forward artifact"
+    choose: "Classify the hypothesis as conflict and name the specific gate (G1/G3/G4/G5) to invalidate"
+    over: "Silently noting the discrepancy without naming a gate"
+    because: "R4's --invalidate-forward action needs the named gate to act on; an unnamed conflict cannot be routed"
+  - when: "R3 is about to advance to R4 but PO has not reviewed the intent hypotheses"
+    choose: "Block the advance until po_reviewed=true and po_review_evidence is populated"
+    over: "Advancing to R4 on the hypotheses alone"
+    because: "PO verification is mandatory for R3; ut-tdd plan lint machine-checks po_reviewed and treats a missing sign-off as a blocking violation"
+  - when: "Drafting the forward_routing candidate for a gap"
+    choose: "Select the routing layer using the reverse.md §4 routing table"
+    over: "Choosing a layer ad hoc based on where the gap seems to fit"
+    because: "The routing table encodes the established L1/L3/L4/L5/gap-only mapping rules for consistency across Reverse cycles"
+  - when: "Recording PO sign-off for the intent hypotheses"
+    choose: "Record it in the PLAN review_evidence field and in .ut-tdd/audit/"
+    over: "Treating a chat discussion with the PO as sufficient evidence"
+    because: "Only PLAN review_evidence and .ut-tdd/audit/ entries are machine-visible and verifiable at the R3-to-R4 gate"
 ---
 
 # reverse r3

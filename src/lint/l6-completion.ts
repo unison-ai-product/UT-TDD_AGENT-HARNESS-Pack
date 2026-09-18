@@ -2,8 +2,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 // A-120 I-3: review_evidence の有無判定は review-evidence.ts を単一正本にする
 // (旧 l6-completion 版は判定ロジックが乖離し review-evidence hard gate と齟齬を生む恐れがあった)。
-import { hasReviewEvidence } from "./review-evidence";
-import { hasDbcTable } from "./shared";
+import { hasReviewEvidence } from "./review-evidence.ts";
+import { hasDbcTable } from "./shared.ts";
 
 export interface L6CompletionDoc {
   path: string;

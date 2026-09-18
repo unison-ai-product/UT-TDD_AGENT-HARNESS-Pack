@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  applyDigestAnchorCandidatesToContent,
   auditGreenCommandDigests,
   type BlobAtCommit,
   type DigestAuditDeps,
@@ -13,8 +14,8 @@ import {
   nodeHistoryScanDeps,
   planDigestMigration,
   toGitPath,
-} from "../src/lint/green-command-digest";
-import type { GreenCommandEvidence, ParsedReviewPlan } from "../src/lint/review-evidence";
+} from "../src/lint/green-command-digest.ts";
+import type { GreenCommandEvidence, ParsedReviewPlan } from "../src/lint/review-evidence.ts";
 
 function plan(
   planId: string,
@@ -285,6 +286,83 @@ describe("planDigestMigration (PLAN-L7-303 dry-run 計画器)", () => {
     );
     expect(out[0]?.disposition).toBe("already-anchored");
     expect(out[0]?.anchor_candidate).toBe("c2");
+  });
+});
+
+describe("applyDigestAnchorCandidatesToContent (PLAN-L7-303 execute 追記)", () => {
+  const content = `---
+plan_id: PLAN-X
+review_evidence:
+  - reviewer: codex
+    review_kind: intra_runtime_subagent
+    green_commands:
+      - kind: unit_test
+        command: "bun test"
+        runner: bun
+        scope: targeted
+        exit_code: 0
+        evidence_path: tests\\real.test.ts
+        output_digest: "sha256:abc123"
+      - kind: lint
+        command: "bun lint"
+        runner: bun
+        scope: targeted
+        exit_code: 0
+        evidence_path: tests\\suspect.test.ts
+        output_digest: "sha256:suspect"
+---
+
+# Body
+`;
+
+  it("recoverable entry に anchor_commit だけを追記し output_digest は変更しない", () => {
+    const result = applyDigestAnchorCandidatesToContent(content, [
+      {
+        file: "PLAN-X.md",
+        plan_id: "PLAN-X",
+        evidence_path: "tests\\real.test.ts",
+        claimed: "sha256:abc123",
+        anchor_candidate: "abcdeffedcba1234567890",
+        disposition: "recoverable",
+      },
+      {
+        file: "PLAN-X.md",
+        plan_id: "PLAN-X",
+        evidence_path: "tests\\suspect.test.ts",
+        claimed: "sha256:suspect",
+        anchor_candidate: null,
+        disposition: "suspect",
+      },
+    ]);
+
+    expect(result.applied).toBe(1);
+    expect(result.content).toContain(
+      'output_digest: "sha256:abc123"\n        anchor_commit: abcdeffedcba1234567890',
+    );
+    expect(result.content).toContain('output_digest: "sha256:suspect"');
+    expect(result.content).not.toContain("anchor_commit: null");
+  });
+
+  it("既に anchor_commit がある entry は二重追記しない", () => {
+    const anchored = content.replace(
+      'output_digest: "sha256:abc123"',
+      'output_digest: "sha256:abc123"\n        anchor_commit: oldsha',
+    );
+    const result = applyDigestAnchorCandidatesToContent(anchored, [
+      {
+        file: "PLAN-X.md",
+        plan_id: "PLAN-X",
+        evidence_path: "tests\\real.test.ts",
+        claimed: "sha256:abc123",
+        anchor_candidate: "newsha",
+        disposition: "recoverable",
+      },
+    ]);
+
+    expect(result.applied).toBe(0);
+    expect(result.skippedAlreadyAnchored).toBe(1);
+    expect(result.content.match(/anchor_commit:/g)).toHaveLength(1);
+    expect(result.content).toContain("anchor_commit: oldsha");
   });
 });
 

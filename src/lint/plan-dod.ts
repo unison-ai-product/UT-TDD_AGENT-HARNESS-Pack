@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fmValue, normalizePath } from "./shared";
+import { fmValue, normalizePath } from "./shared.ts";
 
 const DONE_STATUSES = new Set(["confirmed", "completed"]);
 

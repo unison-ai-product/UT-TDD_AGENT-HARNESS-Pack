@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyVerificationVerb } from "../src/runtime/verb-classify";
+import { classifyVerificationVerb } from "../src/runtime/verb-classify.ts";
 
 describe("verb-classify (PLAN-RECOVERY-05 item 2) — Bash → 検証 verb 正規化", () => {
   // Codex cross-review 検証観点 1: bun / npm / npx / direct binary が同じ verb に落ちる。

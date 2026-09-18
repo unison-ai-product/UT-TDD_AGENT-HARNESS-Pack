@@ -1,5 +1,5 @@
-import type { TableDef } from "./harness-db";
-import { col, pk } from "./harness-db-table-builders";
+import type { TableDef } from "./harness-db.ts";
+import { col, pk } from "./harness-db-table-builders.ts";
 
 export const HARNESS_DB_GRAPH_EXPORT_TABLES: TableDef[] = [
   {

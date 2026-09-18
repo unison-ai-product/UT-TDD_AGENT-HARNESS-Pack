@@ -26,8 +26,8 @@ import type {
   RelationNodeKind,
   VerificationEvidenceInput,
   VerificationProfileRow,
-} from "./relation-graph-types";
-import { normalizePath } from "./shared";
+} from "./relation-graph-types.ts";
+import { normalizePath } from "./shared.ts";
 
 export type {
   DbTableInput,
@@ -55,7 +55,7 @@ export type {
   TestFileInput,
   VerificationEvidenceInput,
   VerificationProfileRow,
-} from "./relation-graph-types";
+} from "./relation-graph-types.ts";
 
 function nodeId(kind: RelationNodeKind, key: string): string {
   return `${kind}:${key}`;
@@ -176,10 +176,26 @@ export function collectRelationGraphProjection(
       });
     }
     for (const src of plan.generates ?? []) {
+      const lifecycle = plan.availability?.[src] ?? "materialized";
       pushEdge(edges, {
         from: nodeId("plan", plan.id),
         to: nodeId("source", src),
         kind: "generates",
+        lifecycle,
+      });
+    }
+    // draft の未 materialize source は edge を保持し lifecycle=planned と明示する。
+    // endpoint を実装済みsource nodeへ偽装せず、stale-edge detector が planned lifecycle
+    // だけを正規の未実装状態として許可する。実装後は loader が materialized edgeへ昇格する。
+    const planned = Object.entries(plan.availability ?? {})
+      .filter(([, lifecycle]) => lifecycle === "planned")
+      .map(([path]) => path);
+    if (planned.length > 0 && plan.status !== "draft") {
+      findings.push({
+        code: "invalid-planned-artifact",
+        severity: "error",
+        message: `plan ${plan.id} has planned generated artifact(s) (${planned.join(", ")}) but status=${plan.status ?? "unknown"}; only draft permits planned lifecycle`,
+        nodeId: nodeId("plan", plan.id),
       });
     }
   }
@@ -433,7 +449,8 @@ function detectStaleEdges(
     // 未 materialize な外部 governance 参照を許す (ADR は node kind を持たない)。
     const targetExternal = edge.kind === "upstream";
     const dangling =
-      !index.nodeById.has(edge.from) || (!targetExternal && !index.nodeById.has(edge.to));
+      !index.nodeById.has(edge.from) ||
+      (!targetExternal && edge.lifecycle !== "planned" && !index.nodeById.has(edge.to));
     if (dangling) {
       findings.push({
         code: "stale-edge",
@@ -499,7 +516,12 @@ export function analyzeRelationImpact(input: RelationImpactInput): RelationImpac
   const changedNodes: RelationNode[] = [];
   const impacted: RelationNode[] = [];
   const actions: RelationImpactAction[] = [];
-  const findings: RelationFinding[] = detectStaleEdges(input.projection, index);
+  // projection 作成時の契約違反（例: non-draft planned artifact）も impact 判定へ持ち込む。
+  // これを落とすと graph builder はRedでも consumer がOKを返す二重基準になる。
+  const findings: RelationFinding[] = [
+    ...input.projection.findings,
+    ...detectStaleEdges(input.projection, index),
+  ];
 
   for (const raw of input.changedPaths) {
     const path = normalizePath(raw);
@@ -541,6 +563,10 @@ function quotedLabel(label: string): string {
   return label.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function edgeLabel(edge: RelationEdge): string {
+  return edge.lifecycle === "planned" ? `${edge.kind} (${edge.lifecycle})` : edge.kind;
+}
+
 function relationDiagramRows(snapshot: RelationGraphProjection): {
   nodes: RelationNode[];
   edges: RelationEdge[];
@@ -558,7 +584,7 @@ function renderMermaid(snapshot: RelationGraphProjection): string {
     lines.push(`  ${diagramNodeId(node.id)}["${quotedLabel(node.id)}"]`);
   }
   for (const edge of edges) {
-    lines.push(`  ${diagramNodeId(edge.from)} -->|${edge.kind}| ${diagramNodeId(edge.to)}`);
+    lines.push(`  ${diagramNodeId(edge.from)} -->|${edgeLabel(edge)}| ${diagramNodeId(edge.to)}`);
   }
   return lines.join("\n");
 }
@@ -570,7 +596,7 @@ function renderDot(snapshot: RelationGraphProjection): string {
     lines.push(`  "${node.id}" [label="${quotedLabel(node.id)}"];`);
   }
   for (const edge of edges) {
-    lines.push(`  "${edge.from}" -> "${edge.to}" [label="${edge.kind}"];`);
+    lines.push(`  "${edge.from}" -> "${edge.to}" [label="${edgeLabel(edge)}"];`);
   }
   lines.push("}");
   return lines.join("\n");
@@ -583,7 +609,7 @@ function renderD2(snapshot: RelationGraphProjection): string {
     lines.push(`${diagramNodeId(node.id)}: "${quotedLabel(node.id)}"`);
   }
   for (const edge of edges) {
-    lines.push(`${diagramNodeId(edge.from)} -> ${diagramNodeId(edge.to)}: "${edge.kind}"`);
+    lines.push(`${diagramNodeId(edge.from)} -> ${diagramNodeId(edge.to)}: "${edgeLabel(edge)}"`);
   }
   return lines.join("\n");
 }
@@ -625,4 +651,4 @@ export function exportRelationDiagram(input: ExportRelationDiagramInput): Diagra
   };
 }
 
-export * from "./relation-graph-evidence";
+export * from "./relation-graph-evidence.ts";

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,27 +7,26 @@ import {
   primaryKeyOf,
   SCHEMA_VERSION,
   schemaDdl,
-} from "../src/schema/harness-db";
-import { HARNESS_DB_INDEXES, HARNESS_DB_TABLES } from "../src/schema/harness-db-catalog";
-import { HARNESS_DB_INDEXES as SECTION_HARNESS_DB_INDEXES } from "../src/schema/harness-db-indexes";
-import { col, pk } from "../src/schema/harness-db-table-builders";
-import { HARNESS_DB_CORE_TABLES } from "../src/schema/harness-db-tables-core";
-import { HARNESS_DB_EVALUATION_TABLES } from "../src/schema/harness-db-tables-evaluation";
-import { HARNESS_DB_GRAPH_EXPORT_TABLES } from "../src/schema/harness-db-tables-graph";
-import { assertWithinUtTdd, openHarnessDb, upsertRow } from "../src/state-db/index";
-import { ensureHarnessSchema, harnessDbStatus } from "../src/state-db/maintenance";
-import { migrate, missingTables, rowCounts, tableNames } from "../src/state-db/migration";
+} from "../src/schema/harness-db.ts";
+import { HARNESS_DB_INDEXES, HARNESS_DB_TABLES } from "../src/schema/harness-db-catalog.ts";
+import { HARNESS_DB_INDEXES as SECTION_HARNESS_DB_INDEXES } from "../src/schema/harness-db-indexes.ts";
+import { col, pk } from "../src/schema/harness-db-table-builders.ts";
+import { HARNESS_DB_CORE_TABLES } from "../src/schema/harness-db-tables-core.ts";
+import { HARNESS_DB_EVALUATION_TABLES } from "../src/schema/harness-db-tables-evaluation.ts";
+import { HARNESS_DB_GITHUB_TABLES } from "../src/schema/harness-db-tables-github.ts";
+import { HARNESS_DB_GRAPH_EXPORT_TABLES } from "../src/schema/harness-db-tables-graph.ts";
+import { HARNESS_DB_SPEC_IR_TABLES } from "../src/schema/harness-db-tables-spec-ir.ts";
+import { HARNESS_DB_VMODEL_TABLES } from "../src/schema/harness-db-tables-vmodel.ts";
+import { assertWithinUtTdd, openHarnessDb, upsertRow } from "../src/state-db/index.ts";
+import { ensureHarnessSchema, harnessDbStatus } from "../src/state-db/maintenance.ts";
+import { migrate, missingTables, rowCounts, tableNames } from "../src/state-db/migration.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 /**
- * bun:sqlite releases the OS file handle on GC finalization rather than synchronously on
- * close(), so on Windows a plain rmSync of the temp repo right after close() can hit EBUSY
- * (the harness.db file is still mapped). Force GC where the runtime exposes it, then remove
- * with retries. node:sqlite releases on close(), so the GC hook is a Bun-only no-op there.
+ * node:sqlite releases the OS file handle synchronously on close(), so cleanup can remove
+ * the temporary repository without a runtime-specific GC hook.
  */
-function cleanupRepo(repo: string): void {
-  (globalThis as { Bun?: { gc: (sync: boolean) => void } }).Bun?.gc(true);
-  rmSync(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
-}
+const cleanupRepo = removeTestTree;
 
 /**
  * IT-DB-01: harness.db state-db foundation。
@@ -35,12 +34,10 @@ function cleanupRepo(repo: string): void {
  * 設計 pair: docs/test-design/harness/L8-integration-test-design.md IT-DB-01。
  */
 describe("IT-DB-01: harness.db state-db foundation", () => {
-  it("uses node:sqlite fallback when the test worker is running under Node", () => {
+  it("uses the sealed node:sqlite driver", () => {
     const db = openHarnessDb(":memory:");
     try {
-      const expectedDriver =
-        typeof (globalThis as { Bun?: unknown }).Bun === "undefined" ? "node" : "bun";
-      expect(db.driver).toBe(expectedDriver);
+      expect(db.driver).toBe("node");
       db.exec("CREATE TABLE fallback_smoke (id TEXT PRIMARY KEY)");
       db.prepare("INSERT INTO fallback_smoke (id) VALUES (?)").run("ok");
       expect(db.prepare("SELECT id FROM fallback_smoke").get()?.id).toBe("ok");
@@ -63,11 +60,48 @@ describe("IT-DB-01: harness.db state-db foundation", () => {
       [
         ...HARNESS_DB_CORE_TABLES,
         ...HARNESS_DB_GRAPH_EXPORT_TABLES,
+        ...HARNESS_DB_GITHUB_TABLES,
         ...HARNESS_DB_EVALUATION_TABLES,
+        ...HARNESS_DB_VMODEL_TABLES,
+        ...HARNESS_DB_SPEC_IR_TABLES,
       ].map((t) => t.name),
     );
     expect(HARNESS_DB_INDEXES.map((i) => i.name)).toEqual(
       SECTION_HARNESS_DB_INDEXES.map((i) => i.name),
+    );
+    expect(HARNESS_DB_INDEXES).toEqual(
+      expect.arrayContaining([
+        {
+          name: "idx_spec_defs_owner",
+          table: "spec_defs",
+          columns: ["owner_path", "section_anchor"],
+        },
+        {
+          name: "idx_detector_candidates_filing",
+          table: "detector_route_candidates",
+          columns: ["filing_target_id", "severity", "candidate_status"],
+        },
+        {
+          name: "idx_refactor_candidates_state",
+          table: "refactor_candidates",
+          columns: ["state", "confidence", "last_seen_at"],
+        },
+        {
+          name: "idx_document_catalog_doc_type",
+          table: "document_catalog_entries",
+          columns: ["doc_type_id", "default_status"],
+        },
+        {
+          name: "idx_document_scale_profile_entry",
+          table: "document_scale_profile_entries",
+          columns: ["profile_id", "doc_type_id", "decision"],
+        },
+        {
+          name: "idx_spec_rag_closure_rag_status",
+          table: "spec_rag_closure_entries",
+          columns: ["rag", "closure_status"],
+        },
+      ]),
     );
 
     const present = tableNames(db);
@@ -79,6 +113,97 @@ describe("IT-DB-01: harness.db state-db foundation", () => {
       .all()
       .map((row) => String(row.name));
     expect(planRegistryColumns).toContain("source_hash");
+    const specDefsColumns = db
+      .prepare("PRAGMA table_info(spec_defs)")
+      .all()
+      .map((row) => String(row.name));
+    expect(specDefsColumns).toEqual(
+      expect.arrayContaining([
+        "spec_id",
+        "spec_kind",
+        "layer",
+        "sub_doc",
+        "owner_path",
+        "section_anchor",
+        "source_hash",
+      ]),
+    );
+    const detectorCandidateColumns = db
+      .prepare("PRAGMA table_info(detector_route_candidates)")
+      .all()
+      .map((row) => String(row.name));
+    expect(detectorCandidateColumns).toEqual(
+      expect.arrayContaining([
+        "route_candidate_id",
+        "source_table",
+        "filing_target_id",
+        "target_layer",
+        "target_sub_doc",
+        "candidate_status",
+      ]),
+    );
+    const documentCatalogColumns = db
+      .prepare("PRAGMA table_info(document_catalog_entries)")
+      .all()
+      .map((row) => String(row.name));
+    expect(documentCatalogColumns).toEqual(
+      expect.arrayContaining([
+        "document_catalog_entry_id",
+        "doc_type_id",
+        "layer",
+        "sub_doc",
+        "applicability",
+        "default_status",
+        "profile_controlled",
+        "skip_reason_required",
+      ]),
+    );
+    const documentScaleProfileColumns = db
+      .prepare("PRAGMA table_info(document_scale_profile_reviews)")
+      .all()
+      .map((row) => String(row.name));
+    expect(documentScaleProfileColumns).toEqual(
+      expect.arrayContaining([
+        "document_scale_profile_review_id",
+        "profile_id",
+        "doc_type_id",
+        "decision",
+        "catalog_layer",
+        "catalog_sub_doc",
+        "catalog_skip_reason_required",
+      ]),
+    );
+    const specRagColumns = db
+      .prepare("PRAGMA table_info(spec_rag_closure_entries)")
+      .all()
+      .map((row) => String(row.name));
+    expect(specRagColumns).toEqual(
+      expect.arrayContaining([
+        "spec_rag_entry_id",
+        "spec_id",
+        "rag",
+        "closure_status",
+        "requires_test",
+        "test_count",
+        "finding_count",
+      ]),
+    );
+    const refactorCandidateColumns = db
+      .prepare("PRAGMA table_info(refactor_candidates)")
+      .all()
+      .map((row) => String(row.name));
+    expect(refactorCandidateColumns).toEqual(
+      expect.arrayContaining([
+        "candidate_key",
+        "kind",
+        "subject",
+        "state",
+        "linked_plan_id",
+        "first_seen_at",
+        "last_seen_at",
+        "decided_at",
+      ]),
+    );
     expect(missingTables(db)).toEqual([]);
     db.close();
   });
@@ -93,6 +218,33 @@ describe("IT-DB-01: harness.db state-db foundation", () => {
     expect(second.fromVersion).toBe(SCHEMA_VERSION);
     expect(second.toVersion).toBe(SCHEMA_VERSION);
     expect(missingTables(db)).toEqual([]);
+    db.close();
+  });
+
+  it("migrate は v26 DB の既存rowを保持してv27 Forward escape custody表を追加する", () => {
+    const db = openHarnessDb(":memory:");
+    db.exec("CREATE TABLE retained_fixture (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.exec("INSERT INTO retained_fixture VALUES ('before-v27', 'preserved')");
+    db.setUserVersion(26);
+
+    const result = migrate(db);
+
+    expect(result).toMatchObject({ fromVersion: 26, toVersion: SCHEMA_VERSION, applied: true });
+    expect(db.prepare("SELECT value FROM retained_fixture WHERE id = 'before-v27'").get()).toEqual({
+      value: "preserved",
+    });
+    expect(tableNames(db)).toEqual(
+      expect.arrayContaining([
+        "forward_escape_validation_certificates",
+        "forward_escape_projection_events",
+      ]),
+    );
+    expect(
+      db
+        .prepare("PRAGMA foreign_key_list(forward_escape_projection_events)")
+        .all()
+        .map((row) => String(row.table)),
+    ).toContain("forward_escape_validation_certificates");
     db.close();
   });
 

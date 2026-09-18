@@ -1,87 +1,117 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
 import { parse as parseYaml } from "yaml";
-import type { DocumentExportProjectionRows } from "../export/document-export";
+import type { DocumentExportProjectionRows } from "../export/document-export.ts";
 import {
   buildDocumentExportDataset,
   type CanonicalDocumentFamily,
   parseCanonicalDocumentStructure,
-} from "../export/document-export";
-import { loadRelationGraphSourceSet } from "../graph/loader";
-import { loadChangedFiles } from "../lint/change-impact";
+} from "../export/document-export.ts";
+import { loadRelationGraphSourceSet } from "../graph/loader.ts";
+import { resolveLegacyPlanAlias } from "../kernel/plan-alias.ts";
+import { loadChangedFiles } from "../lint/change-impact.ts";
 import {
   analyzeDescentObligations,
   loadDeferLedger,
   loadDescentAdjacency,
   loadTraceKeyedArtifacts,
-} from "../lint/descent-obligation";
+} from "../lint/descent-obligation.ts";
+import { analyzeDocConsistency, loadDocConsistencyDocs } from "../lint/doc-consistency.ts";
+import {
+  analyzeEntityCoverage,
+  loadBusiness as loadEntityBusiness,
+} from "../lint/entity-coverage.ts";
+import { analyzeFrRegistry, loadFrDocs as loadFrRegistryDocs } from "../lint/fr-registry-audit.ts";
+import {
+  analyzeFrRoadmapCoverageWithRoot,
+  loadFrRoadmapCoverageDocs,
+} from "../lint/fr-roadmap-coverage.ts";
+import { analyzeL6FrCoverage, loadL6FrCoverageDocs } from "../lint/l6-fr-coverage.ts";
+import { analyzeModuleDrift, loadModuleDocs } from "../lint/module-drift.ts";
 import {
   analyzeRelationImpact,
   collectRelationGraphProjection,
   type RelationGraphProjection,
   type VerificationEvidenceProjection,
-} from "../lint/relation-graph";
-import { loadReviewPlans } from "../lint/review-evidence";
+} from "../lint/relation-graph.ts";
+import { loadReviewPlans } from "../lint/review-evidence.ts";
 import {
   computeGateProgress,
   computeProgramRollup,
   loadRoadmaps,
   PARKED_BANDS,
-} from "../lint/roadmap-registry";
-import { normalizePath } from "../lint/shared";
+} from "../lint/roadmap-registry.ts";
+import {
+  analyzeSubDocCatalogDrift,
+  loadSubDocCatalogDriftInput,
+} from "../lint/sub-doc-catalog-drift.ts";
+import {
+  analyzeSubDocSectionStructure,
+  loadSubDocSectionStructureInput,
+} from "../lint/sub-doc-section-structure.ts";
 import {
   catalogVerificationProfiles,
   recommendVerificationProfiles,
-} from "../lint/verification-profile";
-import { loadMemoryEntries } from "../memory/index";
-import {
-  HARNESS_DB_TABLE_BY_NAME,
-  HARNESS_DB_TABLES,
-  primaryKeyOf,
-  type TableDef,
-} from "../schema/harness-db";
-import { workflowModeForPlan as catalogWorkflowModeForPlan } from "../schema/mode-catalog";
-import { deriveArtifactProgressDecision } from "./artifact-progress-decision";
+} from "../lint/verification-profile.ts";
+import { loadMemoryEntries } from "../memory/index.ts";
+import { RepositoryModelEvaluationConfig } from "../projection/adapters/model-evaluation-config.ts";
+import { loadRepositoryPlanSources } from "../projection/adapters/repository-plan-sources.ts";
+import { projectModelEvaluations as projectModelEvaluationsApplication } from "../projection/application/project-model-evaluations.ts";
+import { projectOperationalMetrics as projectOperationalMetricsApplication } from "../projection/application/project-operational-metrics.ts";
+import { projectPocEvaluations as projectPocEvaluationsApplication } from "../projection/application/project-poc-evaluations.ts";
+import type { ProjectionEvent } from "../projection/contracts/projection-store.ts";
+import { type ProjectedPlan, projectPlanSources } from "../projection/domain/plan-projection.ts";
+import { HARNESS_DB_TABLES } from "../schema/harness-db.ts";
+import { workflowModeForPlan as catalogWorkflowModeForPlan } from "../schema/mode-catalog.ts";
+import { normalizePath } from "../shared/source-text.ts";
+import { stableId } from "../stable-id.ts";
+import { analyzePairFreeze, loadPairDocs, type PairOrphanReason } from "../vmodel/lint.ts";
+import { deriveArtifactProgressDecision } from "./artifact-progress-decision.ts";
+import { DESIGN_QUALITY_CHECK_IDS, type DesignQualityCheckId } from "./design-detection.ts";
 import {
   projectFeedbackEvents,
+  projectFeedbackLifecycle,
   projectImprovementLog,
   projectIssueApprovalGuardrails,
   projectIssueQueue,
   projectRefactorCandidateSignals,
   projectRetryEvents,
   projectTroubleEvents,
-} from "./feedback-projections";
-import { type GuardrailDecisionInput, inspectGuardrailInvariants } from "./guardrail-invariants";
-import {
-  defaultHarnessDbPath,
-  type HarnessDb,
-  openHarnessDb,
-  SECRET_PATTERN,
-  upsertRow,
-} from "./index";
-import { migrate, rowCounts } from "./migration";
+  projectVerificationDefectRoutingRefactorCandidates,
+  reconcileFeedbackLifecycle,
+} from "./feedback-projections.ts";
+import { rebuildExecutionReadiness } from "./github-forward-projection.ts";
+import { type GuardrailDecisionInput, inspectGuardrailInvariants } from "./guardrail-invariants.ts";
+import { defaultHarnessDbPath, type HarnessDb, openHarnessDb } from "./index.ts";
+import { migrate, rowCounts } from "./migration.ts";
 import {
   projectRuntimeGuardrailDecisionFromSessionEvent as projectRuntimeGuardrailDecisionFromSessionEventCore,
   projectRuntimeSkillInvocationFromSessionEvent as projectRuntimeSkillInvocationFromSessionEventCore,
   projectRuntimeSkillInvocationsFromSessionLogs as projectRuntimeSkillInvocationsFromSessionLogsCore,
   projectRuntimeTestRunFromSessionEvent as projectRuntimeTestRunFromSessionEventCore,
-} from "./runtime-projections";
+} from "./runtime-projections.ts";
 import {
-  PLAN_SUCCESS_STATUSES,
   projectSkillEvaluations as projectSkillEvaluationsCore,
   projectSkillMetrics as projectSkillMetricsCore,
   projectSkillTelemetry as projectSkillTelemetryCore,
   skillScore,
-} from "./skill-projections";
-import type { RunUsage } from "./token-tracker";
+} from "./skill-projections.ts";
+import { projectSpecIr } from "./spec-ir-projections.ts";
+import { clearRebuildableProjectionTables } from "./sqlite-projection-rebuild.ts";
+import { type ProjectionFindingInput, SqliteProjectionStore } from "./sqlite-projection-store.ts";
+import { runSqliteTransaction } from "./sqlite-transaction.ts";
+import {
+  loadRepoScopedRuntimeSessionUsage,
+  type RepoScopeIngestStats,
+  type RunUsage,
+  type SessionScanDirs,
+} from "./token-tracker.ts";
+import { hasVmodelAuthoring, projectVmodelAuthoring } from "./vmodel-projections.ts";
 
-export interface ProjectionEvent {
-  table: string;
-  id: string;
-  row: Record<string, unknown>;
-}
+export type { ProjectionEvent } from "../projection/contracts/projection-store.ts";
 
 export interface RebuildHarnessDbInput {
   repoRoot?: string;
@@ -90,6 +120,8 @@ export interface RebuildHarnessDbInput {
   documentExports?: DocumentExportProjectionRows;
   verificationEvidence?: VerificationEvidenceProjection;
   timing?: boolean;
+  /** token telemetry は外部セッション走査を伴うため、軽量な in-memory 投影では省略できる。 */
+  skipTokenTelemetry?: boolean;
 }
 
 export interface ProjectionTiming {
@@ -108,6 +140,8 @@ export interface RebuildHarnessDbResult {
     verificationEvidence?: VerificationEvidenceProjection;
   };
   timings?: ProjectionTiming[];
+  /** repo スコープ token telemetry ingest の走査統計 (issue #82、可視化用)。 */
+  tokenIngest?: RepoScopeIngestStats;
 }
 
 export {
@@ -116,18 +150,7 @@ export {
   type ArtifactProgressDecisionInput,
   type ArtifactProgressState,
   deriveArtifactProgressDecision,
-} from "./artifact-progress-decision";
-
-interface ProjectedPlan {
-  planId: string;
-  kind: string;
-  layer: string;
-  drive: string;
-  status: string;
-  updatedAt: string;
-  // route_mode frontmatter (mode 第一級化、PLAN-L7-243)。legacy PLAN / fixture は未設定可。
-  routeMode?: string;
-}
+} from "./artifact-progress-decision.ts";
 
 interface PlanDigestProjection {
   plan_id: string;
@@ -146,6 +169,14 @@ interface SessionLogProjection {
   outcome?: string;
 }
 
+interface ProjectedGateRunEvidence {
+  gate_run_id?: unknown;
+  gate_id?: unknown;
+  plan_id?: unknown;
+  status?: unknown;
+  checked_at?: unknown;
+}
+
 interface ProviderHandoverProjection {
   handover_id?: string;
   from?: string;
@@ -157,31 +188,12 @@ interface ProviderHandoverProjection {
   };
 }
 
-const RAW_PAYLOAD_KEYS = new Set([
-  "rawMcpResponse",
-  "browserTrace",
-  "providerTranscript",
-  "transcript",
-  "secret",
-  "credential",
-  "screenshotBlob",
-]);
 const VERIFY_CUTOVER_PLAN_ID = "PLAN-M-00-verify-cutover";
 const VERIFY_CUTOVER_AUDIT_PATH = ".ut-tdd/audit/A-132-l8-l14-verification-band-execution.md";
 const VERIFICATION_BAND_LAYERS = ["L8", "L9", "L10", "L11", "L12", "L13", "L14"] as const;
 
-function tableDef(name: string): TableDef {
-  const table = HARNESS_DB_TABLE_BY_NAME.get(name);
-  if (!table) throw new Error(`unknown harness.db projection table: ${name}`);
-  return table;
-}
-
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function stableId(prefix: string, value: string): string {
-  return `${prefix}:${value.replace(/[^A-Za-z0-9._:-]+/g, "-")}`;
 }
 
 function stableHash(value: string): string {
@@ -202,103 +214,152 @@ function scalarNumber(db: HarnessDb, sql: string, params: unknown[] = []): numbe
   return typeof value === "number" ? value : Number(value ?? 0);
 }
 
-function assertNoSensitivePayload(row: Record<string, unknown>, table: TableDef): void {
-  // Structured-identifier columns — primary keys and `*_id` reference columns —
-  // hold deterministic composite slugs (e.g. "skill:planning-and-task-breakdown",
-  // or a relation-graph "finding:...:changed-path-src-task-..." slug), not
-  // free-form payload. Exempt them from the secret-pattern check so a legitimate
-  // slug that happens to contain "sk-" (inside a "task-" prefix or a "-breakdown"
-  // suffix) is not a false-positive secret. Free-form columns are still checked.
-  const pkNames = new Set(table.columns.filter((c) => c.primaryKey).map((c) => c.name));
-  const isStructuredId = (key: string): boolean => pkNames.has(key) || key.endsWith("_id");
-  for (const [key, value] of Object.entries(row)) {
-    if (RAW_PAYLOAD_KEYS.has(key)) {
-      throw new Error(`raw/sensitive payload column is not allowed in harness.db: ${key}`);
-    }
-    if (!isStructuredId(key) && typeof value === "string" && SECRET_PATTERN.test(value)) {
-      throw new Error(`secret-like value is not allowed in harness.db projection column: ${key}`);
-    }
-  }
-}
-
-function normalizeRow(table: TableDef, event: ProjectionEvent): Record<string, unknown> {
-  const allowed = new Set(table.columns.map((c) => c.name));
-  const pk = primaryKeyOf(table);
-  const row: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(event.row)) {
-    if (allowed.has(key)) row[key] = value;
-  }
-  if (row[pk] === undefined) row[pk] = event.id;
-  assertNoSensitivePayload(row, table);
-  return row;
-}
-
 function planExists(db: HarnessDb, planId: string): boolean {
-  const row = db.prepare("SELECT plan_id FROM plan_registry WHERE plan_id = ?").get(planId);
-  return row !== undefined;
+  return new SqliteProjectionStore(db).planExists(planId);
 }
 
-function findingId(kind: string, subjectId: string): string {
-  return stableId(`finding:${kind}`, subjectId);
+function recordFinding(db: HarnessDb, input: ProjectionFindingInput): void {
+  new SqliteProjectionStore(db).recordFinding(input);
 }
 
-function recordFinding(
+function designCoverageId(subjectId: string): string {
+  return stableId("design-quality-coverage", `${subjectId}:violation_count`);
+}
+
+function recordDesignQualityCoverage(
   db: HarnessDb,
   input: {
-    kind: string;
-    severity?: "error" | "warn" | "info";
-    subjectId: string;
-    source: string;
-    evidencePath?: string;
+    subjectId: DesignQualityCheckId;
+    violationCount: number;
   },
 ): void {
-  upsertRow(db, {
-    table: "findings",
-    primaryKey: "finding_id",
+  const passed = input.violationCount <= 0;
+  recordProjectionEvent(db, {
+    table: "coverage",
+    id: designCoverageId(input.subjectId),
     row: {
-      finding_id: findingId(input.kind, input.subjectId),
-      kind: input.kind,
-      severity: input.severity ?? "warn",
+      coverage_id: designCoverageId(input.subjectId),
+      scope: "design-quality",
       subject_id: input.subjectId,
-      source: input.source,
-      status: "open",
-      evidence_path: input.evidencePath ?? "",
+      metric: "violation_count",
+      value: input.violationCount,
+      threshold: 0,
+      status: passed ? "passed" : "blocked",
     },
   });
 }
 
-function checkResolvablePlanJoin(db: HarnessDb, table: string, row: Record<string, unknown>): void {
-  if (table === "plan_registry") return;
-  if (table === "feedback_events") return;
-  const planId = asString(row.plan_id);
-  if (!planId || planExists(db, planId)) return;
-  // A plan_id column can carry a free-form WORK-CONTEXT label that is not a single
-  // concrete PLAN foreign key and legitimately resolves to no registry row:
-  //   - an audit-cycle id (e.g. "A-136-cycle-p4-verification-audit"), or
-  //   - a compound "PLAN-a+b+c" label spanning several PLANs.
-  // hook_events records whichever work was active, so these are non-FK labels, not
-  // dangling references. A concrete single "PLAN-..." id that does not resolve
-  // (deleted/renamed) is still flagged (PLAN-L7-144).
-  if (/^A-\d/.test(planId) || planId.includes("+")) return;
-  const pk = primaryKeyOf(tableDef(table));
-  const subject = `${table}:${String(row[pk] ?? "")}`;
+function designQualityLoadError(db: HarnessDb, subjectId: DesignQualityCheckId): void {
+  recordDesignQualityCoverage(db, { subjectId, violationCount: 1 });
   recordFinding(db, {
-    kind: "unresolved-join",
-    subjectId: subject,
-    source: "projection-writer",
-    evidencePath: asString(row.evidence_path) ?? undefined,
+    kind: "design-quality-load-error",
+    severity: "error",
+    subjectId,
+    source: "design-quality-projection",
   });
 }
 
+export function projectDesignPairFreezeFindings(repoRoot: string, db: HarnessDb): void {
+  let result: ReturnType<typeof analyzePairFreeze>;
+  try {
+    result = analyzePairFreeze(loadPairDocs(repoRoot));
+  } catch {
+    recordFinding(db, {
+      kind: "design-pair-orphan:load-error",
+      severity: "error",
+      subjectId: "vmodel-pair-freeze",
+      source: "vmodel-pair-freeze",
+      evidencePath: "docs/design/harness",
+    });
+    return;
+  }
+  const knownReasons = new Set<PairOrphanReason>([
+    "pair-missing",
+    "ref-unresolved",
+    "trace-orphan",
+  ]);
+  for (const orphan of result.orphans) {
+    const reason = knownReasons.has(orphan.reason) ? orphan.reason : "trace-orphan";
+    recordFinding(db, {
+      kind: `design-pair-orphan:${reason}`,
+      severity: "error",
+      subjectId: orphan.path,
+      source: "vmodel-pair-freeze",
+      evidencePath: orphan.path,
+    });
+  }
+}
+
+function projectOneDesignQualityCoverage(
+  db: HarnessDb,
+  subjectId: DesignQualityCheckId,
+  run: () => number,
+): void {
+  try {
+    recordDesignQualityCoverage(db, { subjectId, violationCount: run() });
+  } catch {
+    designQualityLoadError(db, subjectId);
+  }
+}
+
+export function projectDesignQualityCoverage(repoRoot: string, db: HarnessDb): void {
+  const expected = new Set<DesignQualityCheckId>(DESIGN_QUALITY_CHECK_IDS);
+  const checks: Record<DesignQualityCheckId, () => number> = {
+    "doc-consistency": () => {
+      const result = analyzeDocConsistency(loadDocConsistencyDocs(repoRoot));
+      return (
+        result.carryOrphans.length +
+        result.screenIdOrphans.length +
+        (result.nfrCount.mismatch ? 1 : 0)
+      );
+    },
+    "entity-coverage": () => analyzeEntityCoverage(loadEntityBusiness(repoRoot)).duplicates.length,
+    "fr-registry-audit": () => {
+      const result = analyzeFrRegistry(loadFrRegistryDocs(repoRoot));
+      return (
+        result.unregistered.length +
+        result.unexplainedGaps.length +
+        result.attributeOrphans.length +
+        result.countMismatches.length +
+        result.screenCoverageOrphans.length
+      );
+    },
+    "sub-doc-catalog-drift": () =>
+      analyzeSubDocCatalogDrift(loadSubDocCatalogDriftInput(repoRoot)).drift.length,
+    "sub-doc-section-structure": () =>
+      analyzeSubDocSectionStructure(loadSubDocSectionStructureInput(repoRoot)).violations.length,
+    "l6-fr-coverage": () => {
+      const result = analyzeL6FrCoverage(loadL6FrCoverageDocs(repoRoot));
+      return (
+        result.missing.length +
+        result.unknown.length +
+        result.incomplete.length +
+        result.missingSpecFiles.length +
+        result.weakContracts.length +
+        result.missingSubstance.length
+      );
+    },
+    "fr-roadmap-coverage": () => {
+      const result = analyzeFrRoadmapCoverageWithRoot(
+        loadFrRoadmapCoverageDocs(repoRoot),
+        repoRoot,
+      );
+      return (result.checked === 0 ? 1 : 0) + result.violations.length + result.openRows.length;
+    },
+    "module-drift": () => analyzeModuleDrift(loadModuleDocs(repoRoot)).orphans.length,
+  };
+  for (const subjectId of DESIGN_QUALITY_CHECK_IDS) {
+    const check = checks[subjectId];
+    if (!check || !expected.has(subjectId)) {
+      designQualityLoadError(db, subjectId);
+      continue;
+    }
+    projectOneDesignQualityCoverage(db, subjectId, check);
+  }
+}
+
 export function recordProjectionEvent(db: HarnessDb, event: ProjectionEvent): void {
-  const table = tableDef(event.table);
-  const row = normalizeRow(table, event);
-  upsertRow(db, {
-    table: table.name,
-    primaryKey: primaryKeyOf(table),
-    row,
-  });
-  checkResolvablePlanJoin(db, table.name, row);
+  new SqliteProjectionStore(db).record(event);
 }
 
 function markdownFiles(dir: string): string[] {
@@ -365,69 +426,12 @@ function readJson<T>(path: string): T | null {
 }
 
 function projectPlans(repoRoot: string, db: HarnessDb): Map<string, ProjectedPlan> {
-  const plans = new Map<string, ProjectedPlan>();
-  for (const path of markdownFiles(join(repoRoot, "docs", "plans"))) {
-    const content = readFileSync(path, "utf8");
-    const planId = frontmatterValue(content, "plan_id");
-    if (!planId) continue;
-    const kind = frontmatterValue(content, "kind");
-    const layer = frontmatterValue(content, "layer");
-    const drive = frontmatterValue(content, "drive");
-    const status = frontmatterValue(content, "status") || "draft";
-    const updatedAt = frontmatterValue(content, "updated") || frontmatterValue(content, "created");
-    const sourceHash = stableHash(content);
-    // decision_outcome: S4 verdict for PoC PLANs (confirmed/rejected/pivot).
-    // Read from `decision_outcome` frontmatter field; fall back to `decision` for legacy.
-    // Stored as "" when absent so the column is always TEXT (single-source: harness-db.ts §plan_registry).
-    const decisionOutcome =
-      frontmatterValue(content, "decision_outcome") || frontmatterValue(content, "decision") || "";
-    const routeMode = frontmatterValue(content, "route_mode");
-    plans.set(planId, { planId, kind, layer, drive, status, updatedAt, routeMode });
-    const relPath = normalizePath(relative(repoRoot, path));
-    recordProjectionEvent(db, {
-      table: "plan_registry",
-      id: planId,
-      row: {
-        plan_id: planId,
-        kind,
-        layer,
-        drive,
-        status,
-        parent: "",
-        route_mode: routeMode,
-        updated_at: updatedAt,
-        decision_outcome: decisionOutcome,
-        source_hash: sourceHash,
-      },
-    });
-    recordProjectionEvent(db, {
-      table: "artifact_registry",
-      id: stableId("artifact", relPath),
-      row: {
-        artifact_id: stableId("artifact", relPath),
-        artifact_type: "markdown_doc",
-        path: relPath,
-        pair_artifact: "",
-        status: "current",
-        updated_at: updatedAt,
-      },
-    });
-    recordProjectionEvent(db, {
-      table: "search_index",
-      id: stableId("plan", planId),
-      row: {
-        search_id: stableId("plan", planId),
-        subject_type: "plan",
-        subject_id: planId,
-        path: relPath,
-        title: frontmatterValue(content, "title") || planId,
-        tokens: `${planId} ${kind} ${layer} ${drive}`,
-        summary: status || "plan",
-        updated_at: updatedAt,
-      },
-    });
-  }
-  return plans;
+  const result = projectPlanSources(loadRepositoryPlanSources(repoRoot), {
+    stableId,
+    hash: stableHash,
+  });
+  for (const write of result.writes) recordProjectionEvent(db, write);
+  return new Map(result.plans);
 }
 
 function projectDriveRuns(
@@ -468,8 +472,8 @@ function projectDriveRuns(
 }
 
 function resolveProjectedPlanId(plans: Map<string, ProjectedPlan>, planId: string): string {
-  if (plans.has(planId)) return planId;
-  return [...plans.keys()].find((id) => id.startsWith(`${planId}-`)) ?? planId;
+  const resolved = resolveLegacyPlanAlias(planId, [...plans.keys()]);
+  return resolved.ok ? resolved.value : planId;
 }
 
 function projectHookEvents(
@@ -615,7 +619,11 @@ export function projectRuntimeSkillInvocationFromSessionEvent(
       resolvePlanId: (planId) => resolveProjectedPlanId(input.plans, planId),
       recordProjectionEvent,
       skillScore: (plan, asset) =>
-        skillScore(plan, asset, { skillDriveModelForPlan: planModeResolver(input.plans) }),
+        skillScore({
+          plan,
+          asset,
+          deps: { skillDriveModelForPlan: planModeResolver(input.plans) },
+        }),
     },
   });
 }
@@ -634,7 +642,11 @@ function projectRuntimeSkillInvocationsFromSessionLogs(
       resolvePlanId: (planId) => resolveProjectedPlanId(plans, planId),
       recordProjectionEvent,
       skillScore: (plan, asset) =>
-        skillScore(plan, asset, { skillDriveModelForPlan: planModeResolver(plans) }),
+        skillScore({
+          plan,
+          asset,
+          deps: { skillDriveModelForPlan: planModeResolver(plans) },
+        }),
     },
   });
 }
@@ -684,8 +696,7 @@ function projectReviewModelRuns(
  */
 export function projectTokenUsage(db: HarnessDb, usages: RunUsage[]): void {
   if (usages.length === 0) return;
-  db.exec("BEGIN IMMEDIATE");
-  try {
+  runSqliteTransaction(db, () => {
     for (const u of usages) {
       if (!u.model) continue; // model 不明の行は集計不能なので捨てる
       const id = stableId("token-run", `${u.runtime}:${u.sessionId}:${u.turnIndex}`);
@@ -710,11 +721,31 @@ export function projectTokenUsage(db: HarnessDb, usages: RunUsage[]): void {
         },
       });
     }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
+}
+
+/**
+ * repo スコープの session ディレクトリを解決する (env override > OS default)。doctor 経路
+ * (`projectRuntimeModelTelemetryForDoctor`、src/doctor/db-projection.ts) と同じ解決順を踏襲する。
+ */
+function repoScopedSessionDirs(): SessionScanDirs {
+  return {
+    claudeDirs: [process.env.UT_TDD_CLAUDE_SESSIONS_DIR ?? join(homedir(), ".claude", "projects")],
+    codexDirs: [process.env.UT_TDD_CODEX_SESSIONS_DIR ?? join(homedir(), ".codex", "sessions")],
+  };
+}
+
+/**
+ * repo スコープの実測 token/cost telemetry を model_runs へ投入する (issue #82、PLAN-L7-454)。
+ * `loadRepoScopedRuntimeSessionUsage` で **この repo に帰属する session usage のみ** (Claude
+ * project-slug ディレクトリ / Codex session cwd フィルタ) を取得し `projectTokenUsage` へ渡す。
+ * cold-start (該当ログ不在) は no-op。個別ファイルの読取失敗は loadRepoScopedRuntimeSessionUsage 内で
+ * fail-open 済み (rebuild 全体を落とさない)。
+ */
+export function projectRepoScopedTokenUsage(repoRoot: string, db: HarnessDb): RepoScopeIngestStats {
+  const { usages, stats } = loadRepoScopedRuntimeSessionUsage(repoRoot, repoScopedSessionDirs());
+  projectTokenUsage(db, usages);
+  return stats;
 }
 
 function planStatusMap(repoRoot: string): Map<string, string> {
@@ -780,10 +811,23 @@ function projectRoadmapRollup(repoRoot: string, db: HarnessDb): void {
   }
 }
 
+export function latestReviewEvidenceEntry<T extends { reviewed_at?: string }>(
+  entries: T[],
+): T | undefined {
+  const timestampRank = (value?: string): number => {
+    const parsed = Date.parse(value ?? "");
+    return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+  };
+  return entries.reduce<T | undefined>((latest, entry) => {
+    if (!latest) return entry;
+    return timestampRank(entry.reviewed_at) >= timestampRank(latest.reviewed_at) ? entry : latest;
+  }, undefined);
+}
+
 function projectReviewEvidenceRegistry(repoRoot: string, db: HarnessDb): void {
   const indexedAt = nowIso();
   for (const plan of loadReviewPlans(repoRoot)) {
-    const firstEntry = plan.crossEntries[0];
+    const latestEntry = latestReviewEvidenceEntry(plan.crossEntries);
     const id = stableId("review-evidence", plan.plan_id);
     recordProjectionEvent(db, {
       table: "review_evidence_registry",
@@ -794,12 +838,12 @@ function projectReviewEvidenceRegistry(repoRoot: string, db: HarnessDb): void {
         kind: plan.kind,
         status: plan.status,
         has_evidence: plan.hasEvidence ? 1 : 0,
-        review_kind: firstEntry?.review_kind ?? "",
-        verdict: firstEntry?.verdict ?? "",
-        reviewed_at: firstEntry?.reviewed_at ?? "",
-        tests_green_at: firstEntry?.tests_green_at ?? "",
-        worker_model: firstEntry?.worker_model ?? "",
-        reviewer_model: firstEntry?.reviewer_model ?? "",
+        review_kind: latestEntry?.review_kind ?? "",
+        verdict: latestEntry?.verdict ?? "",
+        reviewed_at: latestEntry?.reviewed_at ?? "",
+        tests_green_at: latestEntry?.tests_green_at ?? "",
+        worker_model: latestEntry?.worker_model ?? "",
+        reviewer_model: latestEntry?.reviewer_model ?? "",
         source: normalizePath(join("docs", "plans", plan.file)),
         indexed_at: indexedAt,
       },
@@ -834,6 +878,43 @@ function projectReviewEvidenceRegistry(repoRoot: string, db: HarnessDb): void {
           },
         });
       }
+    }
+  }
+}
+
+function projectGithubReviewLaneReceipts(repoRoot: string, db: HarnessDb): void {
+  for (const plan of loadReviewPlans(repoRoot)) {
+    for (const [index, entry] of plan.crossEntries.entries()) {
+      if (
+        entry.review_kind !== "cross_agent" ||
+        !entry.lane ||
+        !entry.plan_revision ||
+        !entry.subject_head
+      )
+        continue;
+      const id = stableId(
+        "github-review-lane",
+        `${plan.plan_id}:${entry.plan_revision}:${entry.lane}:${entry.subject_head}:${index}`,
+      );
+      recordProjectionEvent(db, {
+        table: "github_review_lane_receipts",
+        id,
+        row: {
+          review_lane_receipt_id: id,
+          plan_id: plan.plan_id,
+          plan_revision: entry.plan_revision,
+          lane: entry.lane,
+          subject_head: entry.subject_head,
+          verdict: entry.verdict ?? "",
+          reviewed_at: entry.reviewed_at ?? "",
+          tests_green_at: entry.tests_green_at ?? "",
+          worker_model: entry.worker_model ?? "",
+          reviewer_model: entry.reviewer_model ?? "",
+          attack_trials: entry.attack_trials ?? 0,
+          citations_json: JSON.stringify(entry.citations ?? []),
+          source: normalizePath(join("docs", "plans", plan.file)),
+        },
+      });
     }
   }
 }
@@ -1094,10 +1175,94 @@ function projectVerificationBandExecution(db: HarnessDb): void {
   }
 }
 
-function truncateProjectionTables(db: HarnessDb): void {
-  for (const table of [...HARNESS_DB_TABLES].reverse()) {
-    db.prepare(`DELETE FROM ${table.name}`).run();
+// PLAN-RECOVERY-14: gate 証跡 (.ut-tdd/gate_runs/*.json) は projectHookEvents /
+// projectReviewModelRuns 等と異なり legacy plan alias (PLAN rename でファイル名に説明的
+// suffix が付いた旧 short-id 参照) を解決していなかった。これが orphan_gate_run の主因の
+// 一つ (alias 解決可能な行が恒久 orphan として残り続ける)。他 projection と同じ
+// resolveProjectedPlanId で揃える。
+function projectGateRunEvidence(
+  repoRoot: string,
+  db: HarnessDb,
+  plans: Map<string, ProjectedPlan>,
+): void {
+  const dir = join(repoRoot, ".ut-tdd", "gate_runs");
+  if (!existsSync(dir)) return;
+  const files = readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => join(dir, name))
+    .sort();
+  for (const file of files) {
+    const evidencePath = normalizePath(relative(repoRoot, file));
+    let parsed: ProjectedGateRunEvidence;
+    try {
+      parsed = JSON.parse(readFileSync(file, "utf8")) as ProjectedGateRunEvidence;
+    } catch {
+      recordFinding(db, {
+        kind: "invalid-gate-run-evidence",
+        severity: "warn",
+        subjectId: evidencePath,
+        source: "gate-run-projection",
+        evidencePath,
+      });
+      continue;
+    }
+    const gateRunId = asString(parsed.gate_run_id);
+    const gateId = asString(parsed.gate_id);
+    const status =
+      parsed.status === "passed" ? "passed" : parsed.status === "failed" ? "failed" : null;
+    const checkedAt = asString(parsed.checked_at);
+    if (!gateRunId || !gateId || !status || !checkedAt) {
+      recordFinding(db, {
+        kind: "invalid-gate-run-evidence",
+        severity: "warn",
+        subjectId: evidencePath,
+        source: "gate-run-projection",
+        evidencePath,
+      });
+      continue;
+    }
+    const rawPlanId = asString(parsed.plan_id ?? undefined) ?? "";
+    const planId = rawPlanId ? resolveProjectedPlanId(plans, rawPlanId) : "";
+    recordProjectionEvent(db, {
+      table: "gate_runs",
+      id: gateRunId,
+      row: {
+        gate_run_id: gateRunId,
+        gate_id: gateId,
+        plan_id: planId,
+        status,
+        checked_at: checkedAt,
+        evidence_path: evidencePath,
+      },
+    });
+    if (!planId) continue;
+    const workflowRunId = stableId("gate-workflow", gateRunId);
+    recordProjectionEvent(db, {
+      table: "workflow_runs",
+      id: workflowRunId,
+      row: {
+        workflow_run_id: workflowRunId,
+        plan_id: planId,
+        // Must match the "documented" (session_id="") drive_runs row id that
+        // projectDriveRuns always creates for every projected plan
+        // (`stableId("drive-run", `${planId}:documented`)`). The previous
+        // `stableId("gate-drive", planId)` used a different id prefix, so it could
+        // never join drive_runs — every gate-derived workflow_runs row was a
+        // guaranteed false-positive workflow_orphans hit (PLAN-RECOVERY-14 root cause).
+        drive_run_id: stableId("drive-run", `${planId}:documented`),
+        workflow: "routine-gate",
+        phase: gateId,
+        ready_status: status === "passed" ? "passed" : "blocked",
+        blocked_reason: status === "passed" ? "" : "gate run status failed",
+        human_required: 0,
+        checked_at: checkedAt,
+      },
+    });
   }
+}
+
+function truncateProjectionTables(db: HarnessDb): void {
+  clearRebuildableProjectionTables(db);
 }
 
 function projectRelationGraph(db: HarnessDb, graph: RelationGraphProjection | undefined): void {
@@ -1151,7 +1316,7 @@ function projectRelationGraph(db: HarnessDb, graph: RelationGraphProjection | un
         source: "relation-graph",
         evidence_path: "",
         is_expected: 1,
-        is_actual: 1,
+        is_actual: edge.lifecycle === "planned" ? 0 : 1,
         indexed_at: indexedAt,
       },
     });
@@ -1926,6 +2091,24 @@ function planGeneratedPathMap(repoRoot: string): Map<string, string> {
   return map;
 }
 
+export function missingTestPlanIdNextAction(status: string | undefined): string {
+  if (status === "draft")
+    return "confirm the owning PLAN and declare this test in generates together (merged-plan-status alignment)";
+  if (status === "confirmed") return "declare this test in the owning PLAN generates";
+  return "declare this test in an owning PLAN generates";
+}
+
+function planStatusById(repoRoot: string): Map<string, string> {
+  const statuses = new Map<string, string>();
+  for (const path of markdownFiles(join(repoRoot, "docs", "plans"))) {
+    const content = readFileSync(path, "utf8");
+    const planId = frontmatterValue(content, "plan_id");
+    const status = frontmatterValue(content, "status");
+    if (planId) statuses.set(planId, status);
+  }
+  return statuses;
+}
+
 function planGeneratedPathMultiMap(repoRoot: string): Map<string, string[]> {
   const map = new Map<string, string[]>();
   for (const path of markdownFiles(join(repoRoot, "docs", "plans"))) {
@@ -1991,6 +2174,7 @@ function importedSourcePaths(content: string): string[] {
 
 function projectTestCaseCatalog(repoRoot: string, db: HarnessDb): void {
   const planByPath = planGeneratedPathMap(repoRoot);
+  const statusesByPlanId = planStatusById(repoRoot);
   const indexedAt = nowIso();
   for (const path of assetFiles(join(repoRoot, "tests"), /\.test\.ts$/i)) {
     const rel = normalizePath(relative(repoRoot, path));
@@ -2022,12 +2206,18 @@ function projectTestCaseCatalog(repoRoot: string, db: HarnessDb): void {
         },
       });
       if (!planId) {
+        const ownershipCandidate = sources
+          .map((source) => planByPath.get(source))
+          .find((candidate): candidate is string => Boolean(candidate));
         recordFinding(db, {
           kind: "missing-test-plan-id",
           severity: "warn",
           subjectId: testCaseId,
           source: "test-case-catalog",
           evidencePath: rel,
+          nextAction: missingTestPlanIdNextAction(
+            ownershipCandidate ? statusesByPlanId.get(ownershipCandidate) : undefined,
+          ),
         });
       }
       if (!oracleId) {
@@ -2237,51 +2427,12 @@ export function projectSkillEvaluations(db: HarnessDb, opts?: { asOf?: string })
  * AC-FR-BR21-43-01: 10 PoC, 6 confirmed / 3 rejected / 1 pivot => rate 0.60.
  * AC-FR-BR21-43-02 cold-start: 0 PoC PLANs => 0 rows, no throw.
  */
-const POC_DECISION_VALUES = ["confirmed", "rejected", "pivot"] as const;
-
 export function projectPocEvaluations(db: HarnessDb, opts?: { asOf?: string }): void {
-  const evaluatedAt = opts?.asOf ?? nowIso();
-
-  // Count decided PoC PLANs by outcome.
-  const rows = db
-    .prepare(
-      `SELECT decision_outcome, COUNT(*) AS cnt
-       FROM plan_registry
-       WHERE kind = 'poc'
-         AND decision_outcome IN ('confirmed', 'rejected', 'pivot')
-       GROUP BY decision_outcome`,
-    )
-    .all() as { decision_outcome: string; cnt: number }[];
-
-  if (rows.length === 0) return; // Cold-start: no decided PoC PLANs => 0 rows.
-
-  const counts: Record<string, number> = { confirmed: 0, rejected: 0, pivot: 0 };
-  for (const row of rows) {
-    const outcome = row.decision_outcome as (typeof POC_DECISION_VALUES)[number];
-    if (outcome in counts) counts[outcome] = Number(row.cnt ?? 0);
-  }
-
-  const confirmedCount = counts.confirmed;
-  const rejectedCount = counts.rejected;
-  const pivotCount = counts.pivot;
-  const totalCount = confirmedCount + rejectedCount + pivotCount;
-  const pocSuccessRate = totalCount === 0 ? 0 : Number((confirmedCount / totalCount).toFixed(4));
-
-  // 単一行制約 (review I-1): id 固定で全 PoC を 1 集計行に集約するのは FR-L1-43 の現要件
-  // (1 summary 行) のみで有効。将来 PoC 種別別 / スプリント別に分解する要件が出たら PK を
-  // (scope, evaluated_at) 等へ変更し、本 id 固定・idx_poc_evaluations_rate も合わせて見直す。
-  recordProjectionEvent(db, {
-    table: "poc_evaluations",
-    id: "poc-evaluation:summary",
-    row: {
-      poc_evaluation_id: "poc-evaluation:summary",
-      poc_success_rate: pocSuccessRate,
-      confirmed_count: confirmedCount,
-      rejected_count: rejectedCount,
-      pivot_count: pivotCount,
-      total_count: totalCount,
-      evaluated_at: evaluatedAt,
-    },
+  const store = new SqliteProjectionStore(db);
+  projectPocEvaluationsApplication({
+    evaluatedAt: opts?.asOf ?? nowIso(),
+    read: store,
+    store,
   });
 }
 
@@ -2315,187 +2466,18 @@ export function projectPocEvaluations(db: HarnessDb, opts?: { asOf?: string }): 
  * Cold-start (enabled but 0 model_runs): 0 rows, no throw.
  */
 export function projectModelEvaluations(db: HarnessDb, repoRoot: string): void {
-  // Opt-in gate: disabled by default.
-  const optInPath = join(repoRoot, ".ut-tdd", "config", "model-opt-in.yaml");
-  if (!existsSync(optInPath)) return;
-  let enabled = false;
-  try {
-    const raw = readFileSync(optInPath, "utf8");
-    const parsed = parseYaml(raw) as Record<string, unknown> | null;
-    enabled = parsed != null && parsed.enabled === true;
-  } catch {
-    // parse failure = treat as disabled (fail-open for opt-in gate)
-    return;
-  }
-  if (!enabled) return;
-
-  // Fetch all model_runs grouped by model.
-  const runRows = db
-    .prepare("SELECT model, COUNT(*) AS run_count FROM model_runs GROUP BY model")
-    .all() as { model: string; run_count: number }[];
-
-  if (runRows.length === 0) return; // Cold-start: 0 model_runs => 0 rows.
-
-  // Build success_count per model by joining model_runs -> plan_registry on plan_id.
-  // PLAN_SUCCESS_STATUSES is reused from this module (single-source-of-truth).
-  const successStatusPlaceholders = PLAN_SUCCESS_STATUSES.map(() => "?").join(", ");
-  const evaluatedAt = nowIso();
-
-  for (const runRow of runRows) {
-    const model = runRow.model;
-    const runCount = Number(runRow.run_count ?? 0);
-
-    const successCount =
-      (
-        db
-          .prepare(
-            `SELECT COUNT(*) AS success_count
-           FROM model_runs mr
-           JOIN plan_registry pr ON mr.plan_id = pr.plan_id
-           WHERE mr.model = ?
-             AND pr.status IN (${successStatusPlaceholders})`,
-          )
-          .get(model, ...PLAN_SUCCESS_STATUSES) as { success_count: number } | undefined
-      )?.success_count ?? 0;
-
-    const successRate = runCount === 0 ? 0 : Number((Number(successCount) / runCount).toFixed(4));
-
-    // FR-L1-38 token 効率 (PLAN-L7-57): token 行 (token-tracker 投入) のみ非 NULL。SUM は NULL を無視。
-    // total_cost は全行 NULL のとき NULL (= cost を出せる run が無い)。tokens_per_success / cost_per_success
-    // は success が無い / 該当 totals が無いとき NULL (core=token、$=enrichment、捏造しない)。
-    const agg = db
-      .prepare(
-        `SELECT COALESCE(SUM(input_tokens), 0) AS total_input,
-                COALESCE(SUM(output_tokens), 0) AS total_output,
-                SUM(cost_usd) AS total_cost
-         FROM model_runs WHERE model = ?`,
-      )
-      .get(model) as { total_input: number; total_output: number; total_cost: number | null };
-    const totalInput = Number(agg.total_input ?? 0);
-    const totalOutput = Number(agg.total_output ?? 0);
-    const totalCost = agg.total_cost == null ? null : Number(agg.total_cost);
-    const sc = Number(successCount);
-    const tokensPerSuccess =
-      sc > 0 && totalOutput > 0 ? Number((totalOutput / sc).toFixed(2)) : null;
-    const costPerSuccess = totalCost != null && sc > 0 ? Number((totalCost / sc).toFixed(6)) : null;
-
-    recordProjectionEvent(db, {
-      table: "model_evaluations",
-      id: model,
-      row: {
-        model,
-        success_rate: successRate,
-        run_count: runCount,
-        success_count: sc,
-        evaluated_at: evaluatedAt,
-        total_input_tokens: totalInput,
-        total_output_tokens: totalOutput,
-        total_cost_usd: totalCost,
-        tokens_per_success: tokensPerSuccess,
-        cost_per_success: costPerSuccess,
-      },
-    });
-  }
+  const store = new SqliteProjectionStore(db);
+  projectModelEvaluationsApplication({
+    config: new RepositoryModelEvaluationConfig(repoRoot),
+    read: store,
+    store,
+    evaluatedAt: nowIso(),
+  });
 }
 
 function projectOperationalMetrics(db: HarnessDb): void {
-  const computedAt = nowIso();
-  const metrics: {
-    subject: string;
-    name: string;
-    value: number;
-    threshold: number;
-    status: string;
-  }[] = [];
-  const driveModes = db
-    .prepare("SELECT mode, COUNT(*) AS total FROM drive_runs GROUP BY mode ORDER BY mode")
-    .all();
-  for (const row of driveModes) {
-    const mode = String(row.mode ?? "unknown");
-    const total = Number(row.total ?? 0);
-    const completed = scalarNumber(
-      db,
-      "SELECT COUNT(*) AS value FROM drive_runs WHERE mode = ? AND status IN ('completed', 'confirmed', 'documented')",
-      [mode],
-    );
-    const rate = total === 0 ? 0 : completed / total;
-    metrics.push({
-      subject: `drive:${mode}`,
-      name: "drive_firing_rate",
-      value: Number(rate.toFixed(4)),
-      threshold: 0.8,
-      status: rate >= 0.8 ? "pass" : "warn",
-    });
-  }
-  const hookTotal = scalarNumber(db, "SELECT COUNT(*) AS value FROM hook_events");
-  const troubleTotal = scalarNumber(
-    db,
-    "SELECT COUNT(*) AS value FROM hook_events WHERE event_type IN ('forced_stop', 'error', 'failed') OR digest LIKE '%fail%' OR digest LIKE '%error%'",
-  );
-  metrics.push({
-    subject: "hooks",
-    name: "trouble_event_rate",
-    value: hookTotal === 0 ? 0 : Number((troubleTotal / hookTotal).toFixed(4)),
-    threshold: 0,
-    status: troubleTotal === 0 ? "pass" : "warn",
-  });
-  const workflowTotal = scalarNumber(db, "SELECT COUNT(*) AS value FROM workflow_runs");
-  const blockedTotal = scalarNumber(
-    db,
-    "SELECT COUNT(*) AS value FROM workflow_runs WHERE ready_status NOT IN ('passed_local', 'passed', 'ready')",
-  );
-  const humanTotal = scalarNumber(
-    db,
-    "SELECT COUNT(*) AS value FROM workflow_runs WHERE human_required = 1",
-  );
-  const retryGroups = scalarNumber(
-    db,
-    `SELECT COUNT(*) AS value
-     FROM (
-       SELECT plan_id, workflow, phase, COUNT(*) AS c
-       FROM workflow_runs
-       GROUP BY plan_id, workflow, phase
-       HAVING c > 1
-     )`,
-  );
-  metrics.push({
-    subject: "workflow",
-    name: "workflow_blocked_rate",
-    value: workflowTotal === 0 ? 0 : Number((blockedTotal / workflowTotal).toFixed(4)),
-    threshold: 0,
-    status: blockedTotal === 0 ? "pass" : "warn",
-  });
-  metrics.push({
-    subject: "workflow",
-    name: "workflow_human_required_rate",
-    value: workflowTotal === 0 ? 0 : Number((humanTotal / workflowTotal).toFixed(4)),
-    threshold: 0,
-    status: humanTotal === 0 ? "pass" : "warn",
-  });
-  metrics.push({
-    subject: "workflow",
-    name: "workflow_retry_groups",
-    value: retryGroups,
-    threshold: 0,
-    status: retryGroups === 0 ? "pass" : "warn",
-  });
-  for (const metric of metrics) {
-    const signalId = stableId("telemetry-signal", `${metric.subject}:${metric.name}`);
-    recordProjectionEvent(db, {
-      table: "quality_signals",
-      id: signalId,
-      row: {
-        signal_id: signalId,
-        source: "telemetry-metrics",
-        subject_id: metric.subject,
-        metric: metric.name,
-        value: metric.value,
-        threshold: metric.threshold,
-        status: metric.status,
-        computed_at: computedAt,
-      },
-    });
-  }
+  const store = new SqliteProjectionStore(db);
+  projectOperationalMetricsApplication({ read: store, store, computedAt: nowIso() });
 }
 
 /** screen-list.md §1 の画面表 (画面 ID / 名 / カテゴリ / URL / L1 参照) を行に分解する。 */
@@ -2642,6 +2624,7 @@ export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarn
   const ownsDb = input.db === undefined;
   const db = input.db ?? openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
   const timings: ProjectionTiming[] = [];
+  let tokenIngestStats: RepoScopeIngestStats | undefined;
   const time = <T>(id: string, run: () => T): T => {
     if (input.timing !== true) return run();
     const started = performance.now();
@@ -2660,10 +2643,12 @@ export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarn
     // Atomic rebuild: truncate + re-project run inside a single transaction so a
     // mid-rebuild failure rolls back to the prior committed projection instead of
     // leaving the DB truncated or half-populated (DB rebuild atomicity).
-    db.exec("BEGIN IMMEDIATE");
-    try {
+    runSqliteTransaction(db, () => {
       time("truncate", () => truncateProjectionTables(db));
       const plans = time("plans", () => projectPlans(repoRoot, db));
+      if (hasVmodelAuthoring(repoRoot)) {
+        time("vmodel-authoring", () => projectVmodelAuthoring(repoRoot, db));
+      }
       time("drive-hook-model", () => {
         projectDriveRuns(repoRoot, db, plans);
         projectHookEvents(repoRoot, db, plans);
@@ -2672,9 +2657,13 @@ export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarn
       time("roadmap-review", () => {
         projectRoadmapRollup(repoRoot, db);
         projectReviewEvidenceRegistry(repoRoot, db);
+        projectGithubReviewLaneReceipts(repoRoot, db);
         projectGuardrailInvariantAdvisories(db);
         projectDescentObligations(repoRoot, db);
+        projectDesignPairFreezeFindings(repoRoot, db);
+        projectDesignQualityCoverage(repoRoot, db);
         projectVerificationBandExecution(db);
+        projectGateRunEvidence(repoRoot, db, plans);
       });
       time("automation-memory", () => {
         projectAutomationAssets(repoRoot, db);
@@ -2689,6 +2678,20 @@ export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarn
         projectSkillEvaluations(db);
         projectPocEvaluations(db);
       });
+      if (!input.skipTokenTelemetry) {
+        // repo スコープ token telemetry ingest (issue #82、PLAN-L7-454): 従来 model_runs には
+        // review-evidence 由来行しか無かった実測欠落を是正する。model-operational (token 効率集計) より
+        // 前に走らせ、同一 rebuild 内の projectModelEvaluations が新規 token 行を反映できるようにする。
+        // 専用の timing id で計測し、他の projection と切り分けて可視化する。session ログ読取の想定外失敗は
+        // fail-open とし、rebuild 全体を落とさない (cold-start / 権限エラー等でも継続)。
+        time("token-telemetry", () => {
+          try {
+            tokenIngestStats = projectRepoScopedTokenUsage(repoRoot, db);
+          } catch {
+            tokenIngestStats = undefined;
+          }
+        });
+      }
       time("model-operational", () => {
         projectModelEvaluations(db, repoRoot);
         projectOperationalMetrics(db);
@@ -2713,8 +2716,15 @@ export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarn
         projectVerificationEvidence(db, input.verificationEvidence),
       );
       time("test-cases", () => projectTestCaseCatalog(repoRoot, db));
+      time("spec-ir", () => projectSpecIr(repoRoot, db, projectionDeps));
+      time("forward-readiness", () =>
+        rebuildExecutionReadiness({ db, now: nowIso(), transactional: false, repoRoot }),
+      );
       time("feedback", () => {
+        projectFeedbackLifecycle(repoRoot, db, projectionDeps);
+        projectVerificationDefectRoutingRefactorCandidates(db, projectionDeps);
         projectFeedbackEvents(db, projectionDeps);
+        reconcileFeedbackLifecycle(repoRoot, db, projectionDeps);
         projectTroubleEvents(db, projectionDeps);
         projectRetryEvents(db, projectionDeps);
         projectIssueQueue(db, projectionDeps);
@@ -2722,11 +2732,7 @@ export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarn
         projectImprovementLog(db, projectionDeps);
       });
       time("screens", () => projectScreens(repoRoot, db));
-      time("commit", () => db.exec("COMMIT"));
-    } catch (error) {
-      db.exec("ROLLBACK");
-      throw error;
-    }
+    });
     const counts = time("row-counts", () => rowCounts(db));
     const result: RebuildHarnessDbResult = {
       ok: true,
@@ -2740,6 +2746,7 @@ export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarn
       },
     };
     if (input.timing === true) result.timings = timings;
+    if (tokenIngestStats !== undefined) result.tokenIngest = tokenIngestStats;
     return result;
   } finally {
     if (ownsDb) db.close();
