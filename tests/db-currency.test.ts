@@ -12,7 +12,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { checkDbProjectionIngestion, checkDesignDetection } from "../src/doctor/db-projection.ts";
+import { checkDriveDbRegistration, checkGateRunCoverage } from "../src/doctor/process-quality.ts";
 import { analyzeDbCurrency, dbCurrencyMessages } from "../src/lint/db-currency.ts";
 import type { DriveDbRegistrationStats } from "../src/lint/drive-db-registration.ts";
 import { loadDriveDbRegistrationStats } from "../src/state-db/drive-registration.ts";
@@ -35,6 +37,17 @@ import {
   transferStopRefreshLease,
 } from "../src/state-db/stop-refresh-coordinator.ts";
 import { removeTestTree } from "./support/temp-tree.ts";
+
+const tokenScans = vi.hoisted(() => ({
+  all: vi.fn(() => []),
+  repoScoped: vi.fn(() => {
+    throw new Error("unexpected repo-scoped token scan");
+  }),
+}));
+vi.mock("../src/state-db/token-tracker.ts", () => ({
+  loadRuntimeSessionUsage: tokenScans.all,
+  loadRepoScopedRuntimeSessionUsage: tokenScans.repoScoped,
+}));
 
 const currentStats: DriveDbRegistrationStats = {
   planCount: 10,
@@ -132,7 +145,6 @@ describe("db-currency lint", () => {
 
   it("U-DBCURRENCY-005: Stop-hook refresh converges a stale persisted registry without manual rebuild (PLAN-L7-365 Step 2, issue #78)", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-stop-refresh-"));
-    const emptySessions = mkdtempSync(join(tmpdir(), "ut-tdd-stop-refresh-sessions-"));
     try {
       const planDir = join(root, "docs", "plans");
       mkdirSync(planDir, { recursive: true });
@@ -169,8 +181,6 @@ describe("db-currency lint", () => {
 
       const refresh = refreshHarnessDbOnStop({
         repoRoot: root,
-        claudeSessionsDir: emptySessions,
-        codexSessionsDir: emptySessions,
       });
       expect(refresh.ok).toBe(true);
       expect(refresh.rebuilt).toBe(true);
@@ -179,7 +189,6 @@ describe("db-currency lint", () => {
       expect(result.ok).toBe(true);
     } finally {
       removeTestTree(root);
-      removeTestTree(emptySessions);
     }
   });
 
@@ -190,7 +199,7 @@ describe("db-currency lint", () => {
     try {
       writeFileSync(join(root, ".ut-tdd"), "not a directory", "utf8");
 
-      const refresh = refreshHarnessDbOnStop({ repoRoot: root, skipTokenIngest: true });
+      const refresh = refreshHarnessDbOnStop({ repoRoot: root });
 
       expect(refresh.ok).toBe(false);
       expect(refresh.skippedReason).toBeTruthy();
@@ -446,7 +455,6 @@ describe("db-currency lint", () => {
       const result = runCoalescedStopRefresh({
         repoRoot: root,
         generation: "generation-rerun",
-        skipTokenIngest: true,
         refresh: () => {
           calls += 1;
           // Stop arrives during both runs. First causes exactly one rerun; second remains durable.
@@ -812,8 +820,8 @@ describe("db-currency lint", () => {
       "utf8",
     );
     const child = spawn(process.execPath, [worker], { cwd: root, stdio: "ignore" });
-    const childExit = new Promise<void>((resolvePromise) =>
-      child.once("exit", () => resolvePromise()),
+    const childClose = new Promise<void>((resolvePromise) =>
+      child.once("close", () => resolvePromise()),
     );
     try {
       await new Promise<void>((resolvePromise, reject) => {
@@ -850,7 +858,7 @@ describe("db-currency lint", () => {
       ) as { process_birth: string };
       expect(acknowledged.process_birth.startsWith("unverified-")).toBe(false);
       writeFileSync(release, "release\n", "utf8");
-      await childExit;
+      await childClose;
 
       const replacement = acquireStopRefreshLease(root, {
         pid: process.pid + 200_000,
@@ -861,8 +869,16 @@ describe("db-currency lint", () => {
       expect(replacement.acquired).toBe(true);
     } finally {
       if (!existsSync(release)) writeFileSync(release, "release\n", "utf8");
-      child.kill();
-      removeTestTree(root);
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      let cleanupTimeout: ReturnType<typeof setTimeout> | undefined;
+      const childClosed = await Promise.race([
+        childClose.then(() => true),
+        new Promise<false>((resolvePromise) => {
+          cleanupTimeout = setTimeout(() => resolvePromise(false), 5_000);
+        }),
+      ]);
+      if (cleanupTimeout) clearTimeout(cleanupTimeout);
+      if (childClosed) removeTestTree(root);
     }
   });
 
@@ -899,13 +915,10 @@ describe("db-currency lint", () => {
 
   it("U-DBCURRENCY-026: Stop-hook refresh calls maybeVacuumHarnessDb once, after a successful rebuild (PLAN-L7-457, issue #118)", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-stop-vacuum-"));
-    const emptySessions = mkdtempSync(join(tmpdir(), "ut-tdd-stop-vacuum-sessions-"));
     try {
       const calls: Array<{ dbPath: string; repoRoot?: string }> = [];
       const refresh = refreshHarnessDbOnStop({
         repoRoot: root,
-        claudeSessionsDir: emptySessions,
-        codexSessionsDir: emptySessions,
         vacuum: (dbPath, options) => {
           calls.push({ dbPath, repoRoot: options?.repoRoot });
           return { ran: false };
@@ -920,7 +933,6 @@ describe("db-currency lint", () => {
       expect(refresh.vacuum).toEqual({ ran: false });
     } finally {
       removeTestTree(root);
-      removeTestTree(emptySessions);
     }
   });
 
@@ -931,7 +943,6 @@ describe("db-currency lint", () => {
       let calls = 0;
       const refresh = refreshHarnessDbOnStop({
         repoRoot: root,
-        skipTokenIngest: true,
         vacuum: () => {
           calls += 1;
           return { ran: false };
@@ -943,6 +954,40 @@ describe("db-currency lint", () => {
       expect(refresh.vacuum).toBeUndefined();
     } finally {
       removeTestTree(root);
+    }
+  });
+
+  it("U-TOKSTOP-001: Stop refresh does not scan runtime token sessions", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-stop-no-token-scan-"));
+    tokenScans.all.mockClear();
+    tokenScans.repoScoped.mockClear();
+    try {
+      const result = refreshHarnessDbOnStop({ repoRoot: root, vacuum: () => ({ ran: false }) });
+      expect(result.rebuilt).toBe(true);
+      expect(tokenScans.all).not.toHaveBeenCalled();
+      expect(tokenScans.repoScoped).not.toHaveBeenCalled();
+    } finally {
+      removeTestTree(root);
+    }
+  });
+
+  it("U-TOKSTOP-002: doctor rebuild paths do not scan runtime token sessions", () => {
+    tokenScans.all.mockClear();
+    tokenScans.repoScoped.mockClear();
+    for (const check of [
+      checkDbProjectionIngestion,
+      checkDesignDetection,
+      checkGateRunCoverage,
+      checkDriveDbRegistration,
+    ]) {
+      const root = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-no-token-scan-"));
+      try {
+        check(root);
+        expect(tokenScans.all).not.toHaveBeenCalled();
+        expect(tokenScans.repoScoped).not.toHaveBeenCalled();
+      } finally {
+        removeTestTree(root);
+      }
     }
   });
 });

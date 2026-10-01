@@ -67,6 +67,58 @@ export const dependenciesSchema = z.object({
   references: z.array(z.string()).default([]),
 });
 
+/**
+ * PLAN-L7-690 §2.1: issue binding の projection_state 契約。
+ * - `projected` は canonical `sha256:<64桁hex>` の非全ゼロ digest を必須とする。
+ * - `unprojected` は `projection_digest` を持たない (null/空文字での代用も不可、キー自体を省略)。
+ * - `projection_state` が無い既存 revision の frontmatter / tracked receipt は legacy binding として
+ *   引き続き有効 (§2.1 legacy 条項)。既存 PLAN を一括是正しない。
+ */
+const PROJECTION_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/i;
+/** #690 補正: plan-admission/policy.ts の API 境界チェックでも同一正規表現を再利用する。 */
+export const ALL_ZERO_PROJECTION_DIGEST_PATTERN = /^sha256:0{64}$/i;
+
+const projectedIssueBindingSchema = z
+  .object({
+    provider: z.literal("github"),
+    issue_id: z.number().int().positive(),
+    episode_id: z.string().min(1),
+    projection_state: z.literal("projected"),
+    projection_digest: z
+      .string()
+      .regex(PROJECTION_DIGEST_PATTERN, "projection_digest は sha256:<64桁16進数> 形式必須 (§2.1)")
+      .refine(
+        (value) => !ALL_ZERO_PROJECTION_DIGEST_PATTERN.test(value),
+        "projection_state=projected の projection_digest は全ゼロを許可しない (§2.1/§2.2)",
+      ),
+  })
+  .strict();
+
+const unprojectedIssueBindingSchema = z
+  .object({
+    provider: z.literal("github"),
+    issue_id: z.number().int().positive(),
+    episode_id: z.string().min(1),
+    projection_state: z.literal("unprojected"),
+  })
+  .strict();
+
+/** legacy binding: projection_state 未導入時点の既存 revision (§2.1 legacy 条項、書換え対象外)。 */
+const legacyIssueBindingSchema = z
+  .object({
+    provider: z.literal("github"),
+    issue_id: z.number().int().positive(),
+    episode_id: z.string().min(1),
+    projection_digest: z.string().regex(/^sha256:[a-f0-9]{16,64}$/i),
+  })
+  .strict();
+
+const issueBindingSchema = z.union([
+  projectedIssueBindingSchema,
+  unprojectedIssueBindingSchema,
+  legacyIssueBindingSchema,
+]);
+
 /** 正規authoring経路が発行する自己検証可能なAdmission証明。既存PLANへの遡及強制はdiff fence側で行う。 */
 const admissionReceiptSchema = z
   .object({
@@ -87,15 +139,7 @@ const admissionReceiptSchema = z
       })
       .strict(),
     route: z.object({ signal: z.string().min(1), mode: z.string().min(1) }).strict(),
-    issue: z
-      .object({
-        provider: z.literal("github"),
-        issue_id: z.number().int().positive(),
-        episode_id: z.string().min(1),
-        projection_digest: z.string().regex(/^sha256:[a-f0-9]{16,64}$/i),
-      })
-      .strict()
-      .optional(),
+    issue: issueBindingSchema.optional(),
     origin: z
       .object({
         plan_id: z.string().min(1),

@@ -3,9 +3,10 @@
  * L1 → L3 → AC → AT の双方向 trace 整合を機械検証 (孤児 = 0)。
  * pmo-sonnet 手動 matrix (A-47) の機械強制化、PO 指摘「機能一覧やドメインチェックのテストが走るべき」反映。
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveAuthoringSourceAbsolutePath } from "../shared/design-root.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
@@ -23,27 +24,17 @@ interface DocSource {
 
 // A-120 I-5: repoRoot 注入可 (default = ROOT で挙動保存)。
 export function loadDocs(repoRoot: string = ROOT): DocSource {
+  const readRequired = (path: string): string => {
+    const absolute = resolveAuthoringSourceAbsolutePath(repoRoot, path);
+    if (!existsSync(absolute)) throw new Error(`required doc not created: ${path}`);
+    return readFileSync(absolute, "utf-8");
+  };
   return {
-    l1Functional: readFileSync(
-      resolve(repoRoot, "docs/design/harness/L1-requirements/functional-requirements.md"),
-      "utf-8",
-    ),
-    l3Functional: readFileSync(
-      resolve(repoRoot, "docs/design/harness/L3-functional/functional-requirements.md"),
-      "utf-8",
-    ),
-    l3BusinessDetail: readFileSync(
-      resolve(repoRoot, "docs/design/harness/L3-functional/business-detail.md"),
-      "utf-8",
-    ),
-    l3NfrGrade: readFileSync(
-      resolve(repoRoot, "docs/design/harness/L3-functional/nfr-grade.md"),
-      "utf-8",
-    ),
-    l12AcceptanceTest: readFileSync(
-      resolve(repoRoot, "docs/test-design/harness/L12-acceptance-test-design.md"),
-      "utf-8",
-    ),
+    l1Functional: readRequired("docs/design/harness/L1-requirements/functional-requirements.md"),
+    l3Functional: readRequired("docs/design/harness/L3-functional/functional-requirements.md"),
+    l3BusinessDetail: readRequired("docs/design/harness/L3-functional/business-detail.md"),
+    l3NfrGrade: readRequired("docs/design/harness/L3-functional/nfr-grade.md"),
+    l12AcceptanceTest: readRequired("docs/test-design/harness/L12-acceptance-test-design.md"),
   };
 }
 

@@ -148,6 +148,61 @@ describe("TrackedReceiptRenderer", () => {
     expect(embedded.escape_reason).toBe("PoC実装を設計へ引き戻す");
   });
 
+  it("U-ISSUEBIND-002 (renderer): projection_state=unprojectedはdigestキーを出力しない (§2.1)", () => {
+    const reverseUnprojected: PlanAdmissionRequest = {
+      routeSignal: "reverse",
+      routeMode: "reverse",
+      kind: "reverse",
+      layer: "cross",
+      workflowPhase: "R0",
+      drive: "agent",
+      branch: "work/reverse-renderer",
+      issue: {
+        provider: "github",
+        issueId: 690,
+        episodeId: "episode-690",
+        projectionState: "unprojected",
+      },
+      origin: { planId: "PLAN-L7-100-origin", revision: 2, digest: `sha256:${"d".repeat(64)}` },
+      transitionDirection: "implementation_to_design",
+      implementationDisposition: "preserved",
+      reentry: { targetPlanId: "PLAN-L6-100-reentry", targetRevision: 3, phase: "forward_merge" },
+      escapeReason: "issue690 projection_state contract",
+    };
+    const renderer = new TrackedReceiptRenderer({ read: () => emptyProjection });
+
+    const [source] = renderer.render(
+      command(
+        reverseUnprojected,
+        {
+          admission: reverseUnprojected,
+          canonical: canonical(
+            "PLAN-REVERSE-435-drive-plan-admission-backfill",
+            "docs/plans/PLAN-REVERSE-435-drive-plan-admission-backfill.md",
+          ),
+        },
+        {
+          planId: "PLAN-REVERSE-435-drive-plan-admission-backfill",
+          path: "docs/plans/PLAN-REVERSE-435-drive-plan-admission-backfill.md",
+        },
+        "docs/plans/PLAN-REVERSE-435-drive-plan-admission-backfill.md",
+      ),
+      receipt,
+    );
+
+    const embedded = parseLegacyPlanSource(source.content)?.frontmatter
+      .admission_receipt as EmbeddedReceipt & {
+      issue?: { projection_state?: string; projection_digest?: string };
+    };
+    expect(embedded.issue).toEqual({
+      provider: "github",
+      issue_id: 690,
+      episode_id: "episode-690",
+      projection_state: "unprojected",
+    });
+    expect(embedded.issue?.projection_digest).toBeUndefined();
+  });
+
   it("U-PADM-053: caller supplied projectionと壊れた既存chainをfail-closeする", () => {
     const renderer = new TrackedReceiptRenderer({ read: () => emptyProjection });
     expect(() =>

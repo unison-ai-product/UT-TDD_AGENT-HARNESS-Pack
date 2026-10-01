@@ -283,6 +283,33 @@ describe("verification trigger (U-VTRIG、層群 freeze の機械発火、IMP-06
     ).find((g) => g.id === "L0-L3");
     expect(invalid?.frozen).toBe(false);
     expect(invalid?.activeRevisionTotal).toBe(0);
+
+    const consumerBase = doc("docs/design/L1-requirements/base.md", "L1", "x", "confirmed");
+    const consumerDelta = {
+      ...doc("docs/design/L1-requirements/delta.md", "L1", "x", "draft"),
+      revisionTrack: "additive",
+      revisionBaseArtifact: "docs/design/harness/L1-requirements/base.md",
+    };
+    const consumerRevision = analyzeVerificationGroups([consumerBase, consumerDelta], []).find(
+      (group) => group.id === "L0-L3",
+    );
+    expect(consumerRevision?.frozen).toBe(true);
+    expect(consumerRevision?.activeRevisionTotal).toBe(1);
+    expect(consumerRevision?.activeRevisionDraft).toBe(1);
+  });
+
+  it("reports an invalid additive revision at its canonicalized source path", () => {
+    const invalid = {
+      ...doc("docs/design/harness/L1-requirements/delta.md", "L1", "x", "draft"),
+      revisionTrack: "additive",
+      revisionBaseArtifact: "docs/design/harness/L1-requirements/missing.md",
+    };
+
+    expect(analyzePairFreeze([invalid]).orphans).toContainEqual({
+      path: invalid.path,
+      reason: "revision-base-invalid",
+      detail: invalid.revisionBaseArtifact,
+    });
   });
 
   it("U-VTRIG-003: 層群に pair 孤児があれば freeze 未完了", () => {

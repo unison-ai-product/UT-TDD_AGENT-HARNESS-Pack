@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { CODEX_GIT_ROOT_PREFIX } from "../src/lint/hook-invocation.ts";
 import { BUILTIN_GITHUB_TEMPLATES } from "../src/setup/templates.ts";
 
 const repoRoot = process.cwd();
@@ -176,14 +177,15 @@ describe("Claude hook wrapper execution contract (issue #123 / PLAN-L7-522 S1-b)
     });
     const wrapper = BUILTIN_GITHUB_TEMPLATES["common/ut-tdd.mjs"];
     const codexHooks = JSON.parse(BUILTIN_GITHUB_TEMPLATES["adapter/.codex/hooks.json"]) as {
-      hooks: Record<string, { hooks: { command: string; args?: string[] }[] }[]>;
+      hooks: Record<string, { hooks: { command: string }[] }[]>;
     };
     const codexCommands = Object.values(codexHooks.hooks).flatMap((entries) =>
       entries.flatMap((entry) => entry.hooks),
     );
+    // PLAN-L7-668 §3: Codex は command+args ではなく、git root 解決の固定前置部分を持つ 1 文字列。
     expect(
-      codexCommands.every(
-        (hook) => hook.command === "node" && hook.args?.[0] === ".ut-tdd/bin/ut-tdd.mjs",
+      codexCommands.every((hook) =>
+        hook.command.startsWith(`node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs"`),
       ),
     ).toBe(true);
     expect(wrapper).toContain("spawnSync(process.execPath");

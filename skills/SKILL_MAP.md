@@ -85,6 +85,8 @@ packs for the current task.
 | Stage: detailed design + shift-left test design | vmodel-stage-detailed-design |
 | Stage: implementation / TDD closure / unit test | vmodel-stage-implementation-unit |
 | Stage: integration → system → acceptance → operational test | vmodel-stage-integration-acceptance-ops |
+| Writing `docs/*.yaml` in the vmodel-docgen source format (ID naming, trace declarations) | vmodel-authoring |
+| Running the vmodel-docgen tool's own generate/gate/build workflow (reference only, not this harness's workflow) | vmodel-workflow |
 | Product pattern presets (scale × platform adoption/granularity) | product-profile-tailoring |
 | Data design docs (DB / schema / mapping / dictionary / IO) | design-family-data |
 | Security & privacy design docs | design-family-security-privacy |
@@ -95,6 +97,33 @@ packs for the current task.
 | CLI / API governance / webhook / event design docs | design-family-cli-api-platform |
 | AI agent / AI-output verification / model governance docs | design-family-ai-agent |
 | SaaS business docs (billing / tenant / SLA / compliance) | design-family-saas-business |
+
+## Ported vmodel zip skills (PLAN-L7-676 PR-T3)
+
+`Vモデル設計ドキュメント_checked.zip` (Apache-2.0) contributed 7 skills, 5 role
+guides, and 5 review-record examples (docs/plans/PLAN-L7-676-release-consumer-dev-start.md
+§3.5.1). `vmodel-authoring` and `vmodel-workflow` did not overlap with any
+existing pack and were ported in full (see trigger table above). The other 5
+zip skills overlapped in judgement content with an existing English pack, so
+each was ported as a **thin bridge** (Japanese section-heading index only,
+judgement content lives in the linked pack) rather than a second full copy:
+
+| zip skill (bridge file) | judgement lives in |
+|---|---|
+| vmodel-code-minimalism | code-minimalism |
+| vmodel-design-judgement | design-tailoring-and-granularity |
+| vmodel-substance-review | adversarial-review |
+| vmodel-test-thinking | test-breakage-thinking |
+| vmodel-visual-review | visual-state-verification |
+
+The 5 role guides (`vmodel-role-{architecture,coding,design,marketing,test}`)
+are `skill_type: reference-example`, not workflow/judgement packs: each is a
+worked example of an `agentdocs`-generated, role-scoped implementation digest
+for the zip's sample "TeamFlow" product. Read one when you need to see what a
+complete role-scoped context digest looks like, not for TeamFlow-specific
+facts. The 5 review-record examples (`RV-001`..`RV-005`) live under
+`docs/templates/vmodel/review-examples/` (not `skills/`, not scored) as worked
+examples of the [[adversarial-review]] attacker/defender packet format.
 
 ## Domain / project skills (indexed by category + metadata)
 

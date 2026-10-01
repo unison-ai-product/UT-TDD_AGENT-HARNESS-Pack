@@ -44,6 +44,8 @@ export interface G8IntegrationEvidenceManifest {
     stale_defer_count?: number;
     doctor_check?: string;
   };
+  artifacts?: unknown;
+  defer?: unknown;
 }
 
 export interface G8IntegrationWorkflowResult {
@@ -55,6 +57,12 @@ export interface G8IntegrationWorkflowResult {
   selectedItCount: number;
   mandatoryItCount: number;
   violations: string[];
+}
+
+export interface G8EvidenceManifestExpectation {
+  gate: string;
+  schemaVersion: string;
+  doctorCheck: string;
 }
 
 const WORKFLOW_MARKERS = [
@@ -134,7 +142,10 @@ function evidenceCoverage(value: unknown): G8IntegrationEvidenceCoverage[] {
   }));
 }
 
-function manifestFromJson(manifestPath: string, raw: unknown): G8IntegrationEvidenceManifest {
+export function parseG8IntegrationEvidenceManifest(
+  manifestPath: string,
+  raw: unknown,
+): G8IntegrationEvidenceManifest {
   const doc = isRecord(raw) ? raw : {};
   const exitCriteria = isRecord(doc.exit_criteria) ? doc.exit_criteria : {};
   return {
@@ -164,21 +175,24 @@ function manifestFromJson(manifestPath: string, raw: unknown): G8IntegrationEvid
       doctor_check:
         typeof exitCriteria.doctor_check === "string" ? exitCriteria.doctor_check : undefined,
     },
+    artifacts: doc.artifacts,
+    defer: doc.defer,
   };
 }
 
 export function loadG8IntegrationEvidenceManifests(
   repoRoot = process.cwd(),
+  evidenceDirectory = EVIDENCE_DIR,
 ): G8IntegrationEvidenceManifest[] {
-  const dir = resolve(repoRoot, EVIDENCE_DIR);
+  const dir = resolve(repoRoot, evidenceDirectory);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((name) => name.endsWith(".json"))
     .sort()
     .map((name) => {
-      const manifestPath = `${EVIDENCE_DIR}/${name}`;
+      const manifestPath = `${evidenceDirectory}/${name}`;
       const raw = JSON.parse(readFileSync(resolve(dir, name), "utf8")) as unknown;
-      return manifestFromJson(manifestPath, raw);
+      return parseG8IntegrationEvidenceManifest(manifestPath, raw);
     });
 }
 
@@ -202,13 +216,18 @@ function hasAllowedEvidencePrefix(path: string): boolean {
 function validateManifest(
   manifest: G8IntegrationEvidenceManifest,
   repoRoot: string | undefined,
+  expected: G8EvidenceManifestExpectation = {
+    gate: "G8",
+    schemaVersion: EVIDENCE_MANIFEST_SCHEMA,
+    doctorCheck: "g8-integration-workflow",
+  },
 ): string[] {
   const violations: string[] = [];
-  if (manifest.schema_version !== EVIDENCE_MANIFEST_SCHEMA) {
+  if (manifest.schema_version !== expected.schemaVersion) {
     violations.push(`${manifest.manifest_path}: invalid schema_version`);
   }
-  if (manifest.gate !== "G8") {
-    violations.push(`${manifest.manifest_path}: gate must be G8`);
+  if (manifest.gate !== expected.gate) {
+    violations.push(`${manifest.manifest_path}: gate must be ${expected.gate}`);
   }
   if (!manifest.profile || !manifest.plan_id) {
     violations.push(`${manifest.manifest_path}: profile and plan_id are required`);
@@ -291,12 +310,20 @@ function validateManifest(
   if (manifest.exit_criteria.stale_defer_count !== 0) {
     violations.push(`${manifest.manifest_path}: exit_criteria.stale_defer_count must be 0`);
   }
-  if (manifest.exit_criteria.doctor_check !== "g8-integration-workflow") {
+  if (manifest.exit_criteria.doctor_check !== expected.doctorCheck) {
     violations.push(
-      `${manifest.manifest_path}: exit_criteria.doctor_check must be g8-integration-workflow`,
+      `${manifest.manifest_path}: exit_criteria.doctor_check must be ${expected.doctorCheck}`,
     );
   }
   return violations;
+}
+
+export function validateG8IntegrationEvidenceManifest(
+  manifest: G8IntegrationEvidenceManifest,
+  repoRoot: string,
+  expected: G8EvidenceManifestExpectation,
+): string[] {
+  return validateManifest(manifest, repoRoot, expected);
 }
 
 export function analyzeG8IntegrationWorkflow(

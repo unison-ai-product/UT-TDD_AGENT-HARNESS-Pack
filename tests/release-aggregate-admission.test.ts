@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
+  deriveArtifactInventoryDigest,
+  deriveReleaseId,
+  deriveReleaseRecordDigest,
+} from "../src/schema/release-manifest.ts";
+import { derivePackPublicationAssets } from "../src/setup/pack-publication-assets.ts";
+import {
   admitReleaseAggregate,
   applySealedReleaseAggregate,
   type ReleaseAggregateAdmissionInput,
@@ -8,6 +14,7 @@ import {
   type SealedReleaseAggregatePlan,
 } from "../src/setup/release-aggregate-admission.ts";
 import type { ReleaseChannelAttestation } from "../src/setup/release-channel-adapter.ts";
+import { digestMaterializedReleaseEntries } from "../src/setup/release-materializer.ts";
 
 const revision = "a".repeat(40);
 const expectedDigest = `sha256:${"b".repeat(64)}`;
@@ -38,6 +45,22 @@ function manifest(): Record<string, unknown> {
     },
     channels: { stable: id },
     channelOrder: ["stable"],
+  };
+}
+
+function manifestWithBothChannels(): Record<string, unknown> {
+  const id = releaseId();
+  return {
+    schema_version: "v1",
+    releases: {
+      [id]: {
+        materializerVersion: "1",
+        artifactSourceCommit: revision,
+        artifactSetDigest: expectedDigest,
+      },
+    },
+    channels: { canary: id, stable: id },
+    channelOrder: ["canary", "stable"],
   };
 }
 
@@ -81,16 +104,293 @@ function attested(
   };
 }
 
-function admittedPlan(): Promise<SealedReleaseAggregatePlan> {
+function admittedPlan(): Promise<Extract<SealedReleaseAggregatePlan, { schemaVersion: "v1" }>> {
   return admitReleaseAggregate(input(), { attestChannel: vi.fn(async () => attested()) }).then(
     (result) => {
       if (!result.ok) throw new Error(result.error);
+      if (result.plan.schemaVersion !== "v1") throw new Error("expected v1 fixture plan");
       return result.plan;
     },
   );
 }
 
+const v2Revision = "c".repeat(40);
+const v2Entries = [
+  { path: "src/a.ts", mode: "100644" as const, content: new TextEncoder().encode("artifact-a") },
+  { path: "src/b.ts", mode: "100644" as const, content: new TextEncoder().encode("artifact-b") },
+  { path: "src/c.ts", mode: "100644" as const, content: new TextEncoder().encode("artifact-c") },
+];
+const v2SourcePaths = ["releases/stable/a.ts", "releases/stable/b.ts", "releases/stable/c.ts"];
+const v2Digest = digestMaterializedReleaseEntries(v2Entries);
+const v2ReleaseId = deriveReleaseId("1", v2Revision, v2Digest);
+const v2PublicationEntries = v2Entries.map((entry, index) => ({
+  sourcePath: v2SourcePaths[index] as string,
+  destinationPath: entry.path,
+  mode: entry.mode,
+  size: entry.content.length,
+  contentDigest: `sha256:${createHash("sha256").update(entry.content).digest("hex")}`,
+  content: entry.content,
+}));
+const v2PublicationBase = {
+  materializerVersion: "1",
+  artifactSourceCommit: v2Revision,
+  artifactSetDigest: v2Digest,
+  artifactInventoryDigest: deriveArtifactInventoryDigest(v2PublicationEntries),
+  releaseAssetInventoryDigest: `sha256:${"0".repeat(64)}`,
+  releaseRecordDigest: `sha256:${"0".repeat(64)}`,
+  artifacts: v2PublicationEntries.map(
+    ({ sourcePath, destinationPath, mode, size, contentDigest }) => ({
+      sourcePath,
+      destinationPath,
+      mode,
+      size,
+      contentDigest,
+    }),
+  ),
+};
+const v2PublicationAssets = derivePackPublicationAssets({
+  release: { releaseId: v2ReleaseId, ...v2PublicationBase },
+  entries: v2PublicationEntries,
+});
+if (!v2PublicationAssets.ok) throw new Error(v2PublicationAssets.error);
+const v2ReleaseRecord = {
+  ...v2PublicationBase,
+  releaseAssetInventoryDigest: v2PublicationAssets.value.releaseAssetInventoryDigest,
+};
+const v2Manifest = {
+  schema_version: "v2",
+  releases: {
+    [v2ReleaseId]: {
+      ...v2ReleaseRecord,
+      releaseRecordDigest: deriveReleaseRecordDigest(v2ReleaseRecord),
+    },
+  },
+  channels: { canary: v2ReleaseId, stable: v2ReleaseId },
+  channelOrder: ["canary", "stable"],
+};
+const v2Mappings = v2Entries.map((entry, index) => ({
+  channel: "stable",
+  releaseId: v2ReleaseId,
+  sourceRevision: v2Revision,
+  sourcePath: v2SourcePaths[index] as string,
+  destinationPath: entry.path,
+}));
+
+function v2FinalTree(
+  overrides: Partial<ReleaseAggregateFinalTree> = {},
+): ReleaseAggregateFinalTree {
+  return {
+    manifestEntries: [{ path: "release/manifest.yaml", value: v2Manifest }],
+    sourcePaths: v2SourcePaths,
+    cleanPackAllowlist: ["release/manifest.yaml", ...v2Entries.map((entry) => entry.path)],
+    channelMappings: v2Mappings,
+    ...overrides,
+  };
+}
+
+function v2Input(
+  overrides: Partial<ReleaseAggregateFinalTree> = {},
+  channel: "stable" | "canary" = "stable",
+): ReleaseAggregateAdmissionInput {
+  return { repository: "fixture-repository", channel, finalTree: v2FinalTree(overrides) };
+}
+
+function v2Attested(
+  overrides: Partial<
+    Omit<Extract<ReleaseChannelAttestation, { status: "attested" }>, "status">
+  > = {},
+): Extract<ReleaseChannelAttestation, { status: "attested" }> {
+  return {
+    status: "attested",
+    releaseId: v2ReleaseId,
+    artifactSourceCommit: v2Revision,
+    expectedDigest: v2Digest,
+    actualDigest: v2Digest,
+    entries: v2Entries,
+    ...overrides,
+  };
+}
+
 describe("PF-5 release aggregate admission", () => {
+  it.each([
+    "stable",
+    "canary",
+  ] as const)("CANDIDATE-U-RELAGGV2-001: ordered v2 N=3 inventory seals without scalar destination on %s", async (channel) => {
+    const channelMappings = v2Mappings.map((mapping) => ({ ...mapping, channel }));
+    const attestChannel = vi.fn(async () => v2Attested());
+    const result = await admitReleaseAggregate(v2Input({ channelMappings }, channel), {
+      attestChannel,
+    });
+    expect(attestChannel).toHaveBeenCalledOnce();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Reflect.get(result.plan, "schemaVersion")).toBe("v2");
+    expect(Object.hasOwn(result.plan, "destinationPath")).toBe(false);
+    expect(result.plan.entries.map((entry) => entry.path)).toEqual(
+      v2Entries.map((entry) => entry.path),
+    );
+  });
+
+  it.each([
+    ["zero mappings", { channelMappings: [] }],
+    ["N-1 mappings", { channelMappings: v2Mappings.slice(0, 2) }],
+    [
+      "N+1 mappings",
+      {
+        sourcePaths: [...v2SourcePaths, "releases/stable/d.ts"],
+        cleanPackAllowlist: [
+          "release/manifest.yaml",
+          ...v2Entries.map((entry) => entry.path),
+          "src/d.ts",
+        ],
+        channelMappings: [
+          ...v2Mappings,
+          {
+            channel: "stable",
+            releaseId: v2ReleaseId,
+            sourceRevision: v2Revision,
+            sourcePath: "releases/stable/d.ts",
+            destinationPath: "src/d.ts",
+          },
+        ],
+      },
+    ],
+    [
+      "duplicate mapping replacing a distinct entry",
+      { channelMappings: [v2Mappings[0], v2Mappings[1], v2Mappings[1]] },
+    ],
+    ["mapping order swap", { channelMappings: [v2Mappings[1], v2Mappings[0], v2Mappings[2]] }],
+    [
+      "destination outside allowlist",
+      {
+        channelMappings: [
+          v2Mappings[0],
+          v2Mappings[1],
+          { ...v2Mappings[2], destinationPath: "src/not-allowed.ts" },
+        ],
+      },
+    ],
+    [
+      "one mapping belongs to another declared channel",
+      {
+        channelMappings: [v2Mappings[0], { ...v2Mappings[1], channel: "__other__" }, v2Mappings[2]],
+      },
+    ],
+    [
+      "release ID mismatch",
+      {
+        channelMappings: [
+          v2Mappings[0],
+          { ...v2Mappings[1], releaseId: deriveReleaseId("1", "d".repeat(40), v2Digest) },
+          v2Mappings[2],
+        ],
+      },
+    ],
+    [
+      "source revision mismatch",
+      {
+        channelMappings: [
+          v2Mappings[0],
+          { ...v2Mappings[1], sourceRevision: "d".repeat(40) },
+          v2Mappings[2],
+        ],
+      },
+    ],
+    [
+      "source path outside source inventory",
+      {
+        channelMappings: [
+          v2Mappings[0],
+          { ...v2Mappings[1], sourcePath: "releases/stable/unlisted.ts" },
+          v2Mappings[2],
+        ],
+      },
+    ],
+  ] as const)("CANDIDATE-U-RELAGGV2-003: %s is rejected before attestation", async (_name, mutation) => {
+    for (const channel of ["stable", "canary"] as const) {
+      const otherChannel = channel === "stable" ? "canary" : "stable";
+      const overrides: Partial<ReleaseAggregateFinalTree> = {
+        ...mutation,
+        channelMappings: mutation.channelMappings.map((mapping) => ({
+          ...mapping,
+          channel: mapping.channel === "__other__" ? otherChannel : channel,
+        })),
+      };
+      const attestChannel = vi.fn(async () => v2Attested());
+      const result = await admitReleaseAggregate(v2Input(overrides, channel), { attestChannel });
+      expect(result).toEqual({ ok: false, phase: "preflight", error: "missing_channel_mapping" });
+      expect(attestChannel).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    ["missing attested entry", v2Entries.slice(0, 2)],
+    ["attested path order swap", [v2Entries[1], v2Entries[0], v2Entries[2]]],
+    [
+      "attested destination path mismatch",
+      [v2Entries[0], { ...v2Entries[1], path: "src/wrong.ts" }, v2Entries[2]],
+    ],
+  ] as const)("CANDIDATE-U-RELAGGV2-004: %s is rejected after attestation", async (_name, entries) => {
+    for (const channel of ["stable", "canary"] as const) {
+      const channelMappings = v2Mappings.map((mapping) => ({ ...mapping, channel }));
+      const attestChannel = vi.fn(async () => v2Attested({ entries }));
+      const result = await admitReleaseAggregate(v2Input({ channelMappings }, channel), {
+        attestChannel,
+      });
+      expect(result).toEqual({ ok: false, phase: "resolve", error: "invalid_artifact" });
+      expect(attestChannel).toHaveBeenCalledOnce();
+    }
+  });
+
+  it.each([
+    "stable",
+    "canary",
+  ] as const)("CANDIDATE-U-RELAGGV2-005: v1 keeps exactly-one mapping and scalar destination on %s", async (channel) => {
+    const baseTree = finalTree();
+    const oneMappingTree = {
+      ...baseTree,
+      manifestEntries: [{ path: "release/manifest.yaml", value: manifestWithBothChannels() }],
+      channelMappings: baseTree.channelMappings.map((mapping) => ({ ...mapping, channel })),
+    };
+    const normal = await admitReleaseAggregate(
+      { repository: "fixture-repository", channel, finalTree: oneMappingTree },
+      { attestChannel: vi.fn(async () => attested()) },
+    );
+    expect(normal.ok).toBe(true);
+    if (normal.ok) {
+      expect(Reflect.get(normal.plan, "schemaVersion")).toBe("v1");
+      if (normal.plan.schemaVersion !== "v1") throw new Error("expected v1 fixture plan");
+      expect(normal.plan.destinationPath).toBe(destinationPath);
+    }
+
+    const secondDestination = "src/second.ts";
+    const attestChannel = vi.fn(async () => attested());
+    const multiple = await admitReleaseAggregate(
+      {
+        repository: "fixture-repository",
+        channel,
+        finalTree: {
+          ...oneMappingTree,
+          sourcePaths: [sourcePath, "releases/stable/second.ts"],
+          cleanPackAllowlist: ["release/manifest.yaml", destinationPath, secondDestination],
+          channelMappings: [
+            ...oneMappingTree.channelMappings,
+            {
+              channel,
+              releaseId: releaseId(),
+              sourceRevision: revision,
+              sourcePath: "releases/stable/second.ts",
+              destinationPath: secondDestination,
+            },
+          ],
+        },
+      },
+      { attestChannel },
+    );
+    expect(multiple).toEqual({ ok: false, phase: "preflight", error: "missing_channel_mapping" });
+    expect(attestChannel).not.toHaveBeenCalled();
+  });
+
   it("U-RELMAN-014: final-tree predicate A/B/C failures stop before resolver and writes", async () => {
     const cases: Array<[string, Partial<ReleaseAggregateFinalTree>, string]> = [
       ["manifest uniqueness", { manifestEntries: [] }, "invalid_manifest"],
@@ -310,6 +610,7 @@ describe("PF-5 release aggregate admission", () => {
       { attestChannel: vi.fn(async () => attested()) },
     );
     if (!alternate.ok) throw new Error(alternate.error);
+    if (alternate.plan.schemaVersion !== "v1") throw new Error("expected v1 fixture plan");
     expect(alternate.plan.destinationPath).toBe(alternateDestination);
   });
 

@@ -10,10 +10,11 @@
  *
  * 純関数 (analyzePairFreeze) + I/O loader (loadPairDocs) を分離 (backfill-pairing と同方針)。
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fmValue } from "../lint/shared.ts";
 import type { LintResult } from "../plan/lint.ts";
+import { canonicalizeVModelPath, resolveVModelRoots } from "../shared/design-root.ts";
 
 export interface PairDoc {
   /** repo 相対 path (forward slash 正規化)。 */
@@ -49,6 +50,11 @@ export interface PairFreezeResult {
   ok: boolean;
 }
 
+export interface VModelLintResult extends LintResult {
+  documentCount: number;
+  status: "checked" | "not-created";
+}
+
 /** 検査対象外の index/living doc (basename 固定リスト、vmodel-pair-freeze.md §3)。 */
 const EXCLUDED_BASENAMES = new Set(["README.md", "roadmap.md"]);
 
@@ -67,7 +73,9 @@ const dirOf = (p: string): string => p.slice(0, p.lastIndexOf("/") + 1);
  * frontmatter `layer` 欠落でも対象に入れる (layer/pair を持たない L6 doc が検査を素通りする穴を塞ぐ、IMP-067)。
  */
 export function designLayerFromPath(path: string): string | null {
-  return path.match(/^docs\/design\/harness\/(L[1-6])-[^/]+\/[^/]+\.md$/)?.[1] ?? null;
+  return (
+    canonicalizeVModelPath(path).match(/^docs\/design\/(L[1-6])-[^/]+\/[^/]+\.md$/)?.[1] ?? null
+  );
 }
 
 /** 検査対象の設計 sub-doc か (L1-L6 サブディレクトリ配下、README/roadmap は除外)。 */
@@ -92,7 +100,7 @@ export function parsePairDoc(path: string, content: string): PairDoc {
 
 function isValidAdditiveRevision(doc: PairDoc, docsByPath: Map<string, PairDoc>): boolean {
   if (doc.revisionTrack !== "additive" || !doc.revisionBaseArtifact) return false;
-  const base = docsByPath.get(doc.revisionBaseArtifact);
+  const base = docsByPath.get(canonicalizeVModelPath(doc.revisionBaseArtifact));
   const sameFamily = base
     ? doc.path.startsWith("docs/design/") === base.path.startsWith("docs/design/")
     : false;
@@ -110,7 +118,7 @@ function isValidAdditiveRevision(doc: PairDoc, docsByPath: Map<string, PairDoc>)
  * @param docs design + test-design の全 PairDoc
  */
 export function analyzePairFreeze(docs: PairDoc[]): PairFreezeResult {
-  const byPath = new Map(docs.map((d) => [d.path, d]));
+  const byPath = new Map(docs.map((d) => [canonicalizeVModelPath(d.path), d]));
   const orphans: PairOrphan[] = [];
   const invalidRevisionPaths = new Set(
     docs
@@ -118,7 +126,7 @@ export function analyzePairFreeze(docs: PairDoc[]): PairFreezeResult {
       .map((doc) => doc.path),
   );
   for (const path of invalidRevisionPaths) {
-    const doc = byPath.get(path);
+    const doc = byPath.get(canonicalizeVModelPath(path));
     if (!doc) continue;
     orphans.push({
       path,
@@ -139,7 +147,7 @@ export function analyzePairFreeze(docs: PairDoc[]): PairFreezeResult {
       continue;
     }
     // rule 2 ref-resolves
-    const target = byPath.get(pa);
+    const target = byPath.get(canonicalizeVModelPath(pa));
     if (!target) {
       orphans.push({ path: d.path, reason: "ref-unresolved", detail: pa });
       continue;
@@ -153,12 +161,15 @@ export function analyzePairFreeze(docs: PairDoc[]): PairFreezeResult {
       continue;
     }
     // rule 3 trace-bidir
-    if (pa.startsWith("docs/test-design/")) {
+    if (canonicalizeVModelPath(pa).startsWith("docs/test-design/")) {
       // test-design 側は design dir の集合参照。design の所在 dir を含めば双方向成立。
       const back = target.pairArtifact;
-      const dir = dirOf(d.path);
-      const normBack = back ? (back.endsWith("/") ? back : `${back}/`) : null;
-      if (back === d.path || (normBack && dir.startsWith(normBack))) {
+      const dir = dirOf(canonicalizeVModelPath(d.path));
+      const normBack = back ? `${canonicalizeVModelPath(back).replace(/\/$/, "")}/` : null;
+      if (
+        canonicalizeVModelPath(back ?? "") === canonicalizeVModelPath(d.path) ||
+        (normBack && dir.startsWith(normBack))
+      ) {
         pairs++;
       } else {
         orphans.push({
@@ -178,6 +189,7 @@ export function analyzePairFreeze(docs: PairDoc[]): PairFreezeResult {
 
 /** dir を再帰し .md の (repo 相対 path, 本文) を集める。 */
 function walkMd(dir: string, repoRoot: string): { rel: string; content: string }[] {
+  if (!existsSync(dir)) return [];
   const out: { rel: string; content: string }[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
@@ -193,7 +205,8 @@ function walkMd(dir: string, repoRoot: string): { rel: string; content: string }
 /** docs/design/harness/** + docs/test-design/harness/** の全 .md frontmatter を読む。 */
 export function loadPairDocs(repoRoot: string = process.cwd()): PairDoc[] {
   const docs: PairDoc[] = [];
-  for (const base of ["docs/design/harness", "docs/test-design/harness"]) {
+  const roots = resolveVModelRoots(repoRoot);
+  for (const base of [roots.designRoot, roots.testDesignRoot]) {
     for (const { rel, content } of walkMd(join(repoRoot, base), repoRoot)) {
       docs.push(parsePairDoc(rel, content));
     }
@@ -589,9 +602,20 @@ export function refactorQaReleaseContractMessages(
   ];
 }
 
-export function lintVmodel(_path?: string): LintResult {
-  const result = analyzePairFreeze(loadPairDocs());
-  return { ok: result.ok, messages: pairFreezeMessages(result) };
+export function lintVmodel(_path?: string, repoRoot: string = process.cwd()): VModelLintResult {
+  const docs = loadPairDocs(repoRoot);
+  const result = analyzePairFreeze(docs);
+  const documentCount = docs.length;
+  const status = documentCount === 0 ? "not-created" : "checked";
+  return {
+    ok: result.ok,
+    messages:
+      status === "not-created"
+        ? ["vmodel — 未作成 (文書 0 件)"]
+        : [`vmodel — 文書 ${documentCount} 件`, ...pairFreezeMessages(result)],
+    documentCount,
+    status,
+  };
 }
 
 // ── 検証タイミングの機械発火 (IMP-068、PLAN-L6-11/L7-12) ──
@@ -733,7 +757,7 @@ export function analyzeVerificationGroups(
   planEvidence: VerificationPlanEvidenceMap = new Map<string, VerificationPlanEvidence>(),
 ): GroupReadiness[] {
   const orphanPaths = new Set(orphans.map((o) => o.path));
-  const docsByPath = new Map(docs.map((doc) => [doc.path, doc]));
+  const docsByPath = new Map(docs.map((doc) => [canonicalizeVModelPath(doc.path), doc]));
   return VERIFICATION_GROUPS.map((g) => {
     const layerSet = new Set(g.layers);
     const allGroupDocs = docs.filter((d) => {

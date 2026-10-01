@@ -223,6 +223,74 @@ export function loadChangedFiles(repoRoot: string = process.cwd()): string[] {
   return parseGitPorcelain(output);
 }
 
+/**
+ * `git status --porcelain=v1 -z --untracked-files=all` の NUL 区切り生出力から
+ * untracked-added (`??`) パスだけを抽出する (review-guard の untracked-added exemption、
+ * IMP-137 追補、issue #721)。`-z` は git 公式が機械可読向けに推奨する形式で、非 ASCII や
+ * 記号を含むパスを C-quote (二重引用符 + 8進エスケープ) せず生バイトのまま NUL 終端で返す
+ * ため、`norm()` の素朴な `\` → `/` 置換で壊れる問題がそもそも発生しない (Sol r1 FLAG 1、
+ * issue #721)。`--untracked-files=all` は untracked ディレクトリを `?? dir/` へ畳まず配下の
+ * 各ファイルを個別に列挙させる。
+ *
+ * rename/copy entry (`R`/`C` を含む status code) は `-z` では「dest パス」に続けてもう1つ
+ * NUL 区切りの「src パス」を伴う。untracked (`??`) entry にこの追加 field は無いが、同じ
+ * porcelain stream に他の tracked entry が混在してもズレないよう、rename/copy entry の直後
+ * 1 token は無条件に skip する。containment (`.ut-tdd/memory/` 配下判定・セパレータ健全性)
+ * は呼び出し側 (review-guard) が担う — ここではパス文字列を一切加工せず分割するだけ。
+ */
+export function parseUntrackedAddedPaths(output: string): string[] {
+  return parseWorkingTreeStatusZ(output).untrackedAdded;
+}
+
+/** `-z` 出力 1 本から、変更 path 全体と untracked-added path を同じ生 path 表現で返す。 */
+export interface WorkingTreeStatus {
+  readonly changed: string[];
+  readonly untrackedAdded: string[];
+}
+
+export function parseWorkingTreeStatusZ(output: string): WorkingTreeStatus {
+  const changed: string[] = [];
+  const untrackedAdded: string[] = [];
+  let skipNextToken = false;
+  for (const token of output.split("\0")) {
+    if (skipNextToken) {
+      skipNextToken = false;
+      continue;
+    }
+    if (token.length === 0) continue;
+    const status = token.slice(0, 2);
+    if (status.includes("R") || status.includes("C")) skipNextToken = true;
+    const path = token.slice(3);
+    if (isTransientHarnessDbFile(path)) continue;
+    changed.push(path);
+    if (status === "??") untrackedAdded.push(path);
+  }
+  return { changed, untrackedAdded };
+}
+
+/**
+ * working tree の untracked-added (`??`) パス一覧 (commit 前 review-guard 判定の機械化)。
+ * hybrid 運用で他レーンが review session と並行して `ut-tdd memory add` 等を実行し、
+ * 新規 untracked ファイルを共有 tree へ追加するケースを区別するために使う。
+ */
+export function loadUntrackedAddedFiles(repoRoot: string = process.cwd()): string[] {
+  return loadWorkingTreeStatus(repoRoot).untrackedAdded;
+}
+
+/**
+ * review-guard 用の working tree 状態 (issue #721 Sol r2)。before / after / untracked-added を
+ * 同じ `-z --untracked-files=all` の生 path 表現で取り、quoted path や畳まれた directory と
+ * exemption 集合の表現がずれないようにする。
+ */
+export function loadWorkingTreeStatus(repoRoot: string = process.cwd()): WorkingTreeStatus {
+  const output = execFileSync(
+    "git",
+    ["-C", repoRoot, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+  );
+  return parseWorkingTreeStatusZ(output);
+}
+
 /** `git diff --cached --name-only` の出力をパース (1 行 1 path、staged 集合)。 */
 export function parseStagedNames(output: string): string[] {
   return output

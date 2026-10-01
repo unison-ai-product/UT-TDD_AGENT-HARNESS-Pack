@@ -1,15 +1,195 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { executeLiveReviewDelegation } from "../src/cli/review-live.ts";
+import {
+  executeLiveReviewDelegation,
+  resolveLiveReviewDelegationEntrypoint,
+} from "../src/cli/review-live.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const originalClaudeBin = process.env.UT_TDD_CLAUDE_BIN;
 
 afterEach(() => {
   if (originalClaudeBin === undefined) delete process.env.UT_TDD_CLAUDE_BIN;
   else process.env.UT_TDD_CLAUDE_BIN = originalClaudeBin;
+});
+
+describe("#779 Pack-only review delegation entrypoint", () => {
+  it("CANDIDATE-U-RVPACK-001: source CLI re-enters the invoked source path", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-rvpack-source-"));
+    try {
+      const source = join(root, "src", "cli.ts");
+      mkdirSync(join(root, "src"));
+      writeFileSync(source, "// source CLI\n");
+      writeFileSync(
+        join(root, "package.json"),
+        JSON.stringify({ name: "ut-tdd", utTdd: { artifactProfile: "source" } }),
+      );
+      expect(resolveLiveReviewDelegationEntrypoint(root, source)).toEqual({
+        ok: true,
+        path: source,
+      });
+      const externalCli = join(root, "external-cli.ts");
+      writeFileSync(externalCli, "// launched from another source checkout\n");
+      expect(resolveLiveReviewDelegationEntrypoint(root, externalCli)).toEqual({
+        ok: true,
+        path: source,
+      });
+    } finally {
+      removeTestTree(root);
+    }
+  });
+
+  it("CANDIDATE-U-RVPACK-002: sealed consumer re-enters through the validating wrapper", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-rvpack-sealed-"));
+    try {
+      const runtime = join(root, ".ut-tdd", "runtime");
+      const entry = join(runtime, "bundles", "generation", "ut-tdd.mjs");
+      const wrapper = join(root, ".ut-tdd", "bin", "ut-tdd.mjs");
+      mkdirSync(join(runtime, "bundles", "generation"), { recursive: true });
+      mkdirSync(join(runtime, "activation"), { recursive: true });
+      mkdirSync(join(root, ".ut-tdd", "bin"), { recursive: true });
+      writeFileSync(entry, "// sealed CLI\n");
+      writeFileSync(wrapper, "// validating wrapper\n");
+      mkdirSync(join(root, "src"));
+      writeFileSync(join(root, "src", "cli.ts"), "// unrelated product CLI\n");
+      writeFileSync(join(root, "package.json"), JSON.stringify({ name: "canary-product" }));
+      writeFileSync(
+        join(runtime, "activation", "active.json"),
+        JSON.stringify({ entry_path: entry }),
+      );
+      expect(resolveLiveReviewDelegationEntrypoint(root, entry)).toEqual({
+        ok: true,
+        path: realpathSync.native(wrapper),
+      });
+      const foreign = join(root, "foreign-cli.mjs");
+      writeFileSync(foreign, "// wrong entry\n");
+      expect(resolveLiveReviewDelegationEntrypoint(root, foreign)).toEqual({
+        ok: false,
+        reason: "consumer_runtime_identity_mismatch",
+      });
+      expect(resolveLiveReviewDelegationEntrypoint(root, undefined)).toEqual({
+        ok: false,
+        reason: "consumer_runtime_resolution_denied",
+      });
+      writeFileSync(
+        join(runtime, "activation", "active.json"),
+        JSON.stringify({ entry_path: foreign }),
+      );
+      expect(resolveLiveReviewDelegationEntrypoint(root, entry)).toEqual({
+        ok: false,
+        reason: "consumer_runtime_identity_mismatch",
+      });
+    } finally {
+      removeTestTree(root);
+    }
+  });
+
+  it("CANDIDATE-U-RVPACK-003: default delegation spawns the consumer wrapper and writes a receipt without source CLI", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-rvpack-default-"));
+    const originalArgv1 = process.argv[1];
+    try {
+      const runtime = join(root, ".ut-tdd", "runtime");
+      const entry = join(runtime, "bundles", "generation", "ut-tdd.mjs");
+      const wrapper = join(root, ".ut-tdd", "bin", "ut-tdd.mjs");
+      const receipt = join(root, ".ut-tdd", "review", "receipts", "fixture.json");
+      mkdirSync(dirname(entry), { recursive: true });
+      mkdirSync(dirname(wrapper), { recursive: true });
+      mkdirSync(join(runtime, "activation"), { recursive: true });
+      writeFileSync(entry, "// sealed consumer entry\n");
+      writeFileSync(
+        join(runtime, "activation", "active.json"),
+        JSON.stringify({ entry_path: entry }),
+      );
+      writeFileSync(
+        wrapper,
+        [
+          'import { mkdirSync, readFileSync, writeFileSync } from "node:fs";',
+          'import { dirname, join } from "node:path";',
+          "const root = process.cwd();",
+          'const pointer = JSON.parse(readFileSync(join(root, ".ut-tdd/runtime/activation/active.json"), "utf8"));',
+          'if (pointer.entry_path !== process.env.RVPACK_EXPECTED_ENTRY || process.argv[2] !== "claude") process.exit(3);',
+          'const receipt = join(root, ".ut-tdd/review/receipts/fixture.json");',
+          "mkdirSync(dirname(receipt), { recursive: true });",
+          'writeFileSync(receipt, JSON.stringify({ verdict: "PASS" }));',
+          'console.log(JSON.stringify({ review: { ok: true, receipt: { verdict: "PASS" }, path: receipt, digest: "fixture" } }));',
+        ].join("\n"),
+      );
+      expect(existsSync(join(root, "src", "cli.ts"))).toBe(false);
+      process.argv[1] = entry;
+      process.env.RVPACK_EXPECTED_ENTRY = entry;
+      const result = executeLiveReviewDelegation({ repoRoot: root, provider: "claude", args: [] });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.path).toBe(receipt);
+      expect(existsSync(receipt)).toBe(true);
+    } finally {
+      process.argv[1] = originalArgv1;
+      delete process.env.RVPACK_EXPECTED_ENTRY;
+      removeTestTree(root);
+    }
+  });
+
+  it("CANDIDATE-U-RVPACK-004: absent and mismatched runtime entries have distinct typed reasons", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-rvpack-reasons-"));
+    try {
+      const entry = join(root, "entry.mjs");
+      writeFileSync(entry, "// invoked entry\n");
+      expect(resolveLiveReviewDelegationEntrypoint(root, entry)).toEqual({
+        ok: false,
+        reason: "consumer_runtime_absent",
+      });
+      const originalArgv1 = process.argv[1];
+      try {
+        process.argv[1] = entry;
+        expect(
+          executeLiveReviewDelegation({ repoRoot: root, provider: "claude", args: [] }),
+        ).toEqual({
+          ok: false,
+          reason: "consumer_runtime_absent",
+        });
+      } finally {
+        process.argv[1] = originalArgv1;
+      }
+      const wrapper = join(root, ".ut-tdd", "bin", "ut-tdd.mjs");
+      mkdirSync(dirname(wrapper), { recursive: true });
+      writeFileSync(wrapper, "// wrapper\n");
+      expect(resolveLiveReviewDelegationEntrypoint(root, entry)).toEqual({
+        ok: false,
+        reason: "consumer_runtime_absent",
+      });
+      const pointer = join(root, ".ut-tdd", "runtime", "activation", "active.json");
+      mkdirSync(dirname(pointer), { recursive: true });
+      writeFileSync(pointer, "{invalid json");
+      expect(resolveLiveReviewDelegationEntrypoint(root, entry)).toEqual({
+        ok: false,
+        reason: "consumer_runtime_resolution_denied",
+      });
+      writeFileSync(pointer, JSON.stringify({ entry_path: join(root, "other.mjs") }));
+      expect(resolveLiveReviewDelegationEntrypoint(root, entry)).toEqual({
+        ok: false,
+        reason: "consumer_runtime_absent",
+      });
+      const other = join(root, "other.mjs");
+      writeFileSync(other, "// wrong entry\n");
+      expect(resolveLiveReviewDelegationEntrypoint(root, entry)).toEqual({
+        ok: false,
+        reason: "consumer_runtime_identity_mismatch",
+      });
+    } finally {
+      removeTestTree(root);
+    }
+  });
 });
 
 function git(cwd: string, args: string[]): string {

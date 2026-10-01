@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -204,11 +205,11 @@ async function producerInput(root: string, checkout: string) {
     consumerRoot: identity.consumer_root,
     runtimeRoot: identity.runtime_root,
     plan: {
+      schemaVersion: "v2",
       kind: "release-aggregate",
       channel: "stable",
       releaseId,
       sourceRevision: receipt.subject_revision,
-      destinationPath: sealedEntry.path,
       expectedDigest: artifactSetDigest,
       actualDigest: artifactSetDigest,
       entries: [sealedEntry],
@@ -640,7 +641,8 @@ describe("physical consumer Node runtime adapter", () => {
   // the checkout-deletion launch path; it does not claim the full 007 oracle
   // (external syscall counters and all Pack topology variants are separate).
   it("CANDIDATE-U-PACKNODE-001/002/003: setup and configured provider hooks run after producer checkout deletion", async () => {
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-physical-e2e-"));
+    // PLAN-L7-628 §6.2: consumer_root は 8.3 alias を解決した canonical path で記録する。
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "ut-tdd-physical-e2e-")));
     roots.push(root);
     execFileSync("git", ["init", "-q", root], { stdio: "ignore" });
     writeFileSync(join(root, "ut-tdd.project.json"), "{}\n");
@@ -776,18 +778,32 @@ describe("physical consumer Node runtime adapter", () => {
     });
     expect(hook.status, `${hook.stdout}\n${hook.stderr}`).toBe(0);
     expect(hook.stderr).not.toContain("BLOCK");
+    // PLAN-L7-668 §3: Codex の command は git root 解決の固定前置部分を持つ 1 文字列 (args 無し)。
+    // Codex と同じ shell 起動形 (Windows は pwsh、それ以外は sh) でそのまま実行する。
     const codexSettings = JSON.parse(readFileSync(join(root, ".codex", "hooks.json"), "utf8")) as {
-      hooks: { PreToolUse: Array<{ hooks: Array<{ command: string; args: string[] }> }> };
+      hooks: { PreToolUse: Array<{ hooks: Array<{ command: string }> }> };
     };
-    const codexCommand = codexSettings.hooks.PreToolUse[0].hooks[0];
-    const codexHook = spawnSync(codexCommand.command, codexCommand.args, {
-      cwd: root,
-      input: JSON.stringify({
-        tool_name: "Agent",
-        tool_input: { subagent_type: "pmo-haiku", model: "haiku" },
-      }),
-      encoding: "utf8",
+    const codexCommand = codexSettings.hooks.PreToolUse[0].hooks[0].command;
+    const codexHookInput = JSON.stringify({
+      tool_name: "Agent",
+      tool_input: { subagent_type: "pmo-haiku", model: "haiku" },
     });
+    const codexHook =
+      process.platform === "win32"
+        ? spawnSync(
+            "pwsh",
+            [
+              "-NoProfile",
+              "-Command",
+              `$global:PSNativeCommandUseErrorActionPreference = $false; ${codexCommand}; exit $LASTEXITCODE`,
+            ],
+            { cwd: root, input: codexHookInput, encoding: "utf8", windowsHide: true },
+          )
+        : spawnSync("sh", ["-c", codexCommand], {
+            cwd: root,
+            input: codexHookInput,
+            encoding: "utf8",
+          });
     expect(codexHook.status, `${codexHook.stdout}\n${codexHook.stderr}`).toBe(0);
     expect(codexHook.stderr).not.toContain("BLOCK");
   });

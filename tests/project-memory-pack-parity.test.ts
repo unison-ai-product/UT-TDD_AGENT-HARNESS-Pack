@@ -16,28 +16,67 @@ import {
   writeConsumerRuntimeInput,
 } from "./support/pack-consumer-runtime.ts";
 
-function runConfiguredHook(root: string, provider: "claude" | "codex") {
-  const settingsPath = provider === "claude" ? ".claude/settings.json" : ".codex/hooks.json";
-  const settings = JSON.parse(readFileSync(join(root, settingsPath), "utf8")) as {
-    hooks: { PreToolUse: Array<{ hooks: Array<{ command: string; args: string[] }> }> };
-  };
-  const command = settings.hooks.PreToolUse[0].hooks[0];
-  expect(command.args.join(" ")).toContain(".ut-tdd/bin/ut-tdd.mjs");
-  return spawnSync(command.command, command.args, {
+const HOOK_INPUT = JSON.stringify({
+  tool_name: "Agent",
+  tool_input: { subagent_type: "pmo-haiku", model: "haiku" },
+});
+
+const HOOK_ENV = (root: string) => ({
+  ...process.env,
+  CLAUDE_PROJECT_DIR: root,
+  UT_TDD_PROJECT_DIR: root,
+  UT_TDD_SKIP_UPDATE_CHECK: "1",
+});
+
+/**
+ * Codex がそのまま hooks.json の `command` 文字列を渡す shell 起動形 (PLAN-L7-668 §1.1 実測):
+ * Windows は `pwsh -NoProfile -Command <command>`、それ以外は POSIX `sh -c <command>`。
+ * PowerShell 7.3+ の $PSNativeCommandUseErrorActionPreference (既定 true) は非 0 exit + stderr
+ * 出力を持つ native command の exit code を 1 に丸めるため無効化し、$LASTEXITCODE をそのまま
+ * pwsh 自身の exit code にする。
+ */
+function spawnCodexHookCommand(command: string, root: string) {
+  if (process.platform === "win32") {
+    return spawnSync(
+      "pwsh",
+      [
+        "-NoProfile",
+        "-Command",
+        `$global:PSNativeCommandUseErrorActionPreference = $false; ${command}; exit $LASTEXITCODE`,
+      ],
+      { cwd: root, encoding: "utf8", windowsHide: true, input: HOOK_INPUT, env: HOOK_ENV(root) },
+    );
+  }
+  return spawnSync("sh", ["-c", command], {
     cwd: root,
     encoding: "utf8",
-    windowsHide: true,
-    input: JSON.stringify({
-      tool_name: "Agent",
-      tool_input: { subagent_type: "pmo-haiku", model: "haiku" },
-    }),
-    env: {
-      ...process.env,
-      CLAUDE_PROJECT_DIR: root,
-      UT_TDD_PROJECT_DIR: root,
-      UT_TDD_SKIP_UPDATE_CHECK: "1",
-    },
+    input: HOOK_INPUT,
+    env: HOOK_ENV(root),
   });
+}
+
+function runConfiguredHook(root: string, provider: "claude" | "codex") {
+  if (provider === "claude") {
+    const settings = JSON.parse(readFileSync(join(root, ".claude/settings.json"), "utf8")) as {
+      hooks: { PreToolUse: Array<{ hooks: Array<{ command: string; args: string[] }> }> };
+    };
+    const command = settings.hooks.PreToolUse[0].hooks[0];
+    expect(command.args.join(" ")).toContain(".ut-tdd/bin/ut-tdd.mjs");
+    return spawnSync(command.command, command.args, {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true,
+      input: HOOK_INPUT,
+      env: HOOK_ENV(root),
+    });
+  }
+  // PLAN-L7-668 §3: Codex の command は git root 解決の固定前置部分を持つ 1 文字列 (args 無し)。
+  const settings = JSON.parse(readFileSync(join(root, ".codex/hooks.json"), "utf8")) as {
+    hooks: { PreToolUse: Array<{ hooks: Array<{ command: string }> }> };
+  };
+  const command = settings.hooks.PreToolUse[0].hooks[0].command;
+  expect(command).toContain(".ut-tdd/bin/ut-tdd.mjs");
+  return spawnCodexHookCommand(command, root);
 }
 
 function removeInput(inputPath: string): void {

@@ -220,13 +220,13 @@ function validPlan(plan: unknown): plan is SealedReleaseAggregatePlan {
   return (
     isRecord(plan) &&
     plan.kind === "release-aggregate" &&
+    plan.schemaVersion === "v2" &&
+    !Object.hasOwn(plan, "destinationPath") &&
     typeof plan.channel === "string" &&
     typeof plan.releaseId === "string" &&
     RELEASE_ID.test(plan.releaseId) &&
     typeof plan.sourceRevision === "string" &&
     REVISION.test(plan.sourceRevision) &&
-    typeof plan.destinationPath === "string" &&
-    validPath(plan.destinationPath) &&
     typeof plan.expectedDigest === "string" &&
     SHA256.test(plan.expectedDigest) &&
     typeof plan.actualDigest === "string" &&

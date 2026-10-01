@@ -200,7 +200,7 @@ export function loadOrBuildDriveDbRegistrationStats(
 
   const db = openHarnessDb(":memory:", { repoRoot });
   try {
-    rebuildHarnessDb({ repoRoot, db });
+    rebuildHarnessDb({ repoRoot, db, skipTokenTelemetry: true });
     return {
       ...collectDriveDbRegistrationStats(db, repoRoot),
       expectedPlanCount: loadReviewPlans(repoRoot).length,

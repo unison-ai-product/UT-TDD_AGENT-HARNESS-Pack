@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { CODEX_GIT_ROOT_PREFIX } from "../src/lint/hook-invocation.ts";
 import { buildBranchProtectionPayload } from "../src/setup/branch-protection.ts";
 import {
   applyBranchProtection,
@@ -141,7 +142,7 @@ const baseTemplates: TemplateSet = {
   "adapter/.claude/commands/ut-tdd-test.md": "---\ndescription: Test\n---\n",
   "adapter/.claude/settings.json": '{"hooks":{"SessionStart":[]}}\n',
   "common/harness-check.yml": "name: harness-check\n",
-  "common/commitlint.config.js":
+  "common/commitlint.config.cjs":
     "module.exports = { extends: ['@commitlint/config-conventional'] };\n",
   "common/escalation-stale.yml": "name: escalation-stale\n",
   "common/recovery.md": "# Recovery\n",
@@ -409,10 +410,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
         >;
       };
       const codex = JSON.parse(templates["adapter/.codex/hooks.json"]) as {
-        hooks: Record<
-          string,
-          { matcher?: string; hooks: { command: string; blockOnFailure?: boolean }[] }[]
-        >;
+        hooks: Record<string, { matcher?: string; hooks: { command: string }[] }[]>;
       };
 
       expect(claude.hooks.PreToolUse).toEqual(
@@ -455,9 +453,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
             matcher: "spawn_agent|spawn_agents_on_csv",
             hooks: [
               expect.objectContaining({
-                command: "node",
-                args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "agent-guard"],
-                blockOnFailure: true,
+                command: `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" hook agent-guard`,
               }),
             ],
           }),
@@ -465,9 +461,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
             matcher: "apply_patch|write_file",
             hooks: [
               expect.objectContaining({
-                command: "node",
-                args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "work-guard"],
-                blockOnFailure: true,
+                command: `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" hook work-guard`,
               }),
             ],
           }),
@@ -570,19 +564,20 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(wrapper).not.toContain("node_modules/ut-tdd");
 
     const codexHooks = JSON.parse(deps.files.get(join("/repo", ".codex", "hooks.json")) ?? "") as {
-      hooks: { PreToolUse: { hooks: { command: string; args: string[] }[] }[] };
+      hooks: { PreToolUse: { hooks: { command: string }[] }[] };
     };
     const claudeSettings = JSON.parse(
       deps.files.get(join("/repo", ".claude", "settings.json")) ?? "",
     ) as {
       hooks: { PreToolUse: { hooks: { command: string; args: string[] }[] }[] };
     };
-    const agentGuardInvocation = {
+    expect(claudeSettings.hooks.PreToolUse[0]?.hooks[0]).toMatchObject({
       command: "node",
       args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "agent-guard"],
-    };
-    expect(codexHooks.hooks.PreToolUse[0]?.hooks[0]).toMatchObject(agentGuardInvocation);
-    expect(claudeSettings.hooks.PreToolUse[0]?.hooks[0]).toMatchObject(agentGuardInvocation);
+    });
+    expect(codexHooks.hooks.PreToolUse[0]?.hooks[0]).toMatchObject({
+      command: `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" hook agent-guard`,
+    });
   });
 
   // The generated wrapper is a sealed Node entrypoint. Launch via Node directly and
@@ -683,6 +678,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       paths: [
         "README.md",
         "LICENSE",
+        "NOTICE",
         "package.json",
         ".node-version",
         "src/cli.ts",
@@ -719,6 +715,8 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     expect(plan.ok).toBe(true);
     expect(plan.channel).toBe("clean-repo-plus-tarball");
     expect(plan.artifactPaths).toContain("LICENSE");
+    // Apache-2.0 §4(d): 再配布物は NOTICE を伴う。
+    expect(plan.artifactPaths).toContain("NOTICE");
     expect(plan.artifactPaths).toContain("docs/templates/adapter/AGENTS.md");
     expect(plan.artifactPaths).toContain("docs/templates/adapter/.codex/hooks.json");
     expect(plan.artifactPaths).toContain("docs/templates/adapter/.claude/agents/code-reviewer.md");
@@ -781,6 +779,7 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
     const sourcePaths = [
       "README.md",
       "LICENSE",
+      "NOTICE",
       "package.json",
       ".node-version",
       "src/cli.ts",
@@ -981,6 +980,8 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
       ],
     });
     expect(without.missingRequired).toContain(".node-version");
+    // Apache-2.0 §4(d): NOTICE は allowlist だけでなく必須 path でもある (required から外すと Red)。
+    expect(without.missingRequired).toContain("NOTICE");
   });
 
   it("U-SETUP-011e: clean Pack workflow reuses the package test:pack script", () => {
@@ -1341,15 +1342,20 @@ describe("setup solo/team (PLAN-L7-03 add-impl / U-SETUP)", () => {
 
   it("U-SETUP-008: dryRun=true は副作用ゼロ (state 非書込 / gh 非呼出 / branch protection 非適用)", () => {
     // dry-run は preview のみ。--apply-branch-protection を併用しても remote へ進まない。
+    let databaseInitializations = 0;
     const d = mockDeps({
       templates: baseTemplates,
       isInteractive: true,
       gh: ghTeam,
       confirm: () => true,
+      initializeHarnessDb: () => {
+        databaseInitializations += 1;
+      },
     });
     const r = runSetup({ phase: "0-B", dryRun: true, applyBranchProtection: true }, d);
     // state SSoT を書かない
     expect(d.files.get(statePath)).toBeUndefined();
+    expect(databaseInitializations).toBe(0);
     // 生成物 (CODEOWNERS 等) も書かない (path 一覧は返るが file store は空)
     expect(d.files.get(codeownersPath)).toBeUndefined();
     expect(r.written.length).toBeGreaterThan(0); // preview は path を列挙する

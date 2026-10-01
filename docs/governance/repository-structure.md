@@ -147,7 +147,9 @@ UT-TDD-agent-harness/
 
 ## 8. config 最小化方針 (root の散らかり防止)
 
-- `LICENSE`: MIT License (UNISON-TECHNOLOGY). 配布条件の canonical top-level file として tracked に含める。
+- `LICENSE`: Apache License 2.0 (UNISON-TECHNOLOGY)。配布条件の canonical top-level file として tracked に含める。
+  `v0.2.0-canary.1` までの公開物は MIT。
+- `NOTICE`: Apache-2.0 §4(d) の帰属表示。clean Pack の必須 path であり、再配布物に同梱する。
 
 JS/TS は「1 ツール = 1 設定ファイル」で root に config が溜まりやすい。**フォルダに隠す**のはツールが root を探すため不可（壊れる）。代わりに **ツールを減らす + package.json に集約** で抑える。
 

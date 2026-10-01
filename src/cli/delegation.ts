@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { type SpawnSyncOptions, spawnSync } from "node:child_process";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { Command } from "commander";
 import { resolveRepositoryRoot } from "../feedback/repository-root.ts";
@@ -18,7 +18,7 @@ import {
   reviewIdentityDigest,
   reviewVerdictPath,
 } from "../feedback/review-verdict-custody.ts";
-import { loadChangedFiles } from "../lint/change-impact.ts";
+import { loadUntrackedAddedFiles, loadWorkingTreeStatus } from "../lint/change-impact.ts";
 import {
   type AdapterContextInjection,
   type AdapterPlan,
@@ -46,6 +46,19 @@ export interface AdapterExecutionDeps {
   }) => void;
   writeHandoverWarnings: () => void;
   now?: () => string;
+  spawnSync?: AdapterSpawnSync;
+}
+
+export type AdapterSpawnSync = (
+  command: string,
+  args: readonly string[],
+  options: SpawnSyncOptions,
+) => AdapterSpawnResult;
+
+export interface AdapterSpawnResult {
+  status: number | null;
+  signal: NodeJS.Signals | null;
+  error?: Error;
 }
 
 export interface AdapterExecutionInput {
@@ -102,9 +115,19 @@ export function adapterExecutionEnv(
   };
 }
 
+/** review-guard の before/after。untracked-added と同じ `-z` 生 path 表現で取る (issue #721 Sol r2)。 */
 function safeLoadChangedFiles(repoRoot: string): string[] {
   try {
-    return loadChangedFiles(repoRoot);
+    return loadWorkingTreeStatus(repoRoot).changed;
+  } catch {
+    return [];
+  }
+}
+
+/** untracked-added exemption 用 (issue #721)。取得失敗時は exemption なし (fail-close 側)。 */
+export function safeLoadUntrackedAddedFiles(repoRoot: string): string[] {
+  try {
+    return loadUntrackedAddedFiles(repoRoot);
   } catch {
     return [];
   }
@@ -184,7 +207,9 @@ export function executeAdapterPlanForCli(
     command: plan.command,
     args: plan.args,
   });
-  const child = spawnSync(invocation.command, invocation.args, {
+  const runSpawnSync: AdapterSpawnSync =
+    depsInput.spawnSync ?? ((command, args, options) => spawnSync(command, args, options));
+  const child = runSpawnSync(invocation.command, invocation.args, {
     input: plan.stdin,
     stdio:
       plan.stdin === undefined
@@ -193,6 +218,7 @@ export function executeAdapterPlanForCli(
     env: adapterExecutionEnv(plan.provider, plan.env),
     shell: invocation.shell ?? false,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
+    windowsHide: true,
   });
   let reviewResult: ReturnType<typeof projectReviewVerdict> | undefined;
   if (input.review) {
@@ -238,6 +264,7 @@ export function executeAdapterPlanForCli(
       role: input.reviewRole,
       before: treeBefore,
       after: safeLoadChangedFiles(repoRoot),
+      untrackedAdded: safeLoadUntrackedAddedFiles(repoRoot),
     });
     for (const message of reviewGuardMessages(assessment)) process.stderr.write(`${message}\n`);
   }

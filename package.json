@@ -6,7 +6,7 @@
     "type": "git",
     "url": "git+https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "private": true,
   "packageManager": "npm@11.6.2+sha512-7iKzNfy8lWYs3zq4oFPa8EXZz5xt9gQNKJZau3B1ErLBb6bF7sBJ00x09485DOvRT2l5Gerbl3VlZNT57MxJVA==",

@@ -210,3 +210,7 @@ status.
 - Running review on a partial diff — always review the full PLAN scope.
 - Self-review as the only review evidence in hybrid mode — hybrid mode requires
   a different runtime or subagent family.
+
+## zip lineage (PLAN-L7-676 PR-T3)
+
+The judgement in this skill is a near-1:1 English rendering of the corresponding `.claude/skills/vmodel-substance-review/SKILL.md` in `Vモデル設計ドキュメント_checked.zip` (Apache-2.0). PR-T3 ported the zip pack as [[vmodel-substance-review]] — a thin bridge that indexes the Japanese original's section headings and points back here, rather than duplicating the same decision content twice (docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1).

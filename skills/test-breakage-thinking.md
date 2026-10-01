@@ -314,3 +314,7 @@ than implicitly:
 - Google Testing Blog, "Just Say No to More End-to-End Tests" — https://testing.googleblog.com/2015/04/just-say-no-to-more-end-to-end-tests.html (pyramid discipline; more tests is not better)
 - Codecov, mutation testing in practice — https://about.codecov.io/blog/mutation-testing-how-to-ensure-code-coverage-isnt-a-vanity-metric/ (run incrementally on critical modules, not 100% everywhere)
 
+
+## zip lineage (PLAN-L7-676 PR-T3)
+
+The judgement in this skill is a near-1:1 English rendering of the corresponding `.claude/skills/vmodel-test-thinking/SKILL.md` in `Vモデル設計ドキュメント_checked.zip` (Apache-2.0). PR-T3 ported the zip pack as [[vmodel-test-thinking]] — a thin bridge that indexes the Japanese original's section headings and points back here, rather than duplicating the same decision content twice (docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1).

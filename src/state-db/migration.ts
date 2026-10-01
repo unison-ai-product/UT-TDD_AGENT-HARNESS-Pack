@@ -15,6 +15,7 @@ import {
   schemaDdl,
 } from "../schema/harness-db.ts";
 import type { HarnessDb } from "./index.ts";
+import { runSqliteTransaction } from "./sqlite-transaction.ts";
 
 export interface MigrationResult {
   /** 適用前の user_version。 */
@@ -125,21 +126,27 @@ function rebuildVersion26ProjectionTables(db: HarnessDb, fromVersion: number): b
  * 冪等 (既に最新なら applied=false で no-op)。
  */
 export function migrate(db: HarnessDb): MigrationResult {
-  const fromVersion = db.userVersion();
-  const rebuiltProjectionTables = rebuildVersion26ProjectionTables(db, fromVersion);
-  const ddls = schemaDdl();
-  for (const ddl of ddls.filter((s) => s.startsWith("CREATE TABLE"))) db.exec(ddl);
-  const addedColumns = addMissingColumns(db);
-  ensurePrimaryKeyCompatibilityIndexes(db);
-  for (const ddl of ddls.filter((s) => s.startsWith("CREATE INDEX"))) db.exec(ddl);
-  if (fromVersion < SCHEMA_VERSION) db.setUserVersion(SCHEMA_VERSION);
-  const toVersion = fromVersion > SCHEMA_VERSION ? fromVersion : SCHEMA_VERSION;
-  return {
-    fromVersion,
-    toVersion,
-    applied: fromVersion < SCHEMA_VERSION || addedColumns > 0 || rebuiltProjectionTables,
-    tables: tableNames(db),
-  };
+  return runSqliteTransaction(
+    db,
+    () => {
+      const fromVersion = db.userVersion();
+      const rebuiltProjectionTables = rebuildVersion26ProjectionTables(db, fromVersion);
+      const ddls = schemaDdl();
+      for (const ddl of ddls.filter((s) => s.startsWith("CREATE TABLE"))) db.exec(ddl);
+      const addedColumns = addMissingColumns(db);
+      ensurePrimaryKeyCompatibilityIndexes(db);
+      for (const ddl of ddls.filter((s) => s.startsWith("CREATE INDEX"))) db.exec(ddl);
+      if (fromVersion < SCHEMA_VERSION) db.setUserVersion(SCHEMA_VERSION);
+      const toVersion = fromVersion > SCHEMA_VERSION ? fromVersion : SCHEMA_VERSION;
+      return {
+        fromVersion,
+        toVersion,
+        applied: fromVersion < SCHEMA_VERSION || addedColumns > 0 || rebuiltProjectionTables,
+        tables: tableNames(db),
+      };
+    },
+    { beginMode: "deferred" },
+  );
 }
 
 /** registry が宣言する全 table が DB に存在するか検査する (status 用)。 */

@@ -1,6 +1,53 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolveVModelRoots } from "../shared/design-root.ts";
 import { fmValue } from "./shared.ts";
+
+declare const __UT_TDD_BUNDLED__: boolean;
+
+const bundled = typeof __UT_TDD_BUNDLED__ !== "undefined" && __UT_TDD_BUNDLED__ === true;
+
+interface EmbeddedGateAsset {
+  readonly path: string;
+  readonly content: string;
+}
+
+export type GateAssetPath =
+  | "docs/governance/gate-design.md"
+  | "docs/process/gates.md"
+  | "docs/process/vmodel-contract.yaml";
+
+// Literal require paths are esbuild text-loader inputs and are included in the
+// authoritative bundle receipt. Source execution keeps this index empty.
+const EMBEDDED_GATE_ASSETS: readonly EmbeddedGateAsset[] = bundled
+  ? [
+      {
+        path: "docs/governance/gate-design.md",
+        content: require("ut-tdd-gate-assets/docs/governance/gate-design.md") as string,
+      },
+      {
+        path: "docs/process/gates.md",
+        content: require("ut-tdd-gate-assets/docs/process/gates.md") as string,
+      },
+      {
+        path: "docs/process/vmodel-contract.yaml",
+        content: require("ut-tdd-gate-assets/docs/process/vmodel-contract.yaml") as string,
+      },
+    ]
+  : [];
+
+export function readGateAssetText(repoRoot: string, path: GateAssetPath): string {
+  const consumerPath = join(repoRoot, path);
+  if (existsSync(consumerPath)) return readFileSync(consumerPath, "utf8");
+  if (bundled) {
+    const asset = EMBEDDED_GATE_ASSETS.find((candidate) => candidate.path === path);
+    if (!asset) throw new Error(`embedded gate asset is missing from the Node bundle: ${path}`);
+    return asset.content;
+  }
+  const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  return readFileSync(resolve(sourceRoot, path), "utf8");
+}
 
 export interface GateStatus {
   gate: string;
@@ -79,6 +126,7 @@ export function parseConfirmDoc(
 }
 
 function walkMarkdown(dir: string): string[] {
+  if (!existsSync(dir)) return [];
   const out: string[] = [];
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry);
@@ -90,9 +138,10 @@ function walkMarkdown(dir: string): string[] {
 }
 
 export function loadGateConfirmDocs(repoRoot: string = process.cwd()): GateConfirmDocs {
-  const gateText = readFileSync(join(repoRoot, "docs", "governance", "gate-design.md"), "utf8");
-  const designRoot = join(repoRoot, "docs", "design", "harness");
-  const testRoot = join(repoRoot, "docs", "test-design", "harness");
+  const gateText = readGateAssetText(repoRoot, "docs/governance/gate-design.md");
+  const roots = resolveVModelRoots(repoRoot);
+  const designRoot = join(repoRoot, roots.designRoot);
+  const testRoot = join(repoRoot, roots.testDesignRoot);
   const docs: ConfirmDoc[] = [];
   for (const p of walkMarkdown(designRoot)) {
     docs.push(parseConfirmDoc(p, readFileSync(p, "utf8"), "design"));

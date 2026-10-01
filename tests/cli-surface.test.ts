@@ -982,7 +982,7 @@ describe("L7 CLI surface closure", () => {
     }
   }, 20_000);
 
-  it("creates a local clean distribution tarball and checksum without publishing", () => {
+  it("fails closed when the distribution source tag is unavailable", () => {
     const outDir = mkdtempSync(join(tmpdir(), "ut-tdd-package-out-"));
     try {
       const run = runCliIn(repoRoot, [
@@ -996,28 +996,73 @@ describe("L7 CLI surface closure", () => {
       ]);
       const payload = JSON.parse(run.stdout);
 
-      expect(run.status, run.stderr || run.stdout).toBe(0);
+      expect(run.status, run.stderr || run.stdout).toBe(1);
       expect(payload).toMatchObject({
-        ok: true,
-        actualPublishRequiresPoApproval: true,
-        export: {
-          ok: true,
-          sourceTag: "v0.1.0",
-        },
+        ok: false,
       });
-      // PLAN-L7-413 D-4c: unsigned tarball 契約へ整合 — signature 系 field は payload から
-      // 撤去済み (宣言と実装の一致)。tarball + checksum + manifest のみが成果物。
-      expect(payload.artifacts.signature).toBeUndefined();
-      expect(existsSync(payload.artifacts.tarball)).toBe(true);
-      expect(existsSync(payload.artifacts.checksum)).toBe(true);
-      expect(existsSync(payload.artifacts.manifest)).toBe(true);
-      expect(readFileSync(payload.artifacts.checksum, "utf8")).toContain("v0.1.0.tar.gz");
-      const manifest = JSON.parse(readFileSync(payload.artifacts.manifest, "utf8"));
-      expect(manifest.artifactCount).toBeGreaterThan(100);
+      expect(payload.error).toContain("tag source revision unavailable");
+      expect(readdirSync(outDir)).toHaveLength(0);
     } finally {
       removeTestTree(outDir);
     }
   }, 30_000);
+
+  it("does not start Git when a non-distribution command only needs the CLI version", () => {
+    const traceRoot = mkdtempSync(join(tmpdir(), "ut-tdd-cli-git-trace-"));
+    const tracePath = join(traceRoot, "git-trace.log");
+    try {
+      const run = runCliIn(repoRoot, ["--version"], {
+        ...process.env,
+        GIT_TRACE: tracePath,
+      });
+
+      expect(run.status, run.stderr || run.stdout).toBe(0);
+      expect(run.stdout.trim()).not.toBe("");
+      expect(existsSync(tracePath)).toBe(false);
+    } finally {
+      removeTestTree(traceRoot);
+    }
+  });
+
+  it("resolves the distribution tag only when omitted, without probing Git for an explicit tag", () => {
+    const traceRoot = mkdtempSync(join(tmpdir(), "ut-tdd-distribution-tag-trace-"));
+    try {
+      const explicitTrace = join(traceRoot, "explicit.log");
+      const explicit = runCliIn(
+        repoRoot,
+        ["distribution", "sync-plan", "--tag", "v0.1.0", "--json"],
+        {
+          ...process.env,
+          GIT_TRACE: explicitTrace,
+        },
+      );
+      expect(parseCliJson(explicit).export.sourceTag).toBe("v0.1.0");
+      expect(readFileSync(explicitTrace, "utf8")).not.toMatch(/rev-parse --short HEAD/);
+
+      const head = spawnSync("git", ["rev-parse", "--short", "HEAD"], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        windowsHide: true,
+      });
+      expect(head.status).toBe(0);
+      const omittedTrace = join(traceRoot, "omitted.log");
+      const omitted = runCliIn(repoRoot, ["distribution", "sync-plan", "--json"], {
+        ...process.env,
+        GIT_TRACE: omittedTrace,
+      });
+      expect(parseCliJson(omitted).export.sourceTag).toBe(head.stdout.trim());
+      expect(readFileSync(omittedTrace, "utf8")).toMatch(/rev-parse --short HEAD/);
+
+      const omittedPlan = parseCliJson(runCliIn(repoRoot, ["distribution", "plan", "--json"]));
+      expect(omittedPlan.export.sourceTag).toBe(head.stdout.trim());
+      expect(omittedPlan.readiness.contracts.tagPin).toBe(
+        `github:unison-ai-product/UT-TDD_AGENT-HARNESS-Pack#${head.stdout.trim()}`,
+      );
+      expect(omittedPlan.readiness.rollback.commands[0]).toBe(`git switch ${head.stdout.trim()}`);
+    } finally {
+      removeTestTree(traceRoot);
+    }
+  });
 
   it("exposes a non-destructive Pack repository sync plan", () => {
     const run = runCliIn(repoRoot, [
@@ -1217,7 +1262,7 @@ describe("L7 CLI surface closure", () => {
     expect(payload.commands.join("\n")).not.toContain("bun ");
     expect(payload.commands.join("\n")).not.toContain(".sig");
     expect(payload.commands).toContain(
-      "gh release create v0.1.0 .ut-tdd/release/v0.1.0.tar.gz .ut-tdd/release/v0.1.0.tar.gz.sha256 .ut-tdd/release/v0.1.0.manifest.json --repo unison-ai-product/UT-TDD_AGENT-HARNESS-Pack --verify-tag --notes-file .ut-tdd/release/v0.1.0.manifest.json",
+      'gh release create v0.1.0 .ut-tdd/release/v0.1.0.tar.gz .ut-tdd/release/v0.1.0.tar.gz.sha256 .ut-tdd/release/v0.1.0.ut-tdd.mjs .ut-tdd/release/v0.1.0.consumer-runtime.json .ut-tdd/release/v0.1.0.consumer.sha256 --repo unison-ai-product/UT-TDD_AGENT-HARNESS-Pack --verify-tag --notes "UT-TDD Pack consumer runtime v0.1.0"',
     );
     expect(payload.commands).toEqual(
       expect.arrayContaining([

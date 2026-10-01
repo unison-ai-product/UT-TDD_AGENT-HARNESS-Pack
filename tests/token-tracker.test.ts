@@ -104,7 +104,7 @@ describe("computeCodexCostUsd (OPENAI_PRICING, 公式単価)", () => {
     ).toBeCloseTo(0.0175, 6);
   });
 
-  it("computes pricing fallbacks for the GPT-5.6 worker and frontier tiers", () => {
+  it("computes pricing fallbacks for the GPT-5.6 worker and GPT-6.1 frontier tiers", () => {
     expect(
       computeCodexCostUsd({
         model: MODEL_IDS.codex.worker,
@@ -116,6 +116,15 @@ describe("computeCodexCostUsd (OPENAI_PRICING, 公式単価)", () => {
     expect(
       computeCodexCostUsd({
         model: MODEL_IDS.codex.frontier,
+        inputTokens: 1_000,
+        cachedInputTokens: 0,
+        outputTokens: 1_000,
+      }),
+    ).toBeCloseTo(0.012, 6);
+    // 切替前 (gpt-5.6-sol) の記録済み行も従来単価で計算できる (#735)。
+    expect(
+      computeCodexCostUsd({
+        model: "gpt-5.6-sol",
         inputTokens: 1_000,
         cachedInputTokens: 0,
         outputTokens: 1_000,

@@ -255,15 +255,20 @@ describe("F0b sealed Node producer candidate oracles", () => {
 
   it("CAND-NODEBOOT-B2 builder digest mutation fails closed", async () => {
     const real = await buildReal();
-    const builderPath = resolve(root, real.receipt.builder.path);
+    const fixture = createVerificationFixture(real);
+    const builderPath = resolve(fixture.root, real.receipt.builder.path);
     const original = readFileSync(builderPath);
+    const canonicalBuilderPath = resolve(root, real.receipt.builder.path);
+    const canonicalOriginal = readFileSync(canonicalBuilderPath);
     try {
       writeFileSync(builderPath, Buffer.concat([original, Buffer.from("\nmutation\n")]));
-      expect(() => bootstrap.verifyNodeGeneration(root, real.generationPath, candidate)).toThrow(
-        /builder-digest-mismatch/,
-      );
+      expect(() =>
+        bootstrap.verifyNodeGeneration(fixture.root, fixture.generationPath, candidate),
+      ).toThrow(/builder-digest-mismatch/);
+      expect(readFileSync(canonicalBuilderPath)).toEqual(canonicalOriginal);
     } finally {
       writeFileSync(builderPath, original);
+      rmTestDist(fixture.root);
     }
   });
 });

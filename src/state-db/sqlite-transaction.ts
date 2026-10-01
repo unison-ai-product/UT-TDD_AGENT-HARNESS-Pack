@@ -3,10 +3,14 @@ import type { HarnessDb } from "./index.ts";
 /** SQLite固有の原子境界。applicationはこの実装を直接参照しない。 */
 const transactionDepth = new WeakMap<HarnessDb, number>();
 
-export function runSqliteTransaction<T>(db: HarnessDb, work: () => T): T {
+export function runSqliteTransaction<T>(
+  db: HarnessDb,
+  work: () => T,
+  options: { beginMode?: "immediate" | "deferred" } = {},
+): T {
   const depth = transactionDepth.get(db) ?? 0;
   const savepoint = `ut_tdd_projection_${depth}`;
-  if (depth === 0) db.exec("BEGIN IMMEDIATE");
+  if (depth === 0) db.exec(options.beginMode === "deferred" ? "BEGIN" : "BEGIN IMMEDIATE");
   else db.exec(`SAVEPOINT ${savepoint}`);
   transactionDepth.set(db, depth + 1);
   try {

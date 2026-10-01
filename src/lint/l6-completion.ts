@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { resolveVModelRoots } from "../shared/design-root.ts";
 // A-120 I-3: review_evidence の有無判定は review-evidence.ts を単一正本にする
 // (旧 l6-completion 版は判定ロジックが乖離し review-evidence hard gate と齟齬を生む恐れがあった)。
 import { hasReviewEvidence } from "./review-evidence.ts";
@@ -164,18 +165,19 @@ export function analyzeL6Completion(inputs: L6CompletionInputs): L6CompletionRes
 }
 
 export function loadL6CompletionInputs(repoRoot: string): L6CompletionInputs {
-  const l6Dir = join(repoRoot, "docs", "design", "harness", "L6-function-design");
+  const roots = resolveVModelRoots(repoRoot);
+  const l6Dir = join(repoRoot, roots.designRoot, "L6-function-design");
   const planDir = join(repoRoot, "docs", "plans");
-  const l6Docs = readdirSync(l6Dir)
+  const l6Docs = (existsSync(l6Dir) ? readdirSync(l6Dir) : [])
     .filter((name) => name.endsWith(".md"))
     .map((name) => {
       const path = join(l6Dir, name);
       return {
-        path: `docs/design/harness/L6-function-design/${name}`,
+        path: `${roots.designRoot}/L6-function-design/${name}`,
         text: readFileSync(path, "utf8"),
       };
     });
-  const l6Plans = readdirSync(planDir)
+  const l6Plans = (existsSync(planDir) ? readdirSync(planDir) : [])
     .filter((name) => /^PLAN-L6-.*\.md$/.test(name))
     .map((name) => {
       const path = join(planDir, name);
@@ -184,19 +186,21 @@ export function loadL6CompletionInputs(repoRoot: string): L6CompletionInputs {
   return {
     l6Docs,
     l6Plans,
-    l7Text: readFileSync(
-      join(repoRoot, "docs", "test-design", "harness", "L7-unit-test-design.md"),
-      "utf8",
-    ),
-    gateText: readFileSync(join(repoRoot, "docs", "governance", "gate-design.md"), "utf8"),
+    l7Text: existsSync(join(repoRoot, roots.testDesignRoot, "L7-unit-test-design.md"))
+      ? readFileSync(join(repoRoot, roots.testDesignRoot, "L7-unit-test-design.md"), "utf8")
+      : "",
+    gateText: existsSync(join(repoRoot, "docs", "governance", "gate-design.md"))
+      ? readFileSync(join(repoRoot, "docs", "governance", "gate-design.md"), "utf8")
+      : "",
   };
 }
 
 export function canLoadL6CompletionInputs(repoRoot: string): boolean {
+  const roots = resolveVModelRoots(repoRoot);
   return (
-    existsSync(join(repoRoot, "docs", "design", "harness", "L6-function-design")) &&
+    existsSync(join(repoRoot, roots.designRoot, "L6-function-design")) &&
     existsSync(join(repoRoot, "docs", "plans")) &&
-    existsSync(join(repoRoot, "docs", "test-design", "harness", "L7-unit-test-design.md")) &&
+    existsSync(join(repoRoot, roots.testDesignRoot, "L7-unit-test-design.md")) &&
     existsSync(join(repoRoot, "docs", "governance", "gate-design.md"))
   );
 }

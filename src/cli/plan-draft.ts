@@ -49,6 +49,36 @@ const targetSchema = z
   .object({ target_plan_id: z.string().min(1), target_revision: z.number().int().positive() })
   .strict();
 
+/** PLAN-L7-690 §2.1/§2.2: 新規revisionの入力境界はprojection_state必須。
+ *  projected は非全ゼロのcanonical digest必須、unprojectedはdigestを持たない。 */
+const projectionDigestSchema = z
+  .string()
+  .regex(/^sha256:[a-f0-9]{64}$/i, "projection_digest は sha256:<64桁16進数> 形式必須")
+  .refine(
+    (value) => !/^sha256:0{64}$/i.test(value),
+    "projection_digest は全ゼロを許可しません (PLAN-L7-690 §2.2)",
+  );
+
+const issueBindingSchema = z.discriminatedUnion("projection_state", [
+  z
+    .object({
+      provider: z.literal("github"),
+      issue_id: z.number().int().positive(),
+      episode_id: z.string().min(1),
+      projection_state: z.literal("projected"),
+      projection_digest: projectionDigestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      provider: z.literal("github"),
+      issue_id: z.number().int().positive(),
+      episode_id: z.string().min(1),
+      projection_state: z.literal("unprojected"),
+    })
+    .strict(),
+]);
+
 const admissionSchema = z
   .object({
     route_signal: z.string().min(1),
@@ -60,15 +90,7 @@ const admissionSchema = z
     branch: z.string().min(1),
     status: statusSchema.optional(),
     sub_doc: subDocSchema.optional(),
-    issue: z
-      .object({
-        provider: z.literal("github"),
-        issue_id: z.number().int().positive(),
-        episode_id: z.string().min(1),
-        projection_digest: z.string().min(1),
-      })
-      .strict()
-      .optional(),
+    issue: issueBindingSchema.optional(),
     origin: z
       .object({
         plan_id: z.string().min(1),
@@ -187,7 +209,10 @@ function toAdmissionRequest(input: DraftManifest["admission"]): PlanAdmissionReq
             provider: input.issue.provider,
             issueId: input.issue.issue_id,
             episodeId: input.issue.episode_id,
-            projectionDigest: input.issue.projection_digest,
+            projectionState: input.issue.projection_state,
+            ...(input.issue.projection_state === "projected"
+              ? { projectionDigest: input.issue.projection_digest }
+              : {}),
           },
         }
       : {}),

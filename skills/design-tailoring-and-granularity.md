@@ -180,3 +180,7 @@ a valid choice in the first place.
   options + a recommendation to the human.
 - Presenting an option that drops requirement IDs or otherwise breaks
   traceability as if it were a legitimate tailoring choice.
+
+## zip lineage (PLAN-L7-676 PR-T3)
+
+The judgement in this skill is a near-1:1 English rendering of the corresponding `.claude/skills/vmodel-design-judgement/SKILL.md` in `Vモデル設計ドキュメント_checked.zip` (Apache-2.0). PR-T3 ported the zip pack as [[vmodel-design-judgement]] — a thin bridge that indexes the Japanese original's section headings and points back here, rather than duplicating the same decision content twice (docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1).

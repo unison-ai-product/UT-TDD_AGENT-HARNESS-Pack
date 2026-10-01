@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { resolveAuthoringSourceAbsolutePath } from "../shared/design-root.ts";
 
 export interface G1TraceDocs {
   business: string;
@@ -29,25 +30,23 @@ const REQUIRED_L3_REQUIRES = [
 
 export function loadG1TraceDocs(repoRoot: string = process.cwd()): G1TraceDocs {
   const plansDir = resolve(repoRoot, "docs/plans");
-  const plans = readdirSync(plansDir)
-    .filter((f) => /^PLAN-L3-\d+-.+\.md$/.test(f))
-    .map((f) => ({
-      file: join("docs", "plans", f),
-      content: readFileSync(resolve(plansDir, f), "utf8"),
-    }));
+  const plans = existsSync(plansDir)
+    ? readdirSync(plansDir)
+        .filter((f) => /^PLAN-L3-\d+-.+\.md$/.test(f))
+        .map((f) => ({
+          file: join("docs", "plans", f),
+          content: readFileSync(resolve(plansDir, f), "utf8"),
+        }))
+    : [];
+  const readRequired = (path: string): string => {
+    const absolute = resolveAuthoringSourceAbsolutePath(repoRoot, path);
+    if (!existsSync(absolute)) throw new Error(`required doc not created: ${path}`);
+    return readFileSync(absolute, "utf8");
+  };
   return {
-    business: readFileSync(
-      resolve(repoRoot, "docs/design/harness/L1-requirements/business-requirements.md"),
-      "utf8",
-    ),
-    functional: readFileSync(
-      resolve(repoRoot, "docs/design/harness/L1-requirements/functional-requirements.md"),
-      "utf8",
-    ),
-    screen: readFileSync(
-      resolve(repoRoot, "docs/design/harness/L1-requirements/screen-requirements.md"),
-      "utf8",
-    ),
+    business: readRequired("docs/design/harness/L1-requirements/business-requirements.md"),
+    functional: readRequired("docs/design/harness/L1-requirements/functional-requirements.md"),
+    screen: readRequired("docs/design/harness/L1-requirements/screen-requirements.md"),
     plans,
   };
 }

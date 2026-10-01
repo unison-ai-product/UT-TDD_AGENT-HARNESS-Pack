@@ -129,8 +129,10 @@ export function buildReleasePublicationPlan(input: {
   const artifactNames = releaseArtifactFileNames(tag);
   const tarball = `.ut-tdd/release/${artifactNames.tarball}`;
   const checksum = `.ut-tdd/release/${artifactNames.checksum}`;
-  const manifest = `.ut-tdd/release/${artifactNames.manifest}`;
-  const packageAssets = [tarball, checksum, manifest];
+  const compiledEsm = `.ut-tdd/release/${artifactNames.compiledEsm}`;
+  const consumerRuntime = `.ut-tdd/release/${artifactNames.consumerRuntime}`;
+  const consumerChecksum = `.ut-tdd/release/${artifactNames.consumerChecksum}`;
+  const packageAssets = [tarball, checksum, compiledEsm, consumerRuntime, consumerChecksum];
   return {
     ok: /^v\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?$/.test(tag) && repo.length > 0,
     tag,
@@ -140,7 +142,7 @@ export function buildReleasePublicationPlan(input: {
     commands: [
       `git tag -a ${tag} -m "release ${tag}"`,
       `node src/cli.ts distribution package --tag ${tag}`,
-      `gh release create ${tag} ${packageAssets.join(" ")} --repo ${repo} --verify-tag --notes-file ${manifest}`,
+      `gh release create ${tag} ${packageAssets.join(" ")} --repo ${repo} --verify-tag --notes "UT-TDD Pack consumer runtime ${tag}"`,
     ],
     externalPublishRequiresApproval: true,
   };

@@ -89,6 +89,7 @@ import {
 } from "../src/doctor/index.ts";
 import { buildDoctorResult } from "../src/doctor/result.ts";
 import { analyzeGateRunCoverage, gateRunCoverageMessages } from "../src/lint/gate-run-coverage.ts";
+import { CODEX_GIT_ROOT_PREFIX } from "../src/lint/hook-invocation.ts";
 import type { AgentSlotsDeps, Slot } from "../src/runtime/agent-slots.ts";
 import {
   analyzeDesignDetectionStats,
@@ -419,24 +420,35 @@ describe("checkHandoverDisciplineMessages", () => {
   });
 
   it("runDoctor surfaces handover discipline as warning-only", () => {
-    const files = new Map([
-      [currentPlanPath, "PLAN-L5-08-harness-db-feedback\n2026-06-03T23:50:00.000Z"],
-      [
-        join(digestDir, "PLAN-L5-08-harness-db-feedback.digest.json"),
-        JSON.stringify({
-          plan_id: "PLAN-L5-08-harness-db-feedback",
-          sessions: ["s1"],
-          commits: [],
-          files_touched: ["docs/plans/PLAN-L5-08-harness-db-feedback.md"],
-          failures: [],
-          updated_at: "2026-06-03T23:55:00.000Z",
-        }),
-      ],
-    ]);
-    const r = runDoctor(deps({ files }));
-    expect(r.ok).toBe(false);
-    expect(r.messages.some((m) => m.includes("handover-discipline"))).toBe(true);
-    expect(r.messages.some((m) => m.includes("verification group lint could not run"))).toBe(true);
+    const fixtureParent = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-handover-"));
+    const repoRoot = join(fixtureParent, "missing-root");
+    try {
+      const files = new Map([
+        [
+          join(repoRoot, ".ut-tdd", "state", "current-plan"),
+          "PLAN-L5-08-harness-db-feedback\n2026-06-03T23:50:00.000Z",
+        ],
+        [
+          join(repoRoot, ".ut-tdd", "logs", "plan", "PLAN-L5-08-harness-db-feedback.digest.json"),
+          JSON.stringify({
+            plan_id: "PLAN-L5-08-harness-db-feedback",
+            sessions: ["s1"],
+            commits: [],
+            files_touched: ["docs/plans/PLAN-L5-08-harness-db-feedback.md"],
+            failures: [],
+            updated_at: "2026-06-03T23:55:00.000Z",
+          }),
+        ],
+      ]);
+      const r = runDoctor(deps({ repoRoot, files }));
+      expect(r.ok).toBe(false);
+      expect(r.messages.some((m) => m.includes("handover-discipline"))).toBe(true);
+      expect(r.messages.some((m) => m.includes("verification group lint could not run"))).toBe(
+        true,
+      );
+    } finally {
+      rmSync(fixtureParent, { recursive: true, force: true });
+    }
   });
 });
 
@@ -513,22 +525,28 @@ describe("runDoctor", () => {
   });
 
   it("ok=true includes handover and agent-slots surfaces as warnings", () => {
-    const r = runDoctor(deps());
-    expect(r.ok).toBe(false);
-    expect(r.messages.some((m) => m.includes("handover"))).toBe(true);
-    expect(r.messages.some((m) => m.includes("agent-slots"))).toBe(true);
-    expect(r.messages.some((m) => m.includes("verification group lint could not run"))).toBe(true);
-    // Keep warning-only surfaces from masking hard-fail lint coverage.
-    expect(r.messages.some((m) => m.includes("scrum-reverse"))).toBe(true);
-    expect(r.messages.some((m) => m.includes("propagation"))).toBe(true);
-    expect(r.messages.some((m) => m.includes("coding-rules"))).toBe(true);
+    const fixtureParent = mkdtempSync(join(tmpdir(), "ut-tdd-doctor-missing-root-"));
+    try {
+      const r = runDoctor(deps({ repoRoot: join(fixtureParent, "missing-root") }));
+      expect(r.ok).toBe(false);
+      expect(r.messages.some((m) => m.includes("handover"))).toBe(true);
+      expect(r.messages.some((m) => m.includes("agent-slots"))).toBe(true);
+      expect(r.messages.some((m) => m.includes("verification group lint could not run"))).toBe(
+        true,
+      );
+      // Keep warning-only surfaces from masking hard-fail lint coverage.
+      expect(r.messages.some((m) => m.includes("scrum-reverse"))).toBe(true);
+      expect(r.messages.some((m) => m.includes("propagation"))).toBe(true);
+      expect(r.messages.some((m) => m.includes("coding-rules"))).toBe(true);
+    } finally {
+      rmSync(fixtureParent, { recursive: true, force: true });
+    }
   });
 
   it("U-SETUP-014: supports a fresh-consumer setup smoke without requiring dogfood PLAN/design docs", () => {
     const codexHook = (...args: string[]) => ({
       type: "command",
-      command: "node",
-      args: [".ut-tdd/bin/ut-tdd.mjs", ...args],
+      command: `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" ${args.join(" ")}`,
     });
     const codexHookJson = JSON.stringify({
       hooks: {

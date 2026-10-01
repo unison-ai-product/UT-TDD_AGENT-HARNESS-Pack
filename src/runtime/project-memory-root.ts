@@ -2,7 +2,10 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { loadProjectIdentityFromHead } from "../kernel/project-identity.ts";
+import {
+  loadProjectIdentityFromHead,
+  PROJECT_IDENTITY_COMMIT_RECOVERY_COMMANDS,
+} from "../kernel/project-identity.ts";
 import { memoryStorageRoot } from "../memory/index.ts";
 
 export type ProjectMemoryRootDenyReason =
@@ -182,7 +185,18 @@ export function requireProjectMemoryRoot(
   repoRoot: string,
 ): Extract<ProjectMemoryRootResult, { ok: true }> {
   const result = resolveProjectMemoryRoot(repoRoot);
-  if (!result.ok) throw new Error(`project_memory_root_${result.reason}`);
+  if (!result.ok) {
+    const message = `project_memory_root_${result.reason}`;
+    if (result.reason === "project_identity_unavailable") {
+      throw new Error(
+        [
+          message,
+          ...PROJECT_IDENTITY_COMMIT_RECOVERY_COMMANDS.map((command) => `recovery: ${command}`),
+        ].join("\n"),
+      );
+    }
+    throw new Error(message);
+  }
   return result;
 }
 

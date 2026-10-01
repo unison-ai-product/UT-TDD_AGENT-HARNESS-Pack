@@ -70,11 +70,11 @@ async function fixture(
   const sourceRevision = version === "v2" ? "b".repeat(40) : "a".repeat(40);
   const releaseId = deriveReleaseId("1", sourceRevision, artifactDigest);
   const plan = {
+    schemaVersion: "v2" as const,
     kind: "release-aggregate" as const,
     channel: "stable",
     releaseId,
     sourceRevision,
-    destinationPath: "bin",
     expectedDigest: artifactDigest,
     actualDigest: artifactDigest,
     entries,
@@ -156,6 +156,99 @@ async function fixture(
   };
 }
 
+async function v2Fixture(
+  productId: string,
+  channel: "stable" | "canary",
+): Promise<ConsumerLocalRuntimeAdmissionInput> {
+  const root = await mkdtemp(join(tmpdir(), `ut-tdd-packiso-v2-${productId}-`));
+  roots.push(root);
+  const revision = "c".repeat(40);
+  const entries = [
+    { path: "bin/a.js", mode: "100644" as const, content: new TextEncoder().encode("runtime-a") },
+    { path: "bin/b.js", mode: "100644" as const, content: new TextEncoder().encode("runtime-b") },
+    { path: "bin/c.js", mode: "100644" as const, content: new TextEncoder().encode("runtime-c") },
+  ];
+  const artifactDigest = digest(entries);
+  const releaseId = deriveReleaseId("1", revision, artifactDigest);
+  const publicationEntries = entries.map((entry, index) => ({
+    sourcePath: `releases/${channel}/${String.fromCharCode(97 + index)}.js`,
+    destinationPath: entry.path,
+    mode: entry.mode,
+    size: entry.content.length,
+    contentDigest: `sha256:${createHash("sha256").update(entry.content).digest("hex")}`,
+    content: entry.content,
+  }));
+  const publicationBase = {
+    materializerVersion: "1",
+    artifactSourceCommit: revision,
+    artifactSetDigest: artifactDigest,
+    artifactInventoryDigest: deriveArtifactInventoryDigest(publicationEntries),
+    releaseAssetInventoryDigest: `sha256:${"0".repeat(64)}`,
+    releaseRecordDigest: `sha256:${"0".repeat(64)}`,
+    artifacts: publicationEntries.map(
+      ({ sourcePath, destinationPath, mode, size, contentDigest }) => ({
+        sourcePath,
+        destinationPath,
+        mode,
+        size,
+        contentDigest,
+      }),
+    ),
+  };
+  const publicationAssets = derivePackPublicationAssets({
+    release: { releaseId, ...publicationBase },
+    entries: publicationEntries,
+  });
+  if (!publicationAssets.ok) throw new Error(publicationAssets.error);
+  const publicationRelease = {
+    ...publicationBase,
+    releaseAssetInventoryDigest: publicationAssets.value.releaseAssetInventoryDigest,
+  };
+  const publicationManifest = {
+    schema_version: "v2" as const,
+    releases: {
+      [releaseId]: {
+        ...publicationRelease,
+        releaseRecordDigest: deriveReleaseRecordDigest(publicationRelease),
+      },
+    },
+    channels: { canary: releaseId, stable: releaseId },
+    channelOrder: ["canary", "stable"],
+  };
+  const plan = {
+    schemaVersion: "v2" as const,
+    kind: "release-aggregate" as const,
+    channel,
+    releaseId,
+    sourceRevision: revision,
+    expectedDigest: artifactDigest,
+    actualDigest: artifactDigest,
+    entries,
+  } satisfies ConsumerLocalRuntimeAdmissionInput["plan"];
+  return {
+    productId,
+    consumerRoot: root,
+    runtimeRoot: join(root, ".ut-tdd"),
+    plan,
+    manifest: {
+      materializerVersion: "1",
+      releaseId,
+      sourceRevision: revision,
+      artifactSetDigest: artifactDigest,
+    },
+    receipt: {
+      productId,
+      consumerRoot: root,
+      runtimeRoot: join(root, ".ut-tdd"),
+      materializerVersion: "1",
+      releaseId,
+      sourceRevision: revision,
+      artifactSetDigest: artifactDigest,
+    },
+    controlManifestBytes: Buffer.from(stringify(publicationManifest), "utf8"),
+  };
+}
+
 async function tree(root: string): Promise<string> {
   const rows: string[] = [];
   async function visit(path: string, prefix = ""): Promise<void> {
@@ -183,6 +276,51 @@ async function seedRuntime(root: string, version: string, history = version): Pr
 }
 
 describe("consumer-local runtime admission", () => {
+  it.each([
+    "stable",
+    "canary",
+  ] as const)("CANDIDATE-U-RELAGGV2-006: accepts a complete v2 N=3 sealed plan on %s", async (channel) => {
+    const input = await v2Fixture("product-v2", channel);
+    const result = admitConsumerLocalRuntime(input);
+    expect(result.ok).toBe(true);
+    if (result.ok)
+      expect(result.admission.plan.entries.map((entry) => entry.path)).toEqual([
+        "bin/a.js",
+        "bin/b.js",
+        "bin/c.js",
+      ]);
+  });
+
+  it.each([
+    "stable",
+    "canary",
+  ] as const)("CANDIDATE-U-RELAGGV2-006: rejects an extra v2 destinationPath on %s", async (channel) => {
+    const input = await v2Fixture("product-v2-extra", channel);
+    const malformed = {
+      ...input,
+      plan: { ...input.plan, destinationPath: "bin/a.js" },
+    } as unknown as ConsumerLocalRuntimeAdmissionInput;
+    expect(admitConsumerLocalRuntime(malformed)).toMatchObject({
+      ok: false,
+      error: "artifact_unavailable",
+    });
+  });
+
+  it.each([
+    "stable",
+    "canary",
+  ] as const)("CANDIDATE-U-RELAGGV2-006: rejects a v1 sealed plan on %s", async (channel) => {
+    const v2 = await v2Fixture("product-v1-variant", channel);
+    const legacyVariant = {
+      ...v2,
+      plan: { ...v2.plan, schemaVersion: "v1", destinationPath: "bin" },
+    } as unknown as ConsumerLocalRuntimeAdmissionInput;
+    expect(admitConsumerLocalRuntime(legacyVariant)).toMatchObject({
+      ok: false,
+      error: "artifact_unavailable",
+    });
+  });
+
   it("U-PACKISO-001: sealed artifactだけでsource不在のfresh consumerをadmitできる", async () => {
     const [a, b] = await Promise.all([fixture("product-a", "v1"), fixture("product-b", "v2")]);
     const writes: string[] = [];

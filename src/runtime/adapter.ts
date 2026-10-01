@@ -92,6 +92,11 @@ export type InvokeResult =
 export interface ProviderCommandResolutionOptions {
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
+  runPathLookup?: (
+    finder: string,
+    args: string[],
+    options: { encoding: "utf8"; env: NodeJS.ProcessEnv; windowsHide: true },
+  ) => string;
 }
 
 export interface ProviderInvocation {
@@ -109,7 +114,22 @@ export interface ProviderInvocationInput {
 }
 
 export interface ProviderProbeOptions extends ProviderCommandResolutionOptions {
-  runProbe?: (command: string, args: string[], env: NodeJS.ProcessEnv) => { status: number | null };
+  runProbe?: (input: ProviderProbeInput) => { status: number | null };
+}
+
+export interface ProviderProbeInput {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  options: ProviderProbeSpawnOptions;
+}
+
+export interface ProviderProbeSpawnOptions {
+  env: NodeJS.ProcessEnv;
+  stdio: "ignore";
+  shell: boolean;
+  windowsVerbatimArguments: boolean;
+  windowsHide: true;
 }
 
 export function providerAvailable(provider: AdapterProvider, mode: ExecutionMode): boolean {
@@ -175,7 +195,9 @@ function firstOnPath(command: string, opts: ProviderCommandResolutionOptions = {
       ? win32.join(env.SystemRoot ?? "C:\\Windows", "System32", "where.exe")
       : "which";
   try {
-    const found = execFileSync(finder, [command], { encoding: "utf8", env })
+    const runPathLookup =
+      opts.runPathLookup ?? ((path, args, options) => execFileSync(path, args, options));
+    const found = runPathLookup(finder, [command], { encoding: "utf8", env, windowsHide: true })
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean);
@@ -314,15 +336,23 @@ export function isProviderCommandSpawnable(
   });
   const runProbe =
     opts.runProbe ??
-    ((command: string, args: string[], probeEnv: NodeJS.ProcessEnv) =>
-      spawnSync(command, args, {
-        env: probeEnv,
-        stdio: "ignore",
-        shell: invocation.shell ?? false,
-        windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
-      }));
+    ((input: ProviderProbeInput) => spawnSync(input.command, input.args, input.options));
+  const probeOptions: ProviderProbeSpawnOptions = {
+    env,
+    stdio: "ignore",
+    shell: invocation.shell ?? false,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
+    windowsHide: true,
+  };
   try {
-    return runProbe(invocation.command, invocation.args, env).status === 0;
+    return (
+      runProbe({
+        command: invocation.command,
+        args: invocation.args,
+        env,
+        options: probeOptions,
+      }).status === 0
+    );
   } catch {
     return false;
   }

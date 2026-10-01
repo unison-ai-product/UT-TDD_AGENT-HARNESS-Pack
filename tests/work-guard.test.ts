@@ -137,7 +137,7 @@ describe("work guard (PLAN-L7-114) — 作業衝突ガードレール", () => {
   });
 });
 
-describe("extractEditTargets (PLAN-L7-139) — Codex apply_patch / Claude file_path 両対応", () => {
+describe("U-CXHOOK-007: extractEditTargets (PLAN-L7-139) — Codex apply_patch / Claude file_path 両対応", () => {
   it("Claude Edit/Write/MultiEdit の tool_input.file_path を返す", () => {
     expect(extractEditTargets({ file_path: "src/cli.ts" })).toEqual(["src/cli.ts"]);
   });

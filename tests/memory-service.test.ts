@@ -472,7 +472,8 @@ describe("MemoryService (PLAN-L7-468 PR-A)", () => {
       "runtime/session-log.ts",
       "state-db/index.ts",
     ]);
-    const SCAN_ONLY_DIR_ACCESS = new Set(["lint/memory-sync.ts"]);
+    // review-guard は untracked の path が `.ut-tdd/memory/` 配下かを判定するだけで本文を読まない。
+    const SCAN_ONLY_DIR_ACCESS = new Set(["lint/memory-sync.ts", "runtime/review-guard.ts"]);
     expect(tableLiteral.filter((rel) => !ALLOWED_TABLE_ACCESS.has(rel))).toEqual([]);
     expect(
       dirLiteral.filter((rel) => !ALLOWED_DIR_ACCESS.has(rel) && !SCAN_ONLY_DIR_ACCESS.has(rel)),

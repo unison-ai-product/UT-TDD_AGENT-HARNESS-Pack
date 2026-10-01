@@ -159,11 +159,20 @@ function receiptFrontmatter(input: {
     route: { signal: admission.routeSignal, mode: admission.routeMode },
     ...(admission.issue
       ? {
+          // PLAN-L7-690 §2.1: projection_state 明示時はそのまま出力し、unprojected では
+          // projection_digest を省略する (null/空文字での代用禁止)。projection_state 未指定の
+          // legacy admission は従来通り digest のみを出力する (legacy 条項、既存 receipt 互換)。
           issue: {
             provider: admission.issue.provider,
             issue_id: admission.issue.issueId,
             episode_id: admission.issue.episodeId,
-            projection_digest: admission.issue.projectionDigest,
+            ...(admission.issue.projectionState
+              ? { projection_state: admission.issue.projectionState }
+              : {}),
+            ...(admission.issue.projectionState !== "unprojected" &&
+            admission.issue.projectionDigest
+              ? { projection_digest: admission.issue.projectionDigest }
+              : {}),
           },
         }
       : {}),

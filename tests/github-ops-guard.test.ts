@@ -94,7 +94,9 @@ describe("github ops guard", () => {
     expect(plan.packageAssets).toEqual([
       ".ut-tdd/release/v0.1.0.tar.gz",
       ".ut-tdd/release/v0.1.0.tar.gz.sha256",
-      ".ut-tdd/release/v0.1.0.manifest.json",
+      ".ut-tdd/release/v0.1.0.ut-tdd.mjs",
+      ".ut-tdd/release/v0.1.0.consumer-runtime.json",
+      ".ut-tdd/release/v0.1.0.consumer.sha256",
     ]);
     expect(plan.commands).toContain("node src/cli.ts distribution package --tag v0.1.0");
     expect(plan.commands.join("\n")).not.toContain("bun ");
@@ -107,7 +109,7 @@ describe("github ops guard", () => {
     );
     const publish = plan.commands.find((command) => command.startsWith("gh release create"));
     expect(publish).toBe(
-      "gh release create v0.1.0 .ut-tdd/release/v0.1.0.tar.gz .ut-tdd/release/v0.1.0.tar.gz.sha256 .ut-tdd/release/v0.1.0.manifest.json --repo unison-ai-product/UT-TDD_AGENT-HARNESS-Pack --verify-tag --notes-file .ut-tdd/release/v0.1.0.manifest.json",
+      'gh release create v0.1.0 .ut-tdd/release/v0.1.0.tar.gz .ut-tdd/release/v0.1.0.tar.gz.sha256 .ut-tdd/release/v0.1.0.ut-tdd.mjs .ut-tdd/release/v0.1.0.consumer-runtime.json .ut-tdd/release/v0.1.0.consumer.sha256 --repo unison-ai-product/UT-TDD_AGENT-HARNESS-Pack --verify-tag --notes "UT-TDD Pack consumer runtime v0.1.0"',
     );
   });
 
@@ -119,7 +121,13 @@ describe("github ops guard", () => {
     });
 
     expect(plan.packageAssets).toEqual(
-      [names.tarball, names.checksum, names.manifest].map((name) => `.ut-tdd/release/${name}`),
+      [
+        names.tarball,
+        names.checksum,
+        names.compiledEsm,
+        names.consumerRuntime,
+        names.consumerChecksum,
+      ].map((name) => `.ut-tdd/release/${name}`),
     );
     expect(plan.commands).toContain("node src/cli.ts distribution package --tag v0.1.0+build.1");
     expect(plan.commands.join("\n")).not.toContain(".sig");

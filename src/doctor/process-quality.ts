@@ -230,7 +230,7 @@ function loadOrBuildGateRunCoverageStats(repoRoot: string) {
   const needsRebuild = !existsSync(dbPath);
   const db = openHarnessDb(dbPath, { repoRoot });
   try {
-    if (needsRebuild) rebuildHarnessDb({ repoRoot, db });
+    if (needsRebuild) rebuildHarnessDb({ repoRoot, db, skipTokenTelemetry: true });
     const gateRuns = count(db, "SELECT COUNT(*) AS value FROM gate_runs");
     const workflowRuns = count(db, "SELECT COUNT(*) AS value FROM workflow_runs");
     const workflowPlansWithoutGateRun = count(

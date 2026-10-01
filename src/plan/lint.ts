@@ -122,6 +122,7 @@ export function loadPlanScheduleDocs(
     return [{ file: target, content: readFileSync(p, "utf8") }];
   }
   const plansDir = join(repoRoot, "docs", "plans");
+  if (!existsSync(plansDir)) return [];
   return readdirSync(plansDir)
     .filter((f) => f.startsWith("PLAN-") && f.endsWith(".md"))
     .map((f) => ({
