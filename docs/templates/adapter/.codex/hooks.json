@@ -1,5 +1,5 @@
 {
-  "$comment": "UT-TDD Codex adapter hooks. Hosted/API tool surfaces still require explicit `ut-tdd guard preflight` before edits because repo-local Codex hooks do not execute there.",
+  "$comment": "UT-TDD Codex adapter hooks (PLAN-L7-668 command schema). Hosted/API tool surfaces still require explicit `ut-tdd guard preflight` before edits because repo-local Codex hooks do not execute there.",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,10 +7,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [".ut-tdd/bin/ut-tdd.mjs","hook","agent-guard"],
+            "command": "node \"$(git rev-parse --show-toplevel)/.ut-tdd/bin/ut-tdd.mjs\" hook agent-guard",
             "timeout": 5,
-            "blockOnFailure": true,
             "statusMessage": "agent-guard: Codex subagent allowlist/model enforcement"
           }
         ]
@@ -20,10 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [".ut-tdd/bin/ut-tdd.mjs","hook","work-guard"],
+            "command": "node \"$(git rev-parse --show-toplevel)/.ut-tdd/bin/ut-tdd.mjs\" hook work-guard",
             "timeout": 5,
-            "blockOnFailure": true,
             "statusMessage": "work-guard: foreign edit protection"
           }
         ]
@@ -34,8 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [".ut-tdd/bin/ut-tdd.mjs","session","start"],
+            "command": "node \"$(git rev-parse --show-toplevel)/.ut-tdd/bin/ut-tdd.mjs\" session start",
             "timeout": 5,
             "statusMessage": "session-log: session start (fail-open)"
           }
@@ -44,12 +39,11 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "apply_patch|write_file|exec_command|local_shell",
+        "matcher": "apply_patch|write_file|exec_command|local_shell|Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [".ut-tdd/bin/ut-tdd.mjs","hook","post-tool-use"],
+            "command": "node \"$(git rev-parse --show-toplevel)/.ut-tdd/bin/ut-tdd.mjs\" hook post-tool-use",
             "timeout": 5,
             "statusMessage": "session-log: post tool use (fail-open)"
           }
@@ -61,8 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node",
-            "args": [".ut-tdd/bin/ut-tdd.mjs","session","summary"],
+            "command": "node \"$(git rev-parse --show-toplevel)/.ut-tdd/bin/ut-tdd.mjs\" session summary",
             "timeout": 5,
             "statusMessage": "session-log: PLAN digest summary (fail-open)"
           }

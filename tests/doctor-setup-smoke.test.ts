@@ -5,13 +5,16 @@ import {
   collectHookCommands,
   type SetupSmokeDeps,
 } from "../src/doctor/setup-smoke.ts";
+import { CODEX_GIT_ROOT_PREFIX } from "../src/lint/hook-invocation.ts";
 
+// PLAN-L7-668 §3: Codex の command は `node "$(git rev-parse --show-toplevel)/<script>" [args]`
+// の 1 文字列 (args field は無い)。
 const codexCommands = [
-  "node .ut-tdd/bin/ut-tdd.mjs hook agent-guard",
-  "node .ut-tdd/bin/ut-tdd.mjs hook work-guard",
-  "node .ut-tdd/bin/ut-tdd.mjs session start",
-  "node .ut-tdd/bin/ut-tdd.mjs hook post-tool-use",
-  "node .ut-tdd/bin/ut-tdd.mjs session summary",
+  `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" hook agent-guard`,
+  `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" hook work-guard`,
+  `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" session start`,
+  `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" hook post-tool-use`,
+  `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" session summary`,
 ] as const;
 
 const claudeCommands = [
@@ -27,6 +30,15 @@ function hooksJson(commands: readonly string[]) {
   return JSON.stringify({
     hooks: {
       SessionStart: [{ hooks: commands.map((command) => ({ command })) }],
+    },
+  });
+}
+
+/** Codex 用: `type: "command"` を持つ hooks.json (collectCodexHookInvocations の対象形)。 */
+function codexHooksJson(commands: readonly string[]) {
+  return JSON.stringify({
+    hooks: {
+      SessionStart: [{ hooks: commands.map((command) => ({ type: "command", command })) }],
     },
   });
 }
@@ -56,7 +68,7 @@ function setupSmokeDeps(overrides: Record<string, string | null> = {}): SetupSmo
       ".claude/CLAUDE.md": "# Claude runtime\n",
       ".claude/settings.json": claudeHooksJson(claudeCommands),
       ".codex/config.toml": "[features]\nhooks = true\n",
-      ".codex/hooks.json": claudeHooksJson(codexCommands),
+      ".codex/hooks.json": codexHooksJson(codexCommands),
     }).map(([relativePath, text]) => [join(root, relativePath), text]),
   );
   for (const [relativePath, text] of Object.entries(overrides)) {
@@ -139,10 +151,15 @@ describe("doctor setup-smoke direct checks", () => {
     expect(result.messages.join("\n")).toContain("missing wrapper-placeholder-free");
   });
 
-  it("rejects shell-serialized hooks even when their token text matches the native contract", () => {
+  it("rejects Codex hooks whose command text matches the launcher token but drops the git-root prefix", () => {
+    // PLAN-L7-668 §3.2: 現行 Codex schema には args が無いので、git root 解決 (`$(git rev-parse
+    // --show-toplevel)/`) を外した command は token 文字列としては launcher path を含んでいても
+    // 無効 (unrooted_command_path) として扱われ、setup-smoke の codex-hook 充足を満たさない。
     const result = checkSetupSmoke(
       setupSmokeDeps({
-        ".codex/hooks.json": hooksJson(codexCommands),
+        ".codex/hooks.json": codexHooksJson(
+          codexCommands.map((command) => command.replace(CODEX_GIT_ROOT_PREFIX, "")),
+        ),
       }),
     );
 

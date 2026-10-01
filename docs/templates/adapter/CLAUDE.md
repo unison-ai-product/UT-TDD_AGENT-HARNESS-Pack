@@ -23,7 +23,7 @@ models for judgement.
 | Claude Haiku (`claude-haiku-4-5`) | scouting, triage, lightweight parallel checks | high, small scoped tasks |
 | GPT/Codex worker (`gpt-5.6-terra`) | test implementation lanes | middle |
 | GPT/Codex spark (`gpt-5.3-codex-spark`) | lightweight implementation lanes | high |
-| GPT frontier (`gpt-5.6-sol`) | gated top-tier review/consultation | low |
+| GPT frontier (`gpt-6.1-sol`) | gated top-tier review/consultation | low |
 
 - Give agents the full goal, constraints, and done-criteria in the first turn.
 - Separate creation from judgement: prefer a different model family for review.

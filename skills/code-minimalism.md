@@ -260,3 +260,7 @@ exists**:
 - Martin Fowler, "Yagni" — https://martinfowler.com/bliki/Yagni.html (four hidden costs of building early: build/delay/carry/repair; YAGNI does not apply to refactoring effort)
 - Martin Fowler, "Tolerant Reader" — https://martinfowler.com/bliki/TolerantReader.html (loose coupling to dependency schemas)
 
+
+## zip lineage (PLAN-L7-676 PR-T3)
+
+The judgement in this skill is a near-1:1 English rendering of the corresponding `.claude/skills/vmodel-code-minimalism/SKILL.md` in `Vモデル設計ドキュメント_checked.zip` (Apache-2.0). PR-T3 ported the zip pack as [[vmodel-code-minimalism]] — a thin bridge that indexes the Japanese original's section headings and points back here, rather than duplicating the same decision content twice (docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1).

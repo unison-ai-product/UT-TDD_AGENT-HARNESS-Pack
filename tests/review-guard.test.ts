@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assessReviewSession,
   detectWorkingTreeMutation,
+  isExemptUntrackedMemoryAddition,
   isReadOnlyDelegationRole,
   isReviewCustodyProjection,
   reviewGuardMessages,
@@ -102,6 +103,144 @@ describe("review-guard (IMP-137 / PLAN-L7-85)", () => {
       const a = assessReviewSession({ role: "tl", before: ["a"], after: ["a"] });
       expect(a.violation).toBe(false);
       expect(a.mutatedPaths).toEqual([]);
+    });
+
+    it("U-RGUARD-014: a newly added untracked .ut-tdd/memory/ file (another lane's `ut-tdd memory add`) is NOT a violation (issue #721)", () => {
+      const a = assessReviewSession({
+        role: "blind-reviewer",
+        before: [],
+        after: [".ut-tdd/memory/x.md"],
+        untrackedAdded: [".ut-tdd/memory/x.md"],
+      });
+      expect(a.mutatedPaths).toEqual([]);
+      expect(a.violation).toBe(false);
+    });
+
+    it("U-RGUARD-015: an already-tracked .ut-tdd/memory/ file modified during the session IS a violation (not in untrackedAdded)", () => {
+      const a = assessReviewSession({
+        role: "blind-reviewer",
+        before: [],
+        after: [".ut-tdd/memory/existing.md"],
+        untrackedAdded: [],
+      });
+      expect(a.mutatedPaths).toEqual([".ut-tdd/memory/existing.md"]);
+      expect(a.violation).toBe(true);
+    });
+
+    it("U-RGUARD-016: a newly added untracked file outside .ut-tdd/memory/ IS a violation", () => {
+      const a = assessReviewSession({
+        role: "blind-reviewer",
+        before: [],
+        after: ["src/foo.ts"],
+        untrackedAdded: ["src/foo.ts"],
+      });
+      expect(a.mutatedPaths).toEqual(["src/foo.ts"]);
+      expect(a.violation).toBe(true);
+    });
+
+    it("U-RGUARD-017: review custody projection exemption is unchanged when untrackedAdded is provided", () => {
+      const a = assessReviewSession({
+        role: "blind-reviewer",
+        before: [],
+        after: [
+          ".ut-tdd/review/requests/request.json",
+          ".ut-tdd/memory/new.md",
+          ".ut-tdd/memory/existing.md",
+        ],
+        untrackedAdded: [".ut-tdd/memory/new.md"],
+      });
+      expect(a.mutatedPaths).toEqual([".ut-tdd/memory/existing.md"]);
+      expect(a.violation).toBe(true);
+    });
+  });
+
+  describe("isExemptUntrackedMemoryAddition", () => {
+    it("U-RGUARD-018: exempts only paths under .ut-tdd/memory/ present in untrackedAdded", () => {
+      const untrackedAdded = new Set([".ut-tdd/memory/new.md"]);
+      expect(isExemptUntrackedMemoryAddition(".ut-tdd/memory/new.md", untrackedAdded)).toBe(true);
+      expect(isExemptUntrackedMemoryAddition(".ut-tdd/memory/other.md", untrackedAdded)).toBe(
+        false,
+      );
+      expect(isExemptUntrackedMemoryAddition("src/foo.ts", new Set(["src/foo.ts"]))).toBe(false);
+    });
+
+    it("U-RGUARD-019: a non-ASCII path under .ut-tdd/memory/ (from -z unquoted git output) is exempt (issue #721 Sol r1 FLAG 1)", () => {
+      // mutation check: reinstating a `\` -> `/` normalization step on this path would be a
+      // no-op here (no backslash present) so this test alone does not kill that mutant; it
+      // pins the actual real-world failure mode instead — a legit non-ASCII path must match
+      // containment exactly as produced by the -z loader (see change-impact test group).
+      const path = ".ut-tdd/memory/日本語.md";
+      const untrackedAdded = new Set([path]);
+      expect(isExemptUntrackedMemoryAddition(path, untrackedAdded)).toBe(true);
+    });
+
+    it("U-RGUARD-020: a `./` current-dir segment is not exempt", () => {
+      // mutation check: dropping the "." segment rejection would make this containment match
+      // (string still starts with ".ut-tdd/memory/") and flip the assertion to true.
+      const path = ".ut-tdd/memory/./x.md";
+      expect(isExemptUntrackedMemoryAddition(path, new Set([path]))).toBe(false);
+    });
+
+    it("U-RGUARD-021: a `..` escape segment is not exempt", () => {
+      // mutation check: dropping the ".." segment rejection would make this containment match
+      // (string still starts with ".ut-tdd/memory/") and flip the assertion to true.
+      const path = ".ut-tdd/memory/../../src/x.ts";
+      expect(isExemptUntrackedMemoryAddition(path, new Set([path]))).toBe(false);
+    });
+
+    it("U-RGUARD-022: a backslash inside the path is not exempt (git never emits `\\` as a separator)", () => {
+      // mutation check: reinstating `path.replaceAll("\\", "/")` before the containment check
+      // would turn this into 3 clean segments (.ut-tdd/memory/evil.md) and flip to true.
+      const path = ".ut-tdd/memory/evil\\x.md";
+      expect(isExemptUntrackedMemoryAddition(path, new Set([path]))).toBe(false);
+    });
+
+    it("U-RGUARD-023: a different-case .ut-tdd directory is not exempt (case-sensitive)", () => {
+      // mutation check: comparing segments case-insensitively (e.g. .toLowerCase()) would flip
+      // this to true.
+      const path = ".UT-TDD/memory/x.md";
+      expect(isExemptUntrackedMemoryAddition(path, new Set([path]))).toBe(false);
+    });
+
+    it("U-RGUARD-026: an empty path segment is not exempt and still surfaces as a read-only violation", () => {
+      // mutation check: dropping the empty-segment rejection would exempt `.ut-tdd/memory//x.md`.
+      const path = ".ut-tdd/memory//x.md";
+      expect(isExemptUntrackedMemoryAddition(path, new Set([path]))).toBe(false);
+      const assessment = assessReviewSession({
+        role: "blind-reviewer",
+        before: [],
+        after: [path],
+        untrackedAdded: [path],
+      });
+      expect(assessment.violation).toBe(true);
+    });
+
+    it("U-RGUARD-024: an untracked directory addition exempts each listed file individually (no collapse)", () => {
+      const untrackedAdded = new Set([".ut-tdd/memory/dir/a.md", ".ut-tdd/memory/dir/b.md"]);
+      expect(isExemptUntrackedMemoryAddition(".ut-tdd/memory/dir/a.md", untrackedAdded)).toBe(true);
+      expect(isExemptUntrackedMemoryAddition(".ut-tdd/memory/dir/b.md", untrackedAdded)).toBe(true);
+      // a third file not present in untrackedAdded (e.g. a collapsed/omitted sibling) must not
+      // be exempted by association with its directory.
+      expect(isExemptUntrackedMemoryAddition(".ut-tdd/memory/dir/c.md", untrackedAdded)).toBe(
+        false,
+      );
+    });
+  });
+
+  describe("assessReviewSession — rename of a tracked memory file (issue #721 finding 2)", () => {
+    it("U-RGUARD-025: a tracked memory file replaced via rename is a violation (rename target never appears in untrackedAdded)", () => {
+      // A `git mv` rename shows as `R  old -> new` in porcelain, not `??`; the untracked-added
+      // loader therefore never lists the new path, so it must not be exempted.
+      // mutation check: passing the new path through untrackedAdded (as if renames were
+      // untracked-added) would flip violation to false.
+      const a = assessReviewSession({
+        role: "blind-reviewer",
+        before: [],
+        after: [".ut-tdd/memory/renamed.md"],
+        untrackedAdded: [],
+      });
+      expect(a.mutatedPaths).toEqual([".ut-tdd/memory/renamed.md"]);
+      expect(a.violation).toBe(true);
     });
   });
 

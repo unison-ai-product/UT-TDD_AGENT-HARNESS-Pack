@@ -7,6 +7,12 @@ are marked `signatureCreated=false` in each manifest.
 
 ## Unreleased
 
+### Changed
+
+- License: the project is now distributed under the Apache License, Version 2.0
+  (previously MIT). A `NOTICE` file ships with the clean Pack. Releases up to
+  `v0.2.0-canary.1` remain available under their original MIT terms.
+
 ### Added
 
 - Update-check advisory: `ut-tdd status` compares the harness checkout version
@@ -21,7 +27,7 @@ are marked `signatureCreated=false` in each manifest.
 ### Fixed
 
 - README: quick start now begins from `git clone`, the status badge reflects
-  the public MIT distribution, the wrapper resolution order includes the
+  the public distribution, the wrapper resolution order includes the
   repo-local CLI stage, and two command reference errors are corrected
   (`skill suggest --plan` takes a PLAN id; Codex launches as
   `codex exec -m <model> -`).

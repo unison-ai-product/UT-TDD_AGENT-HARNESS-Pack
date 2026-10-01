@@ -33,6 +33,7 @@ const ALLOWED_BUILD_SCRIPTS = new Set(["scripts/build-node.mjs"]);
 const ALLOWED_CI_SCRIPTS = new Set([
   "scripts/node-generation-ci.mjs",
   "scripts/node-generation-ci-aggregate.mjs",
+  "scripts/pack-canary-acceptance.mjs",
 ]);
 const VITEST_ENTRYPOINT = /\b(?:vitest\s+run|scripts[\\/]run-vitest-snapshot\.ts)\b/;
 

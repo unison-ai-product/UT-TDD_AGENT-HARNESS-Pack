@@ -26,6 +26,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { parseNodeBootstrapReceiptBytes } from "../runtime/node-bootstrap.ts";
 import { ensureDir } from "../shared/fs.ts";
 import {
   applyBranchProtection as applyBranchProtectionImpl,
@@ -33,7 +34,9 @@ import {
   type GhRunner,
 } from "./branch-protection.ts";
 import {
+  admitConsumerLocalRuntime,
   type ConsumerLocalRuntimeAdmission,
+  type ConsumerLocalRuntimeAdmissionInput,
   isConsumerLocalRuntimeAdmission,
 } from "./consumer-local-runtime-admission.ts";
 import {
@@ -42,14 +45,23 @@ import {
   type ConsumerNodeRuntimeBundle,
   type ConsumerNodeRuntimeIdentity,
   type ConsumerNodeRuntimeInstallResult,
+  digestConsumerRuntimeBytes,
+  digestConsumerRuntimeValue,
   installConsumerNodeRuntimeOnFilesystem,
   renderConsumerNodeWrapper,
+  validateConsumerNodeRuntimeBundle,
 } from "./consumer-node-runtime.ts";
+import { verifyConsumerRuntimeReleaseAssets } from "./consumer-runtime-release.ts";
 import {
   bootstrapProjectIdentity,
   PROJECT_IDENTITY_PATH,
   type ProjectIdentityBootstrapResult,
 } from "./project-identity-bootstrap.ts";
+import {
+  admitReleaseAggregate,
+  type ReleaseAggregateAdmissionInput,
+} from "./release-aggregate-admission.ts";
+import type { ReleaseChannelAttestation } from "./release-channel-adapter.ts";
 
 export {
   AUTHORING_TEMPLATE_ARTIFACT_PATHS,
@@ -94,6 +106,7 @@ export {
   type ConsumerNodeRuntimePorts,
   type ConsumerNodeRuntimeReadinessInput,
   type ConsumerRuntimeDenyReason,
+  canonicalJson,
   createConsumerNodeRuntimeFilesystemPorts,
   digestConsumerRuntimeBytes,
   digestConsumerRuntimeValue,
@@ -101,10 +114,19 @@ export {
   installConsumerNodeRuntimeOnFilesystem,
   quarantinePathFor,
   renderConsumerNodeWrapper,
+  SAFE_PRODUCT_ID,
   stagingPathFor,
   validateConsumerNodeRuntimeBundle,
   validateConsumerReadiness,
 } from "./consumer-node-runtime.ts";
+export {
+  buildConsumerRuntimeRelease,
+  type ConsumerRuntimeRelease,
+  type ConsumerRuntimeReleaseAdmissionInput,
+  type ConsumerRuntimeReleaseDocument,
+  ConsumerRuntimeReleaseValidationError,
+  validateConsumerRuntimeRelease,
+} from "./consumer-runtime-release.ts";
 export type { CleanDistributionPlan, ConsumerReadinessPlan, PackSyncPlan } from "./distribution.ts";
 export {
   buildCleanDistributionPlan,
@@ -125,6 +147,28 @@ export {
   type PackAuthoringSmokeResult,
   runPackAuthoringSmoke,
 } from "./pack-authoring-smoke.ts";
+export {
+  admitPackPublication,
+  derivePackPublicationAdmissionApprovalBinding,
+  derivePackPublicationAdmissionIntentIdentity,
+  derivePackPublicationAdmissionRecordDigest,
+  derivePackPublicationPreparationReceiptDigest,
+  PACK_PUBLICATION_ADMISSION_COVERAGE,
+  type PackPublicationAdmissionApprovalReference,
+  type PackPublicationAdmissionConfiguration,
+  type PackPublicationAdmissionInput,
+  type PackPublicationAdmissionLedger,
+  type PackPublicationAdmissionLedgerRecord,
+  type PackPublicationAdmissionObserver,
+  type PackPublicationAdmissionResult,
+  type PackPublicationAdmissionSealedValues,
+  type PackPublicationCheckObservation,
+  type PackPublicationMergeBaseObservation,
+  type PackPublicationPullRequestAdmissionObservation,
+  type PackPublicationRepositoryObservation,
+  type PackPublicationReviewObservation,
+  type PackPublicationSealedStagingObservation,
+} from "./pack-publication-admission.ts";
 export {
   bootstrapProjectIdentity,
   canonicalProjectIdentityBytes,
@@ -178,6 +222,12 @@ export {
   selectRollbackCandidate,
 } from "./release-promotion-rollback-gate.ts";
 
+import {
+  embeddedSkillAssets,
+  ensureSkillAssetsIgnored,
+  materializeSkillAssets,
+} from "../shared/embedded-skills.ts";
+import { rebuildHarnessDb } from "../state-db/projection-writer.ts";
 import { BUILTIN_GITHUB_TEMPLATES, COMMON_FILES, type TemplateSet } from "./templates.ts";
 
 export type { Confirm, GhRunner };
@@ -243,8 +293,260 @@ export interface SetupResult {
   phase: SetupPhase;
   written: string[];
   branchProtection: { applied: boolean; reason: string };
+  notices?: string[];
   projectIdentity?: ProjectIdentityBootstrapResult;
   consumerRuntime?: SetupConsumerRuntimeInstall;
+}
+
+export type ConsumerRuntimeReleaseInstallResult =
+  | { readonly status: "installed"; readonly setup: SetupResult }
+  | { readonly status: "already-installed" };
+
+/** Consumer-side composition for a verified, offline Pack Release runtime. */
+export async function installConsumerRuntimeRelease(input: {
+  readonly releaseDirectory: string;
+  readonly expectedConsumerDigest: string;
+  readonly consumerRoot: string;
+  readonly tag: string;
+  readonly executingModulePath: string;
+  readonly setupDeps: () => SetupDeps;
+}): Promise<ConsumerRuntimeReleaseInstallResult> {
+  const assets = verifyConsumerRuntimeReleaseAssets({
+    releaseDirectory: input.releaseDirectory,
+    tag: input.tag,
+    expectedConsumerDigest: input.expectedConsumerDigest,
+    executingModulePath: input.executingModulePath,
+  });
+  const document = assets.document;
+  const consumerRoot = realpathSync.native(input.consumerRoot);
+  const runtimeRoot = join(consumerRoot, ".ut-tdd", "runtime");
+  const release = document.release;
+  const generation = document.generation;
+  const rawAttestation = document.admission_input.aggregate_input.attestation;
+  const attestation = {
+    status: "attested" as const,
+    releaseId: rawAttestation.releaseId,
+    artifactSourceCommit: rawAttestation.artifactSourceCommit,
+    expectedDigest: rawAttestation.expectedDigest,
+    actualDigest: rawAttestation.actualDigest,
+    entries: rawAttestation.entries.map((entry) => ({
+      path: entry.path,
+      mode: entry.mode,
+      content: Buffer.from(entry.content_base64, "base64"),
+    })),
+  } satisfies Extract<ReleaseChannelAttestation, { status: "attested" }>;
+  const aggregateInput: ReleaseAggregateAdmissionInput = {
+    repository: document.admission_input.aggregate_input.repository,
+    channel: document.admission_input.aggregate_input.channel,
+    finalTree: document.admission_input.aggregate_input.final_tree,
+  };
+  const aggregate = await admitReleaseAggregate(aggregateInput, {
+    attestChannel: async () => attestation,
+  });
+  if (!aggregate.ok) throw new Error(`consumer_runtime_release_aggregate_${aggregate.error}`);
+
+  let nodeReceipt: ReturnType<typeof parseNodeBootstrapReceiptBytes>;
+  try {
+    nodeReceipt = parseNodeBootstrapReceiptBytes(assets.receiptBytes);
+  } catch {
+    throw new Error("consumer_runtime_node_receipt_invalid");
+  }
+  const operationId = `packrt-${digestConsumerRuntimeBytes(
+    Buffer.from(`${release.tag}\0${generation.generation_id}`, "utf8"),
+  ).slice(7, 31)}`;
+  if (hasActiveConsumerRuntime(runtimeRoot)) {
+    assertSameCommittedConsumerRuntime({
+      consumerRoot,
+      runtimeRoot,
+      productId: release.product_id,
+      materializerVersion: release.materializer_version,
+      releaseId: aggregate.plan.releaseId,
+      sourceRevision: release.source_revision,
+      artifactSetDigest: generation.artifact_digest,
+      generationId: generation.generation_id,
+      subjectRevision: generation.subject_revision,
+      compiledEsmDigest: generation.compiled_esm_digest,
+      operationId,
+    });
+    return { status: "already-installed" };
+  }
+
+  const controlManifestBytes = Buffer.from(
+    document.admission_input.control_manifest_base64,
+    "base64",
+  );
+  const artifactIdentity = {
+    materializerVersion: release.materializer_version,
+    releaseId: aggregate.plan.releaseId,
+    sourceRevision: release.source_revision,
+    artifactSetDigest: generation.artifact_digest,
+  };
+  const consumerReceipt = {
+    ...artifactIdentity,
+    productId: release.product_id,
+    consumerRoot,
+    runtimeRoot,
+  };
+  const admissionResult = admitConsumerLocalRuntime({
+    productId: release.product_id,
+    consumerRoot,
+    runtimeRoot,
+    plan: aggregate.plan,
+    manifest: artifactIdentity,
+    receipt: consumerReceipt,
+    controlManifestBytes,
+  } satisfies ConsumerLocalRuntimeAdmissionInput);
+  if (!admissionResult.ok)
+    throw new Error(`consumer_runtime_release_admission_${admissionResult.error}`);
+
+  const identity: ConsumerNodeRuntimeIdentity = {
+    product_id: release.product_id,
+    consumer_root: consumerRoot,
+    runtime_root: runtimeRoot,
+    operation_id: operationId,
+    attempt: 1,
+    generation_id: generation.generation_id,
+    subject_revision: generation.subject_revision,
+    artifact_digest: `sha256:${nodeReceipt.compiled_cli.sha256}`,
+    node_executable_identity: `node-${nodeReceipt.node.version}|sha256:${nodeReceipt.node.sha256}`,
+    package_lock_digest: `sha256:${nodeReceipt.package_lock_sha256}`,
+    source_graph_digest: `sha256:${nodeReceipt.source_graph_sha256}`,
+    compiled_esm_digest: generation.compiled_esm_digest,
+    release_id: aggregate.plan.releaseId,
+    materializer_version: release.materializer_version,
+    artifact_set_digest: generation.artifact_digest,
+    control_manifest_digest: admissionResult.admission.controlManifestSnapshotDigest,
+    sealed_policy: "compiled-esm-only",
+  };
+
+  const setup = await runSetupAsync(
+    {
+      phase: "0-A",
+      dryRun: false,
+      applyBranchProtection: false,
+      consumerRuntime: {
+        identity,
+        admission: admissionResult.admission,
+        compiled_esm: assets.compiledEsmBytes,
+        node_bootstrap_receipt: assets.receiptBytes,
+      },
+    },
+    input.setupDeps(),
+  );
+  const runtimeInstall = setup.consumerRuntime?.result;
+  if (!runtimeInstall?.ok)
+    throw new Error(
+      runtimeInstall && !runtimeInstall.ok
+        ? runtimeInstall.reason
+        : "consumer_runtime_install_failed",
+    );
+  return { status: "installed", setup };
+}
+
+function hasActiveConsumerRuntime(runtimeRoot: string): boolean {
+  return existsSync(join(runtimeRoot, "activation", "active.json"));
+}
+
+function assertSameCommittedConsumerRuntime(input: {
+  readonly consumerRoot: string;
+  readonly runtimeRoot: string;
+  readonly productId: string;
+  readonly materializerVersion: string;
+  readonly releaseId: string;
+  readonly sourceRevision: string;
+  readonly artifactSetDigest: string;
+  readonly generationId: string;
+  readonly subjectRevision: string;
+  readonly compiledEsmDigest: string;
+  readonly operationId: string;
+}): void {
+  try {
+    const pointerPath = join(input.runtimeRoot, "activation", "active.json");
+    const pointer = JSON.parse(readFileSync(pointerPath, "utf8")) as Record<string, unknown>;
+    if (
+      Object.keys(pointer).sort().join("\0") !== "bundle_digest\0bundle_path\0entry_path" ||
+      typeof pointer.bundle_digest !== "string" ||
+      typeof pointer.bundle_path !== "string" ||
+      typeof pointer.entry_path !== "string" ||
+      pointer.bundle_path !== resolve(pointer.bundle_path) ||
+      pointer.entry_path !== resolve(pointer.entry_path)
+    )
+      throw new Error("consumer_runtime_identity_mismatch");
+    const bundlePath = pointer.bundle_path;
+    if (!existsSync(join(bundlePath, "bundle-manifest.json")))
+      throw new Error("consumer_runtime_identity_mismatch");
+    const bundle = JSON.parse(
+      readFileSync(join(bundlePath, "bundle-manifest.json"), "utf8"),
+    ) as ConsumerNodeRuntimeBundle;
+    const bundleError = validateConsumerNodeRuntimeBundle(bundle);
+    if (bundleError) throw new Error("consumer_runtime_identity_mismatch");
+    if (
+      pointer.bundle_digest !== bundle.bundle_digest ||
+      pointer.bundle_path !== bundle.bundle_path ||
+      !sameCanonicalSetupPath(pointer.entry_path, join(bundle.bundle_path, "ut-tdd.mjs"))
+    )
+      throw new Error("consumer_runtime_identity_mismatch");
+    const storedIdentity = bundle.identity;
+    const receiptBytes = readFileSync(join(bundlePath, "consumer-receipt.json"));
+    const storedReceipt = JSON.parse(receiptBytes.toString("utf8")) as Record<string, unknown>;
+    const rawConsumer = storedReceipt.consumer;
+    const storedConsumer =
+      rawConsumer && typeof rawConsumer === "object" && !Array.isArray(rawConsumer)
+        ? (rawConsumer as Record<string, unknown>)
+        : undefined;
+    if (
+      !storedConsumer ||
+      !sameCanonicalSetupPath(String(storedConsumer.consumerRoot ?? ""), input.consumerRoot) ||
+      !sameCanonicalSetupPath(String(storedConsumer.runtimeRoot ?? ""), input.runtimeRoot)
+    )
+      throw new Error("consumer_runtime_receipt_mismatch");
+    if (
+      storedReceipt.identity_digest !== digestConsumerRuntimeValue(storedIdentity) ||
+      storedReceipt.operation_id !== storedIdentity.operation_id ||
+      storedIdentity.product_id !== input.productId ||
+      !sameCanonicalSetupPath(storedIdentity.consumer_root, input.consumerRoot) ||
+      !sameCanonicalSetupPath(storedIdentity.runtime_root, input.runtimeRoot) ||
+      storedConsumer.productId !== storedIdentity.product_id ||
+      storedConsumer.materializerVersion !== storedIdentity.materializer_version ||
+      storedConsumer.releaseId !== storedIdentity.release_id ||
+      storedConsumer.sourceRevision !== storedIdentity.subject_revision ||
+      storedConsumer.artifactSetDigest !== storedIdentity.artifact_set_digest
+    )
+      throw new Error("consumer_runtime_receipt_mismatch");
+    if (!containedReal(realpathSync.native(input.runtimeRoot), realpathSync.native(bundlePath)))
+      throw new Error("consumer_runtime_identity_mismatch");
+    if (storedIdentity.operation_id !== input.operationId)
+      throw new Error("consumer_runtime_update_unsupported");
+    if (
+      storedIdentity.product_id !== input.productId ||
+      storedIdentity.materializer_version !== input.materializerVersion ||
+      storedIdentity.release_id !== input.releaseId ||
+      storedIdentity.subject_revision !== input.sourceRevision ||
+      storedIdentity.artifact_set_digest !== input.artifactSetDigest ||
+      storedIdentity.generation_id !== input.generationId ||
+      storedIdentity.compiled_esm_digest !== input.compiledEsmDigest
+    )
+      throw new Error("consumer_runtime_update_unsupported");
+
+    for (const [name, expectedDigest] of Object.entries(bundle.files)) {
+      const path = join(bundlePath, name);
+      if (!containedReal(realpathSync.native(bundlePath), realpathSync.native(path)))
+        throw new Error("consumer_runtime_identity_mismatch");
+      if (digestConsumerRuntimeBytes(readFileSync(path)) !== expectedDigest)
+        throw new Error("consumer_runtime_identity_mismatch");
+    }
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      [
+        "consumer_runtime_receipt_mismatch",
+        "consumer_runtime_update_unsupported",
+        "consumer_runtime_identity_mismatch",
+      ].some((reason) => error.message.includes(reason))
+    )
+      throw error;
+    throw new Error("consumer_runtime_identity_mismatch");
+  }
 }
 
 /** Sealed runtime input handed from the release materializer to setup. */
@@ -333,10 +635,12 @@ export interface SetupDeps {
   isInteractive: boolean;
   templates: TemplateSet;
   bootstrapProjectIdentity?: () => ProjectIdentityBootstrapResult;
+  initializeHarnessDb?: () => void;
 }
 
 const CODEOWNERS_TARGET = join(".github", "CODEOWNERS");
 const STATE_PATH = join(".ut-tdd", "state", "setup.json");
+const GITIGNORE_PATH = ".gitignore";
 const BP_SCRIPT = join("scripts", "setup-branch-protection.sh");
 const MANAGED_START = "<!-- UT-TDD:managed:start -->";
 const MANAGED_END = "<!-- UT-TDD:managed:end -->";
@@ -599,12 +903,47 @@ export function runSetup(args: SetupArgs, deps: SetupDeps): SetupResult {
   }
   const plan = planSetup(phase, { teams: args.teams, dryRun: args.dryRun });
   const emitted = emitSetup(plan, deps.templates, deps);
+  const ignoreWritten = !args.dryRun
+    ? (() => {
+        materializeSkillAssets(deps.repoRoot, embeddedSkillAssets());
+        const path = join(deps.repoRoot, GITIGNORE_PATH);
+        const existing = deps.readText(path);
+        const next = ensureSkillAssetsIgnored(existing);
+        if (next === existing) return false;
+        deps.writeText(path, next);
+        return true;
+      })()
+    : false;
   const written =
     projectIdentity?.ok && projectIdentity.created ? [projectIdentity.path, ...emitted] : emitted;
+  if (ignoreWritten) written.push(GITIGNORE_PATH);
   const branchProtection = args.dryRun
     ? { applied: false, reason: "dry-run" }
     : applyBranchProtection(plan, deps, { apply: args.applyBranchProtection });
-  return { phase, written, branchProtection, ...(projectIdentity ? { projectIdentity } : {}) };
+  const notices = [
+    "commitlint の依存は consumer 側で選択して導入してください: npm install --save-dev @commitlint/cli @commitlint/config-conventional",
+  ];
+  if (deps.readText(join(deps.repoRoot, "commitlint.config.js")) !== null) {
+    notices.unshift(
+      "warning: 既存の commitlint.config.js は変更・削除せず保持しました。必要なら commitlint.config.cjs への移行を確認してください。",
+    );
+  }
+  if (!args.dryRun && deps.initializeHarnessDb) {
+    try {
+      deps.initializeHarnessDb();
+    } catch {
+      notices.unshift(
+        "warning: harness.db の初期化に失敗しました。session start digest は DEGRADED になる可能性があります。復旧時は `ut-tdd db rebuild` を実行してください。",
+      );
+    }
+  }
+  return {
+    phase,
+    written,
+    branchProtection,
+    notices,
+    ...(projectIdentity ? { projectIdentity } : {}),
+  };
 }
 
 /** Async composition root used when setup is supplied a sealed runtime input. */
@@ -703,7 +1042,7 @@ type RuntimeTreeEntry =
 type RuntimeTreeSnapshot = { readonly entries: ReadonlyMap<string, RuntimeTreeEntry> } | null;
 
 function setupTargetPaths(): readonly string[] {
-  const paths = new Set<string>([PROJECT_IDENTITY_PATH, STATE_PATH]);
+  const paths = new Set<string>([PROJECT_IDENTITY_PATH, STATE_PATH, GITIGNORE_PATH]);
   for (const phase of ["0-A", "0-B"] as const)
     for (const file of planSetup(phase, { dryRun: false }).files) paths.add(file.path);
   return [...paths];
@@ -890,5 +1229,8 @@ export function nodeSetupDeps(repoRoot: string): SetupDeps {
     isInteractive: Boolean(process.stdin.isTTY) && Boolean(process.stderr.isTTY) && !process.env.CI,
     templates: loadTemplates(repoRoot),
     bootstrapProjectIdentity: () => bootstrapProjectIdentity(repoRoot),
+    initializeHarnessDb: () => {
+      rebuildHarnessDb({ repoRoot, skipTokenTelemetry: true });
+    },
   };
 }

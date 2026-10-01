@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   analyzeProgramCoverage,
@@ -113,6 +113,7 @@ export function checkVerificationGroupsResult(repoRoot: string): {
   ok: boolean;
 } {
   try {
+    if (!statSync(repoRoot).isDirectory()) throw new Error("repo root is not a directory");
     const docs = loadPairDocs(repoRoot);
     const { orphans } = analyzePairFreeze(docs);
     const groups = analyzeVerificationGroups(docs, orphans, loadVerificationPlanEvidence(repoRoot));

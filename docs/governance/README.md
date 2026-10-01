@@ -25,7 +25,7 @@ V-model 機構の正本 (中核 5 点への追加読み。repository-structure.m
 > `repository-structure.md` §1、PLAN-L7-459 H1)。CLAUDE.md 側は起動時の最小読み順、
 > 本リストは文書体系の完全な正本索引。
 
-> **ADR-001 境界**: 実装は UT-TDD 所有の TypeScript/Bun である。migration
+> **ADR-001 境界**: 実装は UT-TDD 所有の TypeScript/Node である (Node authority sealed、Bun は永久禁止 #134)。migration
 > docs と source snapshots は porting audit と regression idea の参照資料に限る。
 > これらは現行の正本でも実行経路でもない。
 

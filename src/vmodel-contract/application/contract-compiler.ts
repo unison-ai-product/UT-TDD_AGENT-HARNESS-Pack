@@ -29,6 +29,10 @@ export interface CompiledVerificationObligation {
   planId: string;
   layer: string;
   gate: string;
+  pairLayers: string[];
+  requiredArtifacts: string[];
+  evidenceFamilies: string[];
+  approvalRole: string;
   governanceArtifact: string;
   caseIdPrefix: string;
   evidenceManifest: string;
@@ -99,6 +103,10 @@ function compileLayer(value: unknown): CompiledVerificationObligation {
   const gate = requiredString(layer, "gate", layerId);
   if (gate !== expectedGate)
     throw new Error(`${layerId}.gate expected=${expectedGate} actual=${gate}`);
+  const pairLayers = stringArray(layer, "pair_layers", layerId);
+  const requiredArtifacts = stringArray(layer, "required_artifacts", layerId);
+  const evidenceFamilies = stringArray(layer, "evidence_families", layerId);
+  const approvalRole = requiredString(layer, "approval_role", layerId);
   const planId = requiredString(layer, "verification_plan_id", layerId);
   if (!planId.startsWith(`PLAN-${layerId}-`)) {
     throw new Error(`${layerId}.verification_plan_id must start with PLAN-${layerId}-`);
@@ -116,6 +124,10 @@ function compileLayer(value: unknown): CompiledVerificationObligation {
     planId,
     layer: layerId,
     gate,
+    pairLayers,
+    requiredArtifacts,
+    evidenceFamilies,
+    approvalRole,
     governanceArtifact,
     caseIdPrefix,
     evidenceManifest,

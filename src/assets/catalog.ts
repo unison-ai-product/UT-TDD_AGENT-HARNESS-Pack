@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { upsertSearchReference } from "../search/index.ts";
+import { resolveSkillFiles } from "../shared/embedded-skills.ts";
 import type { HarnessDb } from "../state-db/index.ts";
 import { upsertRow } from "../state-db/index.ts";
 
@@ -212,13 +213,15 @@ export function scanSkillCatalog(
   const findings: AssetCatalogFinding[] = [];
   const entries: SkillCatalogEntry[] = [];
 
-  for (const scanRoot of roots) {
-    const requiredRoot = join(repoRoot, scanRoot);
-    for (const path of assetFiles(requiredRoot).filter((path) => /\.md$/i.test(path))) {
-      const entry = skillCatalogEntry(repoRoot, path);
-      if ("kind" in entry) findings.push(entry);
-      else entries.push(entry);
-    }
+  const primaryFiles = input.root
+    ? assetFiles(join(repoRoot, roots[0] ?? "")).filter((path) => /\.md$/i.test(path))
+    : resolveSkillFiles(repoRoot)
+        .map((entry) => entry.absolutePath)
+        .filter((path) => /\.md$/i.test(path));
+  for (const path of primaryFiles) {
+    const entry = skillCatalogEntry(repoRoot, path);
+    if ("kind" in entry) findings.push(entry);
+    else entries.push(entry);
   }
 
   for (const optionalRoot of optionalRoots) {
@@ -329,10 +332,16 @@ export function catalogAutomationAssets(input: CatalogAutomationAssetsInput): As
   const sources = assetSources(repoRoot);
 
   for (const source of sources) {
-    const root = join(repoRoot, source.root);
-    for (const path of assetFiles(root)) {
+    const files =
+      source.type === "skill"
+        ? resolveSkillFiles(repoRoot).map((entry) => entry.absolutePath)
+        : assetFiles(join(repoRoot, source.root));
+    for (const path of files) {
       const rel = normalizeRel(relative(repoRoot, path));
-      if (!sources.some((allowed) => rel === allowed.root || rel.startsWith(`${allowed.root}/`))) {
+      if (
+        source.type !== "skill" &&
+        !sources.some((allowed) => rel === allowed.root || rel.startsWith(`${allowed.root}/`))
+      ) {
         const finding: AssetCatalogFinding = {
           kind: "invalid-root",
           severity: "error",

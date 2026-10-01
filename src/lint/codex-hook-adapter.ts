@@ -23,7 +23,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CODEX_REQUIRED } from "./codex-hook-adapter-policy.ts";
-import { invocationEquals, parseHookInvocation } from "./hook-invocation.ts";
+import {
+  type CodexCommandStringReason,
+  invocationEquals,
+  parseCodexCommandString,
+  parseHookInvocation,
+} from "./hook-invocation.ts";
 import { REQUIRED as CLAUDE_REQUIRED, FORBIDDEN_PATH_RE } from "./project-hook.ts";
 
 export { CODEX_REQUIRED };
@@ -67,16 +72,32 @@ export type CodexHookViolationReason =
   | "missing_hooks_json"
   | "malformed_json"
   | "missing_hook"
-  | "missing_block_on_failure"
   | "claude_project_dir_in_codex"
   | "global_codex_path"
   | "forbidden_path"
-  | "entrypoint_drift";
+  | "entrypoint_drift"
+  | CodexCommandStringReason
+  | "unsupported_hook_field";
 
 export interface CodexHookViolation {
   hook?: string;
   reason: CodexHookViolationReason;
+  field?: string;
 }
+
+/**
+ * PLAN-L7-668 §3.1: 現行 Codex の command handler が受理する field はこれだけ。
+ * `args` / `blockOnFailure` / `commandWindows` を含む、これ以外の field は
+ * 無音で無視される (Issue #668 の原因) ので typed finding で fail-close する。
+ */
+const ALLOWED_HOOK_FIELDS = new Set([
+  "type",
+  "command",
+  "timeout",
+  "statusMessage",
+  "async",
+  "additionalContextLimit",
+]);
 
 export interface CodexHookResult {
   checked: number;
@@ -88,8 +109,7 @@ export interface CodexHookResult {
 interface HookCommand {
   type?: string;
   command?: unknown;
-  args?: unknown;
-  blockOnFailure?: boolean;
+  [field: string]: unknown;
 }
 
 interface HookEntry {
@@ -107,10 +127,10 @@ function matcherEq(actual: string | undefined, expected: string | undefined): bo
 }
 
 /**
- * command が必須 entrypoint を本当に呼んでいるかを照合する。素朴な substring 一致は
- * `echo src/cli.ts ...` のような無関係文字列を誤って guard 充足と判定しうる (cross-runtime
- * review Important)。そこで script path 部 (空白を含まない part) は **token 完全一致**、複数語の
- * subcommand 部 (`session start` 等) は部分一致で照合する。
+ * command が必須 entrypoint を本当に呼んでいるかを照合する。PLAN-L7-668 §3 の固定形式
+ * (`node "$(git rev-parse --show-toplevel)/<script>" [固定引数...]`) を
+ * `parseCodexCommandString` で正規化し、その `args` (`[scriptPath, ...固定引数]`) を
+ * `sourceArgs` / `wrapperArgs` と token 完全一致で照合する。
  */
 export function analyzeCodexHookAdapter(input: { codexHooksJson: string | null }): CodexHookResult {
   if (input.codexHooksJson === null) {
@@ -145,27 +165,39 @@ export function analyzeCodexHookAdapter(input: { codexHooksJson: string | null }
     }
   }
 
-  // 全 command を走査して repo-relative 原則違反 / legacy / global codex 参照を検出。
+  // 全 command hook を走査して schema 外 field (PLAN-L7-668 §3.1) / repo-relative 原則違反 /
+  // legacy / global codex 参照 / command 文字列の形式 (§3.2) を検出する。
   for (const [event, entries] of Object.entries(hooks)) {
     for (const entry of entries ?? []) {
       for (const hook of entry.hooks ?? []) {
+        if (hook.type !== "command") continue;
+        for (const field of Object.keys(hook)) {
+          if (!ALLOWED_HOOK_FIELDS.has(field)) {
+            violations.push({ hook: event, reason: "unsupported_hook_field", field });
+          }
+        }
         const invocation = parseHookInvocation(hook);
-        if (!invocation) continue;
-        const command = invocation.display;
-        if (command.includes("$CLAUDE_PROJECT_DIR")) {
-          violations.push({ hook: event, reason: "claude_project_dir_in_codex" });
+        if (invocation) {
+          const command = invocation.display;
+          if (command.includes("$CLAUDE_PROJECT_DIR")) {
+            violations.push({ hook: event, reason: "claude_project_dir_in_codex" });
+          }
+          if (CODEX_GLOBAL_RE.test(command)) {
+            violations.push({ hook: event, reason: "global_codex_path" });
+          }
+          if (FORBIDDEN_PATH_RE.test(command)) {
+            violations.push({ hook: event, reason: "forbidden_path" });
+          }
         }
-        if (CODEX_GLOBAL_RE.test(command)) {
-          violations.push({ hook: event, reason: "global_codex_path" });
-        }
-        if (FORBIDDEN_PATH_RE.test(command)) {
-          violations.push({ hook: event, reason: "forbidden_path" });
+        const parsedCommand = parseCodexCommandString(hook.command);
+        if (!parsedCommand.ok && parsedCommand.reason) {
+          violations.push({ hook: event, reason: parsedCommand.reason });
         }
       }
     }
   }
 
-  // 各 Codex 必須ガードが宣言され、guard は blockOnFailure を持つこと。
+  // 各 Codex 必須ガードが宣言されていること。
   for (const required of CODEX_REQUIRED) {
     const entries = (hooks[required.event] ?? []).filter((entry) =>
       matcherEq(entry.matcher, required.matcher),
@@ -173,30 +205,24 @@ export function analyzeCodexHookAdapter(input: { codexHooksJson: string | null }
     const matchingCommands = entries
       .flatMap((entry) => entry.hooks ?? [])
       // type==="command" の hook のみが guard を充足しうる (非 command エントリで偽充足させない)。
-      // source 配線 (node 直起動、PR-C で launcher shim 撤去) と setup 生成 wrapper 配線を
-      // 受理する。いずれも shell 文字列でなく node + argv の完全一致に限定し、
-      // Windows shell host を再導入させない。
+      // source 配線 (repo-relative script) と setup 生成 wrapper 配線を受理する。
       .filter((hook) => {
         if (hook.type !== "command") return false;
-        const invocation = parseHookInvocation(hook);
+        const parsedCommand = parseCodexCommandString(hook.command);
+        if (!parsedCommand.ok || !parsedCommand.invocation) return false;
         return (
-          invocation !== null &&
-          (invocationEquals(invocation, {
+          invocationEquals(parsedCommand.invocation, {
             executable: "node",
             args: [...required.sourceArgs],
           }) ||
-            invocationEquals(invocation, {
-              executable: "node",
-              args: [...required.wrapperArgs],
-            }))
+          invocationEquals(parsedCommand.invocation, {
+            executable: "node",
+            args: [...required.wrapperArgs],
+          })
         );
       });
     if (matchingCommands.length === 0) {
       violations.push({ hook: required.id, reason: "missing_hook" });
-      continue;
-    }
-    if (required.blockOnFailure && !matchingCommands.some((hook) => hook.blockOnFailure === true)) {
-      violations.push({ hook: required.id, reason: "missing_block_on_failure" });
     }
   }
 

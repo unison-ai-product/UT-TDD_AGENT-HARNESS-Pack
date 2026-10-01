@@ -66,6 +66,7 @@ import type { ProjectionEvent } from "../projection/contracts/projection-store.t
 import { type ProjectedPlan, projectPlanSources } from "../projection/domain/plan-projection.ts";
 import { HARNESS_DB_TABLES } from "../schema/harness-db.ts";
 import { workflowModeForPlan as catalogWorkflowModeForPlan } from "../schema/mode-catalog.ts";
+import { materializeSkillAssets, resolveSkillFiles } from "../shared/embedded-skills.ts";
 import { normalizePath } from "../shared/source-text.ts";
 import { stableId } from "../stable-id.ts";
 import { analyzePairFreeze, loadPairDocs, type PairOrphanReason } from "../vmodel/lint.ts";
@@ -725,8 +726,8 @@ export function projectTokenUsage(db: HarnessDb, usages: RunUsage[]): void {
 }
 
 /**
- * repo スコープの session ディレクトリを解決する (env override > OS default)。doctor 経路
- * (`projectRuntimeModelTelemetryForDoctor`、src/doctor/db-projection.ts) と同じ解決順を踏襲する。
+ * repo スコープの session ディレクトリを解決する (env override > OS default)。
+ * Stop / doctor の常時 scan は Issue #789 PR-1 で退役し、手動側の整理は PR-2 が所有する。
  */
 function repoScopedSessionDirs(): SessionScanDirs {
   return {
@@ -2266,17 +2267,18 @@ function assetFiles(dir: string, extensions: RegExp): string[] {
 
 function projectAutomationAssets(repoRoot: string, db: HarnessDb): void {
   const indexedAt = nowIso();
-  const skillRoot = existsSync(join(repoRoot, "skills"))
-    ? join(repoRoot, "skills")
-    : join(repoRoot, "docs", "skills");
   const sources = [
-    { type: "skill", root: skillRoot, exts: /\.(md|ya?ml)$/i },
+    { type: "skill", root: "", exts: /\.(md|ya?ml)$/i },
     { type: "roster", root: join(repoRoot, ".claude", "agents"), exts: /\.md$/i },
     { type: "command", root: join(repoRoot, "docs", "commands"), exts: /\.md$/i },
   ] as const;
   let assetCount = 0;
   for (const source of sources) {
-    for (const path of assetFiles(source.root, source.exts)) {
+    const files =
+      source.type === "skill"
+        ? resolveSkillFiles(repoRoot).map((entry) => entry.absolutePath)
+        : assetFiles(source.root, source.exts);
+    for (const path of files) {
       const rel = normalizePath(relative(repoRoot, path));
       const content = readFileSync(path, "utf8");
       const metadata = metadataFromContent(path, content);
@@ -2621,6 +2623,7 @@ function projectScreens(repoRoot: string, db: HarnessDb): void {
 
 export function rebuildHarnessDb(input: RebuildHarnessDbInput = {}): RebuildHarnessDbResult {
   const repoRoot = input.repoRoot ?? process.cwd();
+  materializeSkillAssets(repoRoot);
   const ownsDb = input.db === undefined;
   const db = input.db ?? openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
   const timings: ProjectionTiming[] = [];

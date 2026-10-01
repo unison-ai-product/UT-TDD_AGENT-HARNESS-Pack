@@ -40,12 +40,21 @@ export interface PlanRevisionManifest {
     readonly branch: string;
     readonly status?: PlanAdmissionRequest["status"];
     readonly sub_doc?: PlanAdmissionRequest["subDoc"];
-    readonly issue?: {
-      readonly provider: "github";
-      readonly issue_id: number;
-      readonly episode_id: string;
-      readonly projection_digest: string;
-    };
+    /** PLAN-L7-690 §2.1: projected は非全ゼロdigest必須、unprojectedはdigestを持たない。 */
+    readonly issue?:
+      | {
+          readonly provider: "github";
+          readonly issue_id: number;
+          readonly episode_id: string;
+          readonly projection_state: "projected";
+          readonly projection_digest: string;
+        }
+      | {
+          readonly provider: "github";
+          readonly issue_id: number;
+          readonly episode_id: string;
+          readonly projection_state: "unprojected";
+        };
     readonly origin?: {
       readonly plan_id: string;
       readonly revision: number;

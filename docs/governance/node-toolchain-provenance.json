@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "runtime": "node",
+  "node": { "version": "v24.13.0", "authority": "reviewed-toolchain" },
+  "npm": { "version": "11.6.2", "authority": "bundled-cli" },
+  "platforms": {
+    "win32-x64": {
+      "node_executable_sha256": "d14ba95cdce1ef7dc9ad3ac74949ca5db38b27378ee30f30a23cf26f9e875a11",
+      "npm_cli_sha256": "3ce7cba6f5128dd5f54c98b6a5036b0f850496878cc2e21044b675fe3c594e3e"
+    },
+    "linux-x64": {
+      "node_executable_sha256": "53fb205ae78805130177e24bcb459a69a1518c8d98f8965f31d85aae7ea840fc",
+      "npm_cli_sha256": "8e5f6f3429f8cdbe693cdc29904e9d5a7b127a494bd15c804bd54c7403bfcbe7"
+    }
+  },
+  "build": {
+    "policy": "compiled-esm-only",
+    "builder": "esbuild"
+  }
+}

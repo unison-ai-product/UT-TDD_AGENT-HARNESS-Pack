@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   cpSync,
@@ -13,12 +13,26 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { stringify } from "yaml";
+import { collectDistributionCandidatePaths } from "../src/cli/distribution.ts";
+import { CODEX_GIT_ROOT_PREFIX } from "../src/lint/hook-invocation.ts";
+import {
+  deriveArtifactInventoryDigest,
+  deriveReleaseId,
+  deriveReleaseRecordDigest,
+} from "../src/schema/release-manifest.ts";
 import {
   buildCleanDistributionPlan,
   cleanDistributionSourcePath,
+  digestConsumerRuntimeBytes,
   gitAddPathspecCommands,
+  materializeReleaseArtifacts,
   transformCleanDistributionArtifact,
 } from "../src/setup/index.ts";
+import {
+  createLocalGitObjectReader,
+  resolveReleaseArtifacts,
+} from "../src/setup/release-artifact-resolver.ts";
 import { removeTestTree } from "./support/temp-tree.ts";
 
 const repoRoot = process.cwd();
@@ -49,6 +63,10 @@ function runNode(cwd: string, args: string[], env: NodeJS.ProcessEnv = process.e
     env,
     timeout: 300_000,
   });
+}
+
+function runGit(cwd: string, args: string[]): void {
+  execFileSync("git", args, { cwd, stdio: "ignore" });
 }
 
 // Issue #506: node-toolchain equivalent of `bun install --frozen-lockfile` /
@@ -129,6 +147,50 @@ function createCleanDistributionFixture(): string {
 }
 
 describe("clean distribution local acceptance smoke", () => {
+  it("source candidates use the HEAD tree and exclude untracked allowed-prefix files", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-distribution-candidates-"));
+    try {
+      mkdirSync(join(root, "scripts"), { recursive: true });
+      writeFileSync(join(root, "scripts", "tracked.ts"), "export {}\n", "utf8");
+      writeFileSync(join(root, "scripts", "untracked.ts"), "secret workspace state\n", "utf8");
+      runGit(root, ["init", "--quiet"]);
+      runGit(root, ["config", "user.email", "test@example.invalid"]);
+      runGit(root, ["config", "user.name", "UT test"]);
+      runGit(root, ["add", "scripts/tracked.ts"]);
+      runGit(root, ["commit", "--quiet", "-m", "fixture"]);
+
+      expect(collectDistributionCandidatePaths(root)).toEqual(["scripts/tracked.ts"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("Git work trees without a committed HEAD fail closed instead of using workspace files", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-distribution-unborn-head-"));
+    try {
+      mkdirSync(join(root, "scripts"), { recursive: true });
+      writeFileSync(join(root, "scripts", "untracked.ts"), "workspace state\n", "utf8");
+      runGit(root, ["init", "--quiet"]);
+
+      expect(() => collectDistributionCandidatePaths(root)).toThrow(
+        "Git work tree has no readable HEAD tree",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("clean unpacked trees use the filesystem candidate fallback without Git HEAD", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-distribution-clean-tree-"));
+    try {
+      mkdirSync(join(root, "scripts"), { recursive: true });
+      writeFileSync(join(root, "scripts", "pack-entry.js"), "console.log('ok')\n", "utf8");
+      expect(collectDistributionCandidatePaths(root)).toEqual(["scripts/pack-entry.js"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("PLAN-L7-413 D-1: sync-stage is idempotent when the outDir already has its manifest", () => {
     const cleanRoot = createCleanDistributionFixture();
     const stageDir = join(cleanRoot, ".stage");
@@ -223,7 +285,7 @@ describe("clean distribution local acceptance smoke", () => {
     }
   }, 120_000);
 
-  it("U-SETUP-013 / U-SETUP-014 / AT-DIST-001: clean artifact installs and exposes the same core CLI surfaces", () => {
+  it("U-PACKRT-011 / U-SETUP-013 / U-SETUP-014 / AT-DIST-001: clean artifact installs and exposes the same core CLI surfaces", async () => {
     const sourcePlan = buildCleanDistributionPlan({
       paths: walkCandidatePaths(repoRoot),
       sourceTag: "v0.1.0",
@@ -236,7 +298,31 @@ describe("clean distribution local acceptance smoke", () => {
     expect(plan.missingRequired).toEqual([]);
     expect(plan.denylistViolations).toEqual([]);
 
+    // PLAN-L7-628: the producer builds from tagged source, independently of
+    // the unchanged clean tarball. PR-2c adds tracked text-loader build inputs.
+    const vmodelBuildInputs = execFileSync(
+      "git",
+      [
+        "ls-files",
+        "-z",
+        "--",
+        "docs/templates/vmodel",
+        "docs/governance/vmodel-document-catalog.md",
+      ],
+      { cwd: repoRoot, encoding: "utf8" },
+    )
+      .split("\0")
+      .filter(
+        (path) =>
+          path === "docs/governance/vmodel-document-catalog.md" ||
+          (path.startsWith("docs/templates/vmodel/") &&
+            path.endsWith(".md") &&
+            !path.startsWith("docs/templates/vmodel/review-examples/")),
+      );
+    expect(vmodelBuildInputs.length).toBeGreaterThan(0);
+
     const cleanRoot = mkdtempSync(join(tmpdir(), "ut-tdd-clean-acceptance-"));
+    const injectedHome = mkdtempSync(join(tmpdir(), "ut-tdd-acceptance-home-"));
     try {
       const sourcePaths = walkCandidatePaths(repoRoot);
       for (const rel of plan.artifactPaths) {
@@ -249,6 +335,101 @@ describe("clean distribution local acceptance smoke", () => {
           cpSync(from, to, { recursive: true });
         }
       }
+      // Node generation の sealed receipt は、clean Pack の出荷集合からは除外される
+      // governance provenance を source checkout 側で照合する。tagged source fixture
+      // にはその既存 artifact だけを追加し、tar の clean artifact 集合には入れない。
+      const provenance = "docs/governance/node-toolchain-provenance.json";
+      const provenancePath = join(cleanRoot, provenance);
+      mkdirSync(dirname(provenancePath), { recursive: true });
+      cpSync(join(repoRoot, provenance), provenancePath);
+      cpSync(join(repoRoot, "tsconfig.node.json"), join(cleanRoot, "tsconfig.node.json"));
+      for (const path of vmodelBuildInputs) {
+        const destination = join(cleanRoot, path);
+        mkdirSync(dirname(destination), { recursive: true });
+        cpSync(join(repoRoot, path), destination);
+      }
+
+      // PR-1 の package は、workspace の現在状態ではなく実在 tag が指す
+      // release revision C2 を入力にする。C1 は artifact source、C2 は
+      // release/manifest.yaml だけを追加した release commit として作る。
+      const fixtureArtifact = Buffer.from("export const fixture = true;\n", "utf8");
+      mkdirSync(join(cleanRoot, "releases", "canary"), { recursive: true });
+      writeFileSync(join(cleanRoot, "releases", "canary", "entry.ts"), fixtureArtifact);
+      runGit(cleanRoot, ["init", "--quiet"]);
+      runGit(cleanRoot, ["config", "user.email", "test@example.invalid"]);
+      runGit(cleanRoot, ["config", "user.name", "UT test"]);
+      runGit(cleanRoot, ["remote", "add", "origin", "https://github.com/example/consumer.git"]);
+      runGit(cleanRoot, ["add", "--", "."]);
+      runGit(cleanRoot, ["commit", "--quiet", "-m", "fixture artifact"]);
+      const trackedBuildInputs = execFileSync("git", ["ls-files", "-z"], {
+        cwd: cleanRoot,
+        encoding: "utf8",
+      }).split("\0");
+      for (const path of vmodelBuildInputs) expect(trackedBuildInputs).toContain(path);
+      const artifactCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: cleanRoot,
+        encoding: "utf8",
+      }).trim();
+      const resolved = await resolveReleaseArtifacts(
+        {
+          repository: cleanRoot,
+          release: {
+            releaseId: `rel-sha256:${"0".repeat(64)}`,
+            materializerVersion: "1",
+            artifactSourceCommit: artifactCommit,
+            artifactSetDigest: `sha256:${"0".repeat(64)}`,
+          },
+        },
+        { git: createLocalGitObjectReader(), materialize: materializeReleaseArtifacts },
+      );
+      if (!resolved.ok) throw new Error(`fixture artifact resolution failed: ${resolved.error}`);
+      const artifactSetDigest = resolved.digest;
+      const publicationArtifacts = resolved.entries.map((item) => {
+        if (item.mode !== "100644" && item.mode !== "100755")
+          throw new Error("publication fixture mode is not supported");
+        return {
+          sourcePath: item.path,
+          destinationPath: item.path,
+          mode: item.mode,
+          size: item.content.length,
+          contentDigest: digestConsumerRuntimeBytes(item.content),
+        };
+      });
+      const publicationBase = {
+        materializerVersion: "1",
+        artifactSourceCommit: artifactCommit,
+        artifactSetDigest,
+        artifactInventoryDigest: deriveArtifactInventoryDigest(publicationArtifacts),
+        releaseAssetInventoryDigest: `sha256:${"c".repeat(64)}`,
+        artifacts: publicationArtifacts,
+      };
+      const releaseId = deriveReleaseId("1", artifactCommit, artifactSetDigest);
+      const manifest = {
+        schema_version: "v2" as const,
+        releases: {
+          [releaseId]: {
+            ...publicationBase,
+            releaseRecordDigest: deriveReleaseRecordDigest(publicationBase),
+          },
+        },
+        channels: { canary: releaseId, stable: releaseId },
+        channelOrder: ["canary", "stable"],
+      };
+      mkdirSync(join(cleanRoot, "release"), { recursive: true });
+      writeFileSync(join(cleanRoot, "release", "manifest.yaml"), stringify(manifest), "utf8");
+      runGit(cleanRoot, ["add", "--", "release/manifest.yaml"]);
+      runGit(cleanRoot, ["commit", "--quiet", "-m", "release manifest"]);
+      const releaseCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: cleanRoot,
+        encoding: "utf8",
+      }).trim();
+      runGit(cleanRoot, ["tag", "v0.0.0-accept"]);
+      expect(
+        execFileSync("git", ["rev-parse", "--verify", "refs/tags/v0.0.0-accept^{commit}"], {
+          cwd: cleanRoot,
+          encoding: "utf8",
+        }).trim(),
+      ).toMatch(/^[a-f0-9]{40}$/);
 
       const fakeCodex = writeFakeCodex(cleanRoot);
       writeLocalUtTddShim(cleanRoot);
@@ -258,11 +439,23 @@ describe("clean distribution local acceptance smoke", () => {
         // PLAN-L7-362: staged root には cache が無いため、status の update-check advisory が
         // 実 remote へ問い合わせないよう opt-out する (テスト決定論)。
         UT_TDD_SKIP_UPDATE_CHECK: "1",
+        HOME: injectedHome,
+        USERPROFILE: injectedHome,
         PATH: `${join(cleanRoot, ".fake-bin")}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
       };
 
       const install = runNpm(cleanRoot, ["ci", "--no-audit", "--no-fund"], env);
       expect(install.status, install.stderr || install.stdout).toBe(0);
+      const tagAfterInstall = runNode(
+        cleanRoot,
+        [
+          "-e",
+          "const { spawnSync } = require('node:child_process'); const r = spawnSync('git', ['rev-parse', '--verify', 'refs/tags/v0.0.0-accept^{commit}'], { encoding: 'utf8' }); process.stdout.write(JSON.stringify({ status: r.status, stdout: r.stdout, stderr: r.stderr }));",
+        ],
+        env,
+      );
+      expect(tagAfterInstall.status, tagAfterInstall.stderr || tagAfterInstall.stdout).toBe(0);
+      expect(JSON.parse(tagAfterInstall.stdout).stdout.trim()).toMatch(/^[a-f0-9]{40}$/);
       const packPackageJson = JSON.parse(readFileSync(join(cleanRoot, "package.json"), "utf8")) as {
         scripts: Record<string, string>;
       };
@@ -285,13 +478,7 @@ describe("clean distribution local acceptance smoke", () => {
       const codexHooks = JSON.parse(
         readFileSync(join(cleanRoot, "docs/templates/adapter/.codex/hooks.json"), "utf8"),
       ) as {
-        hooks: Record<
-          string,
-          {
-            matcher?: string;
-            hooks: { command: string; args?: string[]; blockOnFailure?: boolean }[];
-          }[]
-        >;
+        hooks: Record<string, { matcher?: string; hooks: { command: string }[] }[]>;
       };
       expect(codexHooks.hooks.PreToolUse).toEqual(
         expect.arrayContaining([
@@ -299,9 +486,7 @@ describe("clean distribution local acceptance smoke", () => {
             matcher: "spawn_agent|spawn_agents_on_csv",
             hooks: [
               expect.objectContaining({
-                command: "node",
-                args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "agent-guard"],
-                blockOnFailure: true,
+                command: `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" hook agent-guard`,
               }),
             ],
           }),
@@ -309,9 +494,7 @@ describe("clean distribution local acceptance smoke", () => {
             matcher: "apply_patch|write_file",
             hooks: [
               expect.objectContaining({
-                command: "node",
-                args: [".ut-tdd/bin/ut-tdd.mjs", "hook", "work-guard"],
-                blockOnFailure: true,
+                command: `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" hook work-guard`,
               }),
             ],
           }),
@@ -399,9 +582,39 @@ describe("clean distribution local acceptance smoke", () => {
       expect(pkg.status, pkg.stderr || pkg.stdout).toBe(0);
       const pkgJson = JSON.parse(pkg.stdout);
       expect(pkgJson.ok).toBe(true);
-      expect(pkgJson.tar.exitCode).toBe(0);
+      expect(pkgJson.sourceRevision).toBe(artifactCommit);
+      expect(pkgJson.sourceRevision).not.toBe(releaseCommit);
+      expect(readdirSync(releaseDir).sort()).toEqual([
+        "v0.0.0-accept.consumer-runtime.json",
+        "v0.0.0-accept.consumer.sha256",
+        "v0.0.0-accept.tar.gz",
+        "v0.0.0-accept.tar.gz.sha256",
+        "v0.0.0-accept.ut-tdd.mjs",
+      ]);
       expect(existsSync(join(releaseDir, "v0.0.0-accept.tar.gz"))).toBe(true);
       expect(existsSync(join(releaseDir, "v0.0.0-accept.tar.gz.sha256"))).toBe(true);
+      const runtime = JSON.parse(
+        readFileSync(join(releaseDir, "v0.0.0-accept.consumer-runtime.json"), "utf8"),
+      ) as {
+        release: {
+          tag: string;
+          source_revision: string;
+          materializer_version: string;
+          product_id: string;
+        };
+        generation: { subject_revision: string };
+        admission_input: { aggregate_input: { attestation: { artifactSourceCommit: string } } };
+      };
+      expect(runtime.release).toEqual({
+        tag: "v0.0.0-accept",
+        source_revision: artifactCommit,
+        materializer_version: "1",
+        product_id: "ut-tdd",
+      });
+      expect(runtime.generation.subject_revision).toBe(artifactCommit);
+      expect(runtime.admission_input.aggregate_input.attestation.artifactSourceCommit).toBe(
+        artifactCommit,
+      );
 
       const setup = runNode(cleanRoot, ["src/cli.ts", "setup", "--solo"], env);
       expect(setup.status, setup.stderr || setup.stdout).toBe(0);
@@ -418,6 +631,7 @@ describe("clean distribution local acceptance smoke", () => {
       expect(typecheck.status, typecheck.stderr || typecheck.stdout).toBe(0);
     } finally {
       removeCleanRoot(cleanRoot);
+      removeCleanRoot(injectedHome);
     }
   }, 420_000);
 });

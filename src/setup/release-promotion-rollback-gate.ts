@@ -17,10 +17,11 @@ import {
   type ReleaseManifest,
   resolveReleaseChannel,
 } from "../schema/release-manifest.ts";
-import type {
-  ReleaseAggregateApplyResult,
-  ReleaseChannelMapping,
-  SealedReleaseAggregatePlan,
+import {
+  publicationMappingsMatchArtifacts,
+  type ReleaseAggregateApplyResult,
+  type ReleaseChannelMapping,
+  type SealedReleaseAggregatePlan,
 } from "./release-aggregate-admission.ts";
 import type { ReleaseChannelAttestation } from "./release-channel-adapter.ts";
 
@@ -100,7 +101,7 @@ export interface PromotionGateInput {
   readonly currentRelease: ReleaseIdentity;
   readonly targetChannel: string;
   readonly release: ReleaseIdentity;
-  readonly mapping: ReleaseChannelMapping;
+  readonly mappings: readonly ReleaseChannelMapping[];
   readonly sealedPlan: SealedReleaseAggregatePlan;
   readonly exactHeadSha: string;
   readonly planRevision: string;
@@ -236,7 +237,7 @@ function validIdentity(value: unknown): value is ReleaseIdentity {
 function validManifest(value: unknown): value is ReleaseManifest {
   return (
     isRecord(value) &&
-    value.schemaVersion === "v1" &&
+    (value.schemaVersion === "v1" || value.schemaVersion === "v2") &&
     isRecord(value.releases) &&
     isRecord(value.channels) &&
     Array.isArray(value.channelOrder) &&
@@ -329,28 +330,34 @@ function validQaShape(value: unknown): value is QaReleaseGateEvidence {
 }
 
 function validSealedPlanShape(value: unknown): value is SealedReleaseAggregatePlan {
-  return (
-    isRecord(value) &&
-    value.kind === "release-aggregate" &&
-    isString(value.channel) &&
-    typeof value.releaseId === "string" &&
-    /^rel-sha256:[a-f0-9]{64}$/.test(value.releaseId) &&
-    typeof value.sourceRevision === "string" &&
-    COMMIT.test(value.sourceRevision) &&
-    isString(value.destinationPath) &&
-    typeof value.expectedDigest === "string" &&
-    DIGEST.test(value.expectedDigest) &&
-    typeof value.actualDigest === "string" &&
-    DIGEST.test(value.actualDigest) &&
-    Array.isArray(value.entries) &&
-    value.entries.every(
+  if (
+    !isRecord(value) ||
+    value.kind !== "release-aggregate" ||
+    !isString(value.channel) ||
+    typeof value.releaseId !== "string" ||
+    !/^rel-sha256:[a-f0-9]{64}$/.test(value.releaseId) ||
+    typeof value.sourceRevision !== "string" ||
+    !COMMIT.test(value.sourceRevision) ||
+    typeof value.expectedDigest !== "string" ||
+    !DIGEST.test(value.expectedDigest) ||
+    typeof value.actualDigest !== "string" ||
+    !DIGEST.test(value.actualDigest) ||
+    !Array.isArray(value.entries) ||
+    !value.entries.every(
       (entry) =>
         isRecord(entry) &&
         isString(entry.path) &&
         (entry.mode === "100644" || entry.mode === "100755" || entry.mode === "120000") &&
         entry.content instanceof Uint8Array,
     )
-  );
+  )
+    return false;
+
+  if (value.schemaVersion === "v1") return isString(value.destinationPath);
+  if (value.schemaVersion === "v2") {
+    return !("destinationPath" in value);
+  }
+  return false;
 }
 
 function reviewPartsSupplied(value: unknown): boolean {
@@ -572,7 +579,8 @@ function promotionShapeIsValid(input: unknown): input is PromotionGateInput {
     COMMIT.test(input.exactHeadSha) &&
     isString(input.planRevision) &&
     validBinding(input.expectedEvidence) &&
-    isRecord(input.mapping) &&
+    Array.isArray(input.mappings) &&
+    input.mappings.every(isRecord) &&
     validSealedPlanShape(input.sealedPlan)
   );
 }
@@ -580,21 +588,48 @@ function promotionShapeIsValid(input: unknown): input is PromotionGateInput {
 function aggregateIdentityMatches(input: PromotionGateInput): boolean {
   const selected = resolveReleaseChannel(input.manifest, input.targetChannel);
   const current = resolveReleaseChannel(input.manifest, input.currentChannel);
-  return (
-    selected.ok &&
-    current.ok &&
-    sameIdentity(selected.release, input.release) &&
-    sameIdentity(current.release, input.currentRelease) &&
-    input.mapping.channel === input.targetChannel &&
-    input.mapping.releaseId === input.release.releaseId &&
-    input.mapping.sourceRevision === input.release.artifactSourceCommit &&
-    input.sealedPlan.channel === input.targetChannel &&
-    input.sealedPlan.releaseId === input.release.releaseId &&
-    input.sealedPlan.sourceRevision === input.release.artifactSourceCommit &&
-    input.sealedPlan.expectedDigest === input.release.artifactSetDigest &&
-    input.sealedPlan.actualDigest === input.release.artifactSetDigest &&
-    input.mapping.destinationPath === input.sealedPlan.destinationPath
-  );
+  if (
+    !selected.ok ||
+    !current.ok ||
+    !sameIdentity(selected.release, input.release) ||
+    !sameIdentity(current.release, input.currentRelease) ||
+    input.manifest.schemaVersion !== input.sealedPlan.schemaVersion ||
+    input.sealedPlan.channel !== input.targetChannel ||
+    input.sealedPlan.releaseId !== input.release.releaseId ||
+    input.sealedPlan.sourceRevision !== input.release.artifactSourceCommit ||
+    input.sealedPlan.expectedDigest !== input.release.artifactSetDigest ||
+    input.sealedPlan.actualDigest !== input.release.artifactSetDigest ||
+    input.mappings.some(
+      (mapping) =>
+        mapping.channel !== input.targetChannel ||
+        mapping.releaseId !== input.release.releaseId ||
+        mapping.sourceRevision !== input.release.artifactSourceCommit,
+    )
+  )
+    return false;
+
+  if (input.manifest.schemaVersion === "v1" && input.sealedPlan.schemaVersion === "v1") {
+    return (
+      input.mappings.length === 1 &&
+      input.mappings[0].destinationPath === input.sealedPlan.destinationPath
+    );
+  }
+
+  if (input.manifest.schemaVersion === "v2" && input.sealedPlan.schemaVersion === "v2") {
+    const publication = input.manifest.releases[selected.release.releaseId];
+    return (
+      publication !== undefined &&
+      "artifacts" in publication &&
+      Array.isArray(publication.artifacts) &&
+      publicationMappingsMatchArtifacts(input.mappings, publication.artifacts) &&
+      input.sealedPlan.entries.length === publication.artifacts.length &&
+      input.sealedPlan.entries.every(
+        (entry, index) => entry.path === publication.artifacts[index].destinationPath,
+      )
+    );
+  }
+
+  return false;
 }
 
 function evidenceIdentityMatches(input: PromotionGateInput): boolean {

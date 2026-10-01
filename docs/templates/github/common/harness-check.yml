@@ -1,5 +1,4 @@
 name: harness-check
-
 on:
   push:
     branches: [main]
@@ -21,9 +20,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24.13.0"
+      - name: cache npm when a lockfile exists
+        if: ${{ hashFiles('package-lock.json') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.13.0"
           cache: npm
-      - run: npm ci --no-audit --no-fund
+      - name: install dependencies when a lockfile exists
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          fi
+      - name: skip runtime checks when activation is not available
+        run: |
+          if [ ! -f ".ut-tdd/runtime/activation/active.json" ]; then
+            echo "::notice::UT-TDD runtime is not activated in this checkout; harness checks are skipped."
+          fi
       - name: branch-type guard
+        if: ${{ hashFiles('.ut-tdd/runtime/activation/active.json') != '' }}
         env:
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
           BASE_REF: ${{ github.base_ref || 'main' }}
@@ -33,10 +47,22 @@ jobs:
           printf '%s\n' "$PR_BODY" > .ut-tdd-pr-body.txt
           git log --format=%s -n 20 > .ut-tdd-commit-subjects.txt
           node .ut-tdd/bin/ut-tdd.mjs github guard --head-ref "$HEAD_REF" --base-ref "$BASE_REF" --pr-title "$PR_TITLE" --pr-body-file .ut-tdd-pr-body.txt --commit-file .ut-tdd-commit-subjects.txt
-      - run: npm run typecheck
-      - run: npm run test
-      - run: node .ut-tdd/bin/ut-tdd.mjs audit quality --include-tests --limit 20
+      - name: typecheck when the consumer defines the script
+        run: |
+          if [ -f package.json ] && node -e "const scripts = require('./package.json').scripts || {}; process.exit(scripts.typecheck ? 0 : 1)"; then
+            npm run typecheck
+          fi
+      - name: test when the consumer defines the script
+        run: |
+          if [ -f package.json ] && node -e "const scripts = require('./package.json').scripts || {}; process.exit(scripts.test ? 0 : 1)"; then
+            npm run test
+          fi
+      - name: audit quality
+        if: ${{ hashFiles('.ut-tdd/runtime/activation/active.json') != '' }}
+        run: node .ut-tdd/bin/ut-tdd.mjs audit quality --include-tests --limit 20
       # Consumer CI gate is doctor --setup-smoke: full doctor asserts source-repo
       # self-application state (design docs / PLAN corpus) and is structurally red
       # on a fresh consumer repository (A-172 C-1).
-      - run: node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+      - name: setup smoke
+        if: ${{ hashFiles('.ut-tdd/runtime/activation/active.json') != '' }}
+        run: node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke

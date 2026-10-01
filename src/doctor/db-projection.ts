@@ -1,6 +1,4 @@
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import {
   analyzeDbConstraintCoverage,
@@ -24,11 +22,7 @@ import {
 import type { HarnessDb } from "../state-db/index.ts";
 import { openHarnessDb } from "../state-db/index.ts";
 import { migrate } from "../state-db/migration.ts";
-import {
-  type ProjectionTiming,
-  projectTokenUsage,
-  rebuildHarnessDb,
-} from "../state-db/projection-writer.ts";
+import { type ProjectionTiming, rebuildHarnessDb } from "../state-db/projection-writer.ts";
 import {
   type AgentContractIntegrityResult,
   analyzeAgentContractIntegrity,
@@ -45,7 +39,6 @@ import {
   type TypedSpecPhaseLayerAlignmentResult,
   type TypedSpecTraceClosureResult,
 } from "../state-db/spec-ir-projections.ts";
-import { loadRuntimeSessionUsage } from "../state-db/token-tracker.ts";
 import { FULL_DOCTOR_OUTPUT_IDS } from "./profiles.ts";
 
 export interface DbProjectionDoctorOptions {
@@ -164,14 +157,6 @@ function loadDbTelemetryProvenanceStats(db: HarnessDb): DbTelemetryProvenanceSta
   ];
 }
 
-function projectRuntimeModelTelemetryForDoctor(db: HarnessDb): void {
-  const claudeDir =
-    process.env.UT_TDD_CLAUDE_SESSIONS_DIR ?? join(homedir(), ".claude", "projects");
-  const codexDir = process.env.UT_TDD_CODEX_SESSIONS_DIR ?? join(homedir(), ".codex", "sessions");
-  const usages = loadRuntimeSessionUsage({ claudeDirs: [claudeDir], codexDirs: [codexDir] });
-  projectTokenUsage(db, usages);
-}
-
 export function checkDbProjectionIngestion(
   repoRoot: string,
   options: DbProjectionDoctorOptions = {},
@@ -193,8 +178,12 @@ export function checkDbProjectionIngestion(
     };
     const db = timed("open-db", () => openHarnessDb(":memory:", { repoRoot }));
     try {
-      const rebuilt = rebuildHarnessDb({ repoRoot, db, timing: options.timing === true });
-      timed("runtime-model-telemetry", () => projectRuntimeModelTelemetryForDoctor(db));
+      const rebuilt = rebuildHarnessDb({
+        repoRoot,
+        db,
+        timing: options.timing === true,
+        skipTokenTelemetry: true,
+      });
       let telemetryStats: DbTelemetryProvenanceStats[] = [];
       timed("telemetry-stats", () => {
         telemetryStats = loadDbTelemetryProvenanceStats(db);
@@ -235,7 +224,7 @@ export function checkDesignDetection(repoRoot: string): { messages: string[]; ok
   }
   const db = openHarnessDb(":memory:", { repoRoot });
   try {
-    rebuildHarnessDb({ repoRoot, db });
+    rebuildHarnessDb({ repoRoot, db, skipTokenTelemetry: true });
     const result = analyzeDesignDetectionStats(collectDesignDetectionStats(db));
     return { messages: designDetectionMessages(result), ok: result.ok };
   } catch {

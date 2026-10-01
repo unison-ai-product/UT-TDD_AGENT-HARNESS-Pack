@@ -19,9 +19,12 @@ import {
 // Keep the memory verifier in the low-level memory layer. Importing the team policy here would
 // create a cycle (memory → team → workflow/state-db → graph/vmodel → runtime → memory) while the
 // reviewer record only needs the two immutable frontier identities for the blind-review lane.
-const BLIND_REVIEW_FRONTIER_MODELS: Readonly<Record<CurationReviewer["family"], string>> = {
-  claude: "claude-opus-5",
-  codex: "gpt-5.6-sol",
+// codex は現行 Sol (gpt-6.1-sol、#735) に加え、切替前に記録済みの過去 ledger (gpt-5.6-sol) を検証可能に保つ。
+const BLIND_REVIEW_FRONTIER_MODELS: Readonly<
+  Record<CurationReviewer["family"], readonly string[]>
+> = {
+  claude: ["claude-opus-5"],
+  codex: ["gpt-6.1-sol", "gpt-5.6-sol"],
 };
 
 export const CURATION_LEDGER_PATH = "docs/governance/memory-curation-ledger-2026-09.md";
@@ -354,7 +357,7 @@ export function verifyCurationReviewer(ledger: CurationLedger): CurationFinding[
   if (reviewer.family === ledger.author.family)
     findings.push({ kind: "reviewer-same-family", subject: reviewer.model });
   const frontier = BLIND_REVIEW_FRONTIER_MODELS[reviewer.family];
-  if (reviewer.model !== frontier)
+  if (!frontier.includes(reviewer.model))
     findings.push({ kind: "reviewer-not-frontier", subject: reviewer.model });
   if (!HEX40.test(reviewer.exact_head) || ALL_ZERO_HEAD.test(reviewer.exact_head))
     findings.push({ kind: "reviewer-head-invalid", subject: reviewer.exact_head });

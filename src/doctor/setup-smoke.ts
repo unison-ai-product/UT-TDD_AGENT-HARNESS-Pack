@@ -2,6 +2,7 @@ import { join } from "node:path";
 import {
   type HookInvocation,
   invocationEquals,
+  parseCodexCommandString,
   parseHookInvocation,
 } from "../lint/hook-invocation.ts";
 
@@ -64,6 +65,30 @@ export function collectHookCommands(raw: string | null): string[] | null {
   return collectHookInvocations(raw)?.map((invocation) => invocation.display) ?? null;
 }
 
+/**
+ * PLAN-L7-668 §3: Codex の hooks.json は command+args ではなく、固定前置部分 (git root 解決) を
+ * 持つ 1 文字列 command である。`type==="command"` の hook だけを `parseCodexCommandString` で
+ * 正規化する (旧 exec_args 形式や git root 未解決の command は無効として除外される)。
+ */
+function collectCodexHookInvocations(raw: string | null): HookInvocation[] | null {
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as {
+      hooks?: Record<string, { hooks?: { type?: unknown; command?: unknown }[] }[]>;
+    };
+    return Object.values(parsed.hooks ?? {}).flatMap((entries) =>
+      (entries ?? []).flatMap((entry) =>
+        (entry.hooks ?? [])
+          .filter((hook) => hook.type === "command")
+          .map((hook) => parseCodexCommandString(hook.command).invocation)
+          .filter((invocation): invocation is HookInvocation => !!invocation),
+      ),
+    );
+  } catch {
+    return null;
+  }
+}
+
 export function checkSetupSmoke(deps: SetupSmokeDeps): { ok: boolean; messages: string[] } {
   const checks: SetupSmokeCheck[] = [];
   for (const file of SETUP_SMOKE_REQUIRED_FILES) {
@@ -91,7 +116,7 @@ export function checkSetupSmoke(deps: SetupSmokeDeps): { ok: boolean; messages: 
   const claudeInvocations = collectHookInvocations(
     deps.readText(join(deps.repoRoot, ".claude/settings.json")),
   );
-  const codexInvocations = collectHookInvocations(
+  const codexInvocations = collectCodexHookInvocations(
     deps.readText(join(deps.repoRoot, ".codex/hooks.json")),
   );
   checks.push({

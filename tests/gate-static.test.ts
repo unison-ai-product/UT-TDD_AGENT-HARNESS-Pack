@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  checkG8IntegrationWorkflow,
+  checkG9SystemWorkflow,
+  checkG10UxWorkflow,
+} from "../src/doctor/workflow-quality.ts";
+import {
   analyzeLayerPairGate,
   evaluateStaticGate,
   readCoverageSummary,
@@ -11,6 +16,143 @@ import {
 import type { PairDoc } from "../src/vmodel/lint.ts";
 
 const cliPath = join(process.cwd(), "src", "cli.ts");
+
+/**
+ * RCDEV-037 実測 baseline: 066b842f1a3161f1cb67c3d383a28d76d9c36041 (G0 merge-base Git archive).
+ * 明示採取: node rcdev037-capture.mjs <baseline-root>
+ * 採取 script (再生成は明示操作のみ、テスト内で期待値を再生成しない):
+ * import { pathToFileURL } from 'node:url';
+ * import { resolve, join } from 'node:path';
+ * const root = resolve(process.argv[2]);
+ * const { evaluateStaticGate } = await import(pathToFileURL(join(root, 'src/gate/static.ts')).href);
+ * const workflow = await import(pathToFileURL(join(root, 'src/doctor/workflow-quality.ts')).href);
+ * const normalize = (messages) => [...new Set(messages.map(message => message.replaceAll(root, '<repoRoot>').replaceAll(root.replaceAll('\\', '/'), '<repoRoot>')))].sort();
+ * const results = [];
+ * for (let i = 1; i <= 7; i++) {
+ *   const result = evaluateStaticGate({gate: `G${i}`, repoRoot: root});
+ *   results.push({gate: result.gate, passed: result.passed, applicable: result.applicable, messages: normalize(result.messages)});
+ * }
+ * for (const [gate, check] of [['G8', workflow.checkG8IntegrationWorkflow], ['G9', workflow.checkG9SystemWorkflow], ['G10', workflow.checkG10UxWorkflow]]) {
+ *   const result = check(root);
+ *   results.push({gate, ok: result.ok, messages: normalize(result.messages)});
+ * }
+ * process.stdout.write(JSON.stringify(results, null, 2));
+ * 保存時の明示正規化: message の path separator を / に統一 (それ以外の値は実測のまま)。
+ * G8-G10 は doctor API の raw ok/messages。m2 は PR-GR の所有。
+ */
+const HARNESS_GATE_BASELINE = [
+  {
+    gate: "G1",
+    passed: true,
+    applicable: true,
+    messages: [
+      "g1-pair - OK (L1 total=7, confirmed=7, placeholder=0, draft=0, orphans=0)",
+      "g1-trace - OK (business=13, screens=15, p0Fr=19, l3Plans=3)",
+    ],
+  },
+  {
+    gate: "G2",
+    passed: true,
+    applicable: true,
+    messages: ["g2-pair - OK (L2 total=6, confirmed=6, placeholder=0, draft=0, orphans=0)"],
+  },
+  {
+    gate: "G3",
+    passed: true,
+    applicable: true,
+    messages: [
+      "g3-pair - OK (L3 total=4, confirmed=4, placeholder=0, draft=0, orphans=0)",
+      "g3-trace - OK (frL1=51, l3Fr=26, ac=117, at=118, l1Nfr=15, l3Nfr=17)",
+    ],
+  },
+  {
+    gate: "G4",
+    passed: true,
+    applicable: true,
+    messages: ["g4-pair - OK (L4 total=6, confirmed=6, placeholder=0, draft=0, orphans=0)"],
+  },
+  {
+    gate: "G5",
+    passed: true,
+    applicable: true,
+    messages: ["g5-pair - OK (L5 total=5, confirmed=5, placeholder=0, draft=0, orphans=0)"],
+  },
+  {
+    gate: "G6",
+    passed: true,
+    applicable: true,
+    messages: ["g6-pair - OK (L6 total=29, confirmed=29, placeholder=0, draft=0, orphans=0)"],
+  },
+  {
+    gate: "G7",
+    passed: false,
+    applicable: true,
+    messages: [
+      "g7-coverage - violation: coverage summary not found (<repoRoot>/coverage/coverage-summary.json); run test coverage before G7",
+      "g7-static - failed (G7 requires trace evidence and coverage >=80%)",
+      "impl-plan-trace — OK (src 全件 PLAN generates / baseline に被覆、NEW orphan 0)",
+      "oracle-test-trace — OK (宣言 oracle 全件 tests citation / baseline 被覆、test-label 逆向き citation 断線 0、宣言 provenance 重複 0)",
+      "pair-freeze — OK (design⇔test-design 双方向 57 pair、孤児 0)",
+      "verification — 実装検証サイクルゲート [L0-L7] (左腕+谷): ✅ base freeze 完了 (56/56 confirmed, L7 plans 9/9 confirmed, evidence 9/9, 孤児0) / active revisions 1/1 confirmed → 検証サイクル発火可",
+    ],
+  },
+  {
+    gate: "G8",
+    ok: true,
+    messages: [
+      "g8-integration-workflow - OK (it_cases=140, manifests=2, selected_it=14, mandatory_it=14)",
+    ],
+  },
+  {
+    gate: "G9",
+    ok: true,
+    messages: [
+      "g9-system-workflow - OK (st_cases=34, manifests=2, selected_st=28, mandatory_st=28)",
+    ],
+  },
+  {
+    gate: "G10",
+    ok: true,
+    messages: ["g10-ux-workflow - OK (uxv_cases=8, manifests=1, selected_uxv=5, mandatory_uxv=5)"],
+  },
+];
+
+function normalizedHarnessMessages(messages: string[], root: string): string[] {
+  return [
+    ...new Set(
+      messages.map((message) =>
+        message.replaceAll("\\", "/").replaceAll(root.replaceAll("\\", "/"), "<repoRoot>"),
+      ),
+    ),
+  ].sort();
+}
+
+it("U-RCDEV-037: preserves harness G1-G7 static and G8-G10 workflow baseline", () => {
+  const root = process.cwd();
+  const actual = [];
+  for (let i = 1; i <= 7; i++) {
+    const result = evaluateStaticGate({ gate: `G${i}`, repoRoot: root });
+    actual.push({
+      gate: result.gate,
+      passed: result.passed,
+      applicable: result.applicable,
+      messages: normalizedHarnessMessages(result.messages, root),
+    });
+  }
+  for (const [gate, check] of [
+    ["G8", checkG8IntegrationWorkflow],
+    ["G9", checkG9SystemWorkflow],
+    ["G10", checkG10UxWorkflow],
+  ] as const) {
+    const result = check(root);
+    actual.push({
+      gate,
+      ok: result.ok,
+      messages: normalizedHarnessMessages(result.messages, root),
+    });
+  }
+  expect(actual).toEqual(HARNESS_GATE_BASELINE);
+});
 
 function runCli(args: string[], cwd = process.cwd()) {
   // PLAN-L7-462 step 2: CLI 実発火 oracle は node 直 spawn (cmd.exe/bun 経由なし)。

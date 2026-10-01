@@ -233,3 +233,7 @@ Honest limits for an agent performing its own visual judgement:
 - WCAG 2.2 SC 1.4.3 Contrast (Minimum) — https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html (4.5:1 normal text, 3:1 large text, AA)
 - Percy, visual regression practice — https://percy.io/blog/open-source-visual-regression-testing-tools (structural + perceptual filtering before human triage; fail builds only on critical diffs)
 
+
+## zip lineage (PLAN-L7-676 PR-T3)
+
+The judgement in this skill is a near-1:1 English rendering of the corresponding `.claude/skills/vmodel-visual-review/SKILL.md` in `Vモデル設計ドキュメント_checked.zip` (Apache-2.0). PR-T3 ported the zip pack as [[vmodel-visual-review]] — a thin bridge that indexes the Japanese original's section headings and points back here, rather than duplicating the same decision content twice (docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1).

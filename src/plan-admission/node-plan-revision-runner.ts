@@ -444,7 +444,10 @@ function admissionFromManifest(manifest: PlanRevisionManifest): PlanAdmissionReq
             provider: value.issue.provider,
             issueId: value.issue.issue_id,
             episodeId: value.issue.episode_id,
-            projectionDigest: value.issue.projection_digest,
+            projectionState: value.issue.projection_state,
+            ...(value.issue.projection_state === "projected"
+              ? { projectionDigest: value.issue.projection_digest }
+              : {}),
           },
         }
       : {}),

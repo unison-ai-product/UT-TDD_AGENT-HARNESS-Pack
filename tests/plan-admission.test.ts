@@ -198,4 +198,180 @@ describe("PLAN admission policy", () => {
       "plan-admission-reverse-preserved-implementation-required",
     );
   });
+
+  it("U-ISSUEBIND-002 (policy): projection_state=unprojected はForward外escapeの必須Issueを満たす (§2.1/§2.4)", () => {
+    const decision = evaluatePlanAdmission({
+      ...forward,
+      routeSignal: "feature_addition",
+      routeMode: "add-feature",
+      kind: "add-design",
+      layer: "L6",
+      branch: "work/add-feature-admission",
+      issue: {
+        provider: "github",
+        issueId: 690,
+        episodeId: "E4-690",
+        projectionState: "unprojected",
+      },
+      origin: { planId: "PLAN-L4-24", revision: 1, digest: "sha256:def" },
+      reentry: { targetPlanId: "PLAN-L4-24", targetRevision: 2, phase: "forward_merge" },
+      escapeReason: "issue binding contract",
+    });
+    expect(decision).toMatchObject({ ok: true, issueRequired: true });
+  });
+
+  it("CANDIDATE-U-ISSUEBIND (policy): issueId/episodeId欠落は projection_state に関わらず必須Issueを満たさない", () => {
+    const decision = evaluatePlanAdmission({
+      ...forward,
+      routeSignal: "feature_addition",
+      routeMode: "add-feature",
+      kind: "add-design",
+      layer: "L6",
+      branch: "work/add-feature-admission",
+      issue: {
+        provider: "github",
+        issueId: 690,
+        episodeId: "",
+        projectionState: "unprojected",
+      },
+      origin: { planId: "PLAN-L4-24", revision: 1, digest: "sha256:def" },
+      reentry: { targetPlanId: "PLAN-L4-24", targetRevision: 2, phase: "forward_merge" },
+      escapeReason: "issue binding contract",
+    });
+    expect(decision.ok).toBe(false);
+    expect(decision.ok ? [] : decision.violations.map((v) => v.code)).toContain(
+      "plan-admission-issue-required",
+    );
+  });
+
+  it("CANDIDATE-U-ISSUEBIND (policy): projection_state=projected + digest はForward外escapeを許可する (legacy caller互換)", () => {
+    const decision = evaluatePlanAdmission({
+      ...forward,
+      routeSignal: "feature_addition",
+      routeMode: "add-feature",
+      kind: "add-design",
+      layer: "L6",
+      branch: "work/add-feature-admission",
+      issue: {
+        provider: "github",
+        issueId: 690,
+        episodeId: "E4-690",
+        projectionState: "projected",
+        projectionDigest: "sha256:abc",
+      },
+      origin: { planId: "PLAN-L4-24", revision: 1, digest: "sha256:def" },
+      reentry: { targetPlanId: "PLAN-L4-24", targetRevision: 2, phase: "forward_merge" },
+      escapeReason: "issue binding contract",
+    });
+    expect(decision).toMatchObject({ ok: true, issueRequired: true });
+  });
+
+  it("U-ISSUEBIND-002 (policy): projection_state=unprojected と全ゼロdigestの併存はForward外escapeを拒否する (#690補正)", () => {
+    // mutation: `!hasProjectionDigest` を `true` に固定すると本テストが green のまま通ってしまう
+    // (unprojected+digest を admit してしまう回帰を検出できない) ため、下の projectionDigest あり
+    // ケースと対で both を維持する。
+    const decision = evaluatePlanAdmission({
+      ...forward,
+      routeSignal: "feature_addition",
+      routeMode: "add-feature",
+      kind: "add-design",
+      layer: "L6",
+      branch: "work/add-feature-admission",
+      issue: {
+        provider: "github",
+        issueId: 690,
+        episodeId: "E4-690",
+        projectionState: "unprojected",
+        projectionDigest: `sha256:${"0".repeat(64)}`,
+      },
+      origin: { planId: "PLAN-L4-24", revision: 1, digest: "sha256:def" },
+      reentry: { targetPlanId: "PLAN-L4-24", targetRevision: 2, phase: "forward_merge" },
+      escapeReason: "issue binding contract",
+    });
+    expect(decision.ok).toBe(false);
+    expect(decision.ok ? [] : decision.violations.map((v) => v.code)).toContain(
+      "plan-admission-issue-required",
+    );
+  });
+
+  it("U-ISSUEBIND-002 (policy): projection_state=unprojected と実digestの併存はForward外escapeを拒否する (#690補正)", () => {
+    // mutation: `hasProjectionDigest` の判定を削除して impliedProjectionState のみで分岐すると、
+    // unprojected + 実digest が admit されてしまう。本テストはそれを検出する。
+    const decision = evaluatePlanAdmission({
+      ...forward,
+      routeSignal: "feature_addition",
+      routeMode: "add-feature",
+      kind: "add-design",
+      layer: "L6",
+      branch: "work/add-feature-admission",
+      issue: {
+        provider: "github",
+        issueId: 690,
+        episodeId: "E4-690",
+        projectionState: "unprojected",
+        projectionDigest: "sha256:abc",
+      },
+      origin: { planId: "PLAN-L4-24", revision: 1, digest: "sha256:def" },
+      reentry: { targetPlanId: "PLAN-L4-24", targetRevision: 2, phase: "forward_merge" },
+      escapeReason: "issue binding contract",
+    });
+    expect(decision.ok).toBe(false);
+    expect(decision.ok ? [] : decision.violations.map((v) => v.code)).toContain(
+      "plan-admission-issue-required",
+    );
+  });
+
+  it("U-ISSUEBIND-002 (policy): projection_state=unprojected と空文字projectionDigestの併存はForward外escapeを拒否する (#690補正)", () => {
+    // mutation: `issue?.projectionDigest !== undefined` を `Boolean(issue?.projectionDigest)` に
+    // 弱めると、空文字はfalsyなので validIssueBinding が誤ってtrueになる。本テストがそれを検出する。
+    const decision = evaluatePlanAdmission({
+      ...forward,
+      routeSignal: "feature_addition",
+      routeMode: "add-feature",
+      kind: "add-design",
+      layer: "L6",
+      branch: "work/add-feature-admission",
+      issue: {
+        provider: "github",
+        issueId: 690,
+        episodeId: "E4-690",
+        projectionState: "unprojected",
+        projectionDigest: "",
+      },
+      origin: { planId: "PLAN-L4-24", revision: 1, digest: "sha256:def" },
+      reentry: { targetPlanId: "PLAN-L4-24", targetRevision: 2, phase: "forward_merge" },
+      escapeReason: "issue binding contract",
+    });
+    expect(decision.ok).toBe(false);
+    expect(decision.ok ? [] : decision.violations.map((v) => v.code)).toContain(
+      "plan-admission-issue-required",
+    );
+  });
+
+  it("U-ISSUEBIND-001 (policy): projection_state=projected の全ゼロdigestはForward外escapeを拒否する (#690補正、defence in depth)", () => {
+    // mutation: `!ALL_ZERO_PROJECTION_DIGEST_PATTERN.test(...)` の否定を除去すると、全ゼロdigestが
+    // admit されてしまう。本テストがそれを検出する。
+    const decision = evaluatePlanAdmission({
+      ...forward,
+      routeSignal: "feature_addition",
+      routeMode: "add-feature",
+      kind: "add-design",
+      layer: "L6",
+      branch: "work/add-feature-admission",
+      issue: {
+        provider: "github",
+        issueId: 690,
+        episodeId: "E4-690",
+        projectionState: "projected",
+        projectionDigest: `sha256:${"0".repeat(64)}`,
+      },
+      origin: { planId: "PLAN-L4-24", revision: 1, digest: "sha256:def" },
+      reentry: { targetPlanId: "PLAN-L4-24", targetRevision: 2, phase: "forward_merge" },
+      escapeReason: "issue binding contract",
+    });
+    expect(decision.ok).toBe(false);
+    expect(decision.ok ? [] : decision.violations.map((v) => v.code)).toContain(
+      "plan-admission-issue-required",
+    );
+  });
 });

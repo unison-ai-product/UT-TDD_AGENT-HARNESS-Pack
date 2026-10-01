@@ -153,6 +153,140 @@ describe("frontmatter schema (§1.1 / §1.1.parent_design / §3.3 / §3.4)", () 
     ).toBe(false);
   });
 
+  function redesignReceiptBase(issue: Record<string, unknown>) {
+    return {
+      schema_version: "v2",
+      receipt_id: "pa-690",
+      command_id: "cmd-690",
+      admitted_at: "2026-09-25T00:00:00.000Z",
+      source_digest: "sha256:0123456789abcdef",
+      decision_digest: "sha256:fedcba9876543210",
+      receipt_digest: "sha256:9999999999999999",
+      binding: {
+        path: "docs/plans/PLAN-L7-05-frontmatter-schema.md",
+        plan_id: "PLAN-L7-05-frontmatter-schema",
+        asset_id: "plan:l7:05",
+        revision: 1,
+        content_digest: "sha256:1111111111111111",
+      },
+      route: { signal: "redesign", mode: "redesign" },
+      issue,
+      origin: { plan_id: "PLAN-L4-24", revision: 1, digest: "sha256:bbbbbbbbbbbbbbbb" },
+      transition: {
+        direction: "design_to_implementation",
+        implementation_disposition: "none",
+        implementation_target: { target_plan_id: "PLAN-L7-435", target_revision: 1 },
+      },
+      reentry: { target_plan_id: "PLAN-L4-24", target_revision: 2, phase: "forward_merge" },
+      escape_reason: "audit finding",
+      supersedes: ["PLAN-L4-24"],
+    };
+  }
+
+  function redesignFrontmatter(issue: Record<string, unknown>) {
+    return implBase({
+      route_signal: "redesign",
+      route_mode: "redesign",
+      github_issue_id: 12,
+      supersedes: ["PLAN-L4-24"],
+      admission_receipt: redesignReceiptBase(issue),
+    });
+  }
+
+  it("U-ISSUEBIND-001: projection_state=projected の全ゼロ digest は fail-close (§2.1/§2.2)", () => {
+    const zeroDigest = `sha256:${"0".repeat(64)}`;
+    const r = frontmatterSchema.safeParse(
+      redesignFrontmatter({
+        provider: "github",
+        issue_id: 12,
+        episode_id: "E4-12",
+        projection_state: "projected",
+        projection_digest: zeroDigest,
+      }),
+    );
+    expect(r.success).toBe(false);
+  });
+
+  it("U-ISSUEBIND-002: projection_state=unprojected は digest なしで受理し、null/空文字/キー付与は拒否する (§2.1)", () => {
+    const ok = frontmatterSchema.safeParse(
+      redesignFrontmatter({
+        provider: "github",
+        issue_id: 12,
+        episode_id: "E4-12",
+        projection_state: "unprojected",
+      }),
+    );
+    expect(ok.success).toBe(true);
+
+    const withNullDigest = frontmatterSchema.safeParse(
+      redesignFrontmatter({
+        provider: "github",
+        issue_id: 12,
+        episode_id: "E4-12",
+        projection_state: "unprojected",
+        projection_digest: null,
+      }),
+    );
+    expect(withNullDigest.success).toBe(false);
+
+    const withEmptyDigest = frontmatterSchema.safeParse(
+      redesignFrontmatter({
+        provider: "github",
+        issue_id: 12,
+        episode_id: "E4-12",
+        projection_state: "unprojected",
+        projection_digest: "",
+      }),
+    );
+    expect(withEmptyDigest.success).toBe(false);
+  });
+
+  it("U-ISSUEBIND-003: projection_state=projected は digest 欠落/null/空文字で fail-close (§2.1)", () => {
+    const missing = frontmatterSchema.safeParse(
+      redesignFrontmatter({
+        provider: "github",
+        issue_id: 12,
+        episode_id: "E4-12",
+        projection_state: "projected",
+      }),
+    );
+    expect(missing.success).toBe(false);
+
+    const nullDigest = frontmatterSchema.safeParse(
+      redesignFrontmatter({
+        provider: "github",
+        issue_id: 12,
+        episode_id: "E4-12",
+        projection_state: "projected",
+        projection_digest: null,
+      }),
+    );
+    expect(nullDigest.success).toBe(false);
+
+    const emptyDigest = frontmatterSchema.safeParse(
+      redesignFrontmatter({
+        provider: "github",
+        issue_id: 12,
+        episode_id: "E4-12",
+        projection_state: "projected",
+        projection_digest: "",
+      }),
+    );
+    expect(emptyDigest.success).toBe(false);
+  });
+
+  it("U-ISSUEBIND-004: projection_state 欠落の legacy binding は引き続き有効 (§2.1 legacy 条項)", () => {
+    const legacy = frontmatterSchema.safeParse(
+      redesignFrontmatter({
+        provider: "github",
+        issue_id: 12,
+        episode_id: "E4-12",
+        projection_digest: "sha256:aaaaaaaaaaaaaaaa",
+      }),
+    );
+    expect(legacy.success).toBe(true);
+  });
+
   it("kind=impl で parent_design 欠落は fail (§1.1.parent_design)", () => {
     const r = frontmatterSchema.safeParse(implBase({ parent_design: undefined }));
     expect(r.success).toBe(false);

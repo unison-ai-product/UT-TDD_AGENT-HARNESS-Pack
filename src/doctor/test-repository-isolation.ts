@@ -14,18 +14,20 @@ export interface RepositoryReadContract {
 const CONTRACT_ROWS = `
 asset-catalog:3 asset-drift:1 backfill-pairing:2 cited-command-existence:1 cli-surface:2 cli:1
 advisory-strict-gate-aging:4
-codex-hook-adapter:1 coding-rules:1 context-doc-router:2 cycle-p4-verification:5 db-currency:1 db-projection-coverage:1 db-projection-ingestion:3
+codex-hook-adapter:5 coding-rules:1 context-doc-router:2 cycle-p4-verification:5 db-currency:1 db-projection-coverage:1 db-projection-ingestion:3
 dependency-drift:4 descent-obligation:3 distribution-acceptance:1 distribution-scratch-ignore:1 doctor-runtime-surface:2 doctor:25
 drive-model-passage:2 fr-roadmap-coverage:4 frontend-design-coverage:1 g10-ux-workflow:5 g8-integration-workflow:6 g9-system-workflow:7
-erasable-syntax:1 gate-static:9 impl-plan-trace:1 import-specifier:2 l14-close-audit:8 l6-completion:2 l6-fr-coverage:2 mode-catalog:1 model-id-ssot:1 model-id-ssot-drift:1 module-drift:2 oracle-test-trace:5
+erasable-syntax:1 gate-static:10 impl-plan-trace:1 import-specifier:2 l14-close-audit:8 l6-completion:2 l6-fr-coverage:2 mode-catalog:1 model-id-ssot:1 model-id-ssot-drift:1 module-drift:2 oracle-test-trace:5
 plan-id-naming:1 plan-lint:10 projection-writer:13 proposal-document-coverage:2 readability:5 relation-graph-loader:1 review-green-command-projection:1
-release-artifact-resolver:1
+release-artifact-resolver:1 release-consumer-skills:4
 right-arm-gate-planning:1 right-lung-doc-governance:1 roadmap:1 rule-automation-closure:1 rule-drift:4 runtime-hook-entrypoints:1
 review-live-cli:2
 review-delegation-root:1
 runtime-portability:2 screen-impl-pair-freeze:1 setup-bun-removal:2 ban-lint-detection-power:3 bun-permanent-ban:14 self-pair-normative-guard:1 setup-agent-floor:2 setup:8 skill-assignment:1 state-db:1
 sub-doc-catalog-drift:5 sub-doc-section-structure:1 telemetry-closure:1 test-design-naming:1 toolchain-pin:1 tracked-canonical:1
 vmodel-contract-compiler:1 vmodel-source-assets:1 work-guard:1 workspace-roots:3 write-encoding-guard:1
+vmodel-consumer-lint:1
+release-consumer-gates:15
 doctor-test-repository-isolation:1 persistent-db-cleanup-contract:1 memory-clean-cut-removal:1 memory-legacy-archive:1 memory-clean-cut-non-read:1 memory-curation-ledger:1
 secret-scan-diff:1
 feedback-log:2
@@ -39,8 +41,12 @@ hook-native-launcher:1 claude-memory-terminal-gc:1 release-version-identity:2 wi
 profile/tracked-loader:2
 plan-asset/ledger-schema:4 plan-asset/legacy-inventory:5 plan-asset/legacy-migration-dry-run:13 plan-asset/project-identity-loader:1
 disposition/git-authoring-provenance:3 disposition/projection:6 disposition/tracked-target-registry:2
-forward-escape-issue-contract:2
-`;
+  forward-escape-issue-contract:2
+  pack-consumer-runtime-release:4 release-consumer-vmodel-template:1
+  release-consumer-setup-artifacts:1
+  pack-internal-canary-boundary:1 support/pack-internal-canary.ts:1
+  pack-canary-acceptance:2
+  `;
 
 const repositoryReadContracts: Record<string, RepositoryReadContract> = Object.fromEntries(
   CONTRACT_ROWS.trim()
@@ -57,6 +63,12 @@ const repositoryReadContracts: Record<string, RepositoryReadContract> = Object.f
       ];
     }),
 );
+
+repositoryReadContracts["tests/design-root.test.ts"] = {
+  mode: "head_snapshot",
+  calls: 1,
+  reason: "missing consumer roots preserve the immutable HEAD gate definition fallback bytes",
+};
 
 for (const [path, calls] of Object.entries({
   "tests/github-pr-trace.test.ts": 1,
@@ -122,6 +134,18 @@ repositoryReadContracts["tests/support/pack-consumer-runtime.ts"] = {
   mode_calls: { head_snapshot: 1, isolated_fixture: 1 },
   reason:
     "clean Pack/provider parity fixture materializes and seals inputs only from the detached execution snapshot before deleting the Pack checkout",
+};
+repositoryReadContracts["tests/pack-consumer-runtime-release.test.ts"] = {
+  mode: "isolated_fixture",
+  calls: 4,
+  reason:
+    "clean Pack producer fixture copies tracked assets into a temporary Git repository and installer CLI runs only from the detached execution snapshot",
+};
+repositoryReadContracts["tests/release-consumer-vmodel-template.test.ts"] = {
+  mode: "isolated_fixture",
+  calls: 1,
+  reason:
+    "consumer template bundle oracle compares emitted bytes to the source template assets while the CLI writes only into a temporary consumer root",
 };
 
 export const REPOSITORY_READ_CONTRACTS: Readonly<Record<string, RepositoryReadContract>> =

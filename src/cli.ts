@@ -10,11 +10,13 @@ import {
   existsSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { parse as parseYaml } from "yaml";
 import {
@@ -100,9 +102,15 @@ import {
   planDigestMigration,
 } from "./lint/green-command-digest.ts";
 import { parseNodeGenerationCiEvidence } from "./lint/node-generation-ci-policy.ts";
+import { writeVModelTemplates } from "./setup/vmodel-template-writer.ts";
+import { materializeSkillAssets } from "./shared/embedded-skills.ts";
 
 export { collectFinalRetirementFindings };
 
+import {
+  PROJECT_IDENTITY_COMMIT_RECOVERY_COMMANDS,
+  PROJECT_IDENTITY_ORIGIN_RECOVERY_COMMANDS,
+} from "./kernel/project-identity.ts";
 import { computeOutstandingWork, outstandingSummaryLine } from "./lint/outstanding.ts";
 import {
   analyzeRelationImpact,
@@ -211,6 +219,7 @@ import {
   admitConsumerLocalRuntime,
   admitReleaseAggregate,
   type ConsumerLocalRuntimeAdmissionInput,
+  installConsumerRuntimeRelease,
   nodeSetupDeps,
   type ReleaseAggregateAdmissionInput,
   runSetupAsync,
@@ -444,12 +453,29 @@ function sessionTouchedFilesForGuard(repoRoot: string, sessionId: string | undef
     if (!line.trim()) continue;
     try {
       const ev = JSON.parse(line) as { target?: string };
-      if (ev.target) touched.push(normalizeRepoRelative(ev.target, repoRoot));
+      if (ev.target) touched.push(...sessionLogTargetCandidates(ev.target, repoRoot));
     } catch {
       // Ignore malformed session-log rows; preflight should keep checking other rows.
     }
   }
   return touched;
+}
+
+/**
+ * session-log の `target` は `summarize()` (src/runtime/session-log.ts) が書く
+ * `${tool_name} ${path}` 形 (path 系ツールのみ、frozen: U-SLOG-007 系)。work-guard が突合する
+ * `targetPath` は path 単体なので、生の target をそのまま touched set に入れるだけでは
+ * 常に不一致になる (2026-09-24 是正: own-session の apply_patch/write_file が誤って
+ * foreign-uncommitted 扱いされていた)。raw 値に加え、先頭の空白区切りトークン (tool_name) を
+ * 剥がした残り (= path 候補) も候補に含める。
+ */
+function sessionLogTargetCandidates(target: string, repoRoot: string): string[] {
+  const candidates = [normalizeRepoRelative(target, repoRoot)];
+  const spaceIdx = target.indexOf(" ");
+  if (spaceIdx > 0) {
+    candidates.push(normalizeRepoRelative(target.slice(spaceIdx + 1), repoRoot));
+  }
+  return candidates;
 }
 
 function guardTargetsFromPatchText(patchText: string, repoRoot: string): string[] {
@@ -502,6 +528,7 @@ function runSessionStartSideEffects({
   deps,
   json = false,
 }: SessionStartSideEffectInput): void {
+  materializeSkillAssets(repoRoot);
   try {
     scanDanglingStops(deps, input.session_id);
     sweepStaleGuardSlots(nodeAgentSlotsDeps(repoRoot));
@@ -2572,6 +2599,43 @@ builder
 
 const vmodel = program.command("vmodel").description("V-model trace");
 vmodel
+  .command("template")
+  .description("write bundled V-model authoring templates")
+  .option("--slot <doc_type_id...>", "write one or more catalog slot templates")
+  .option("--required", "write all required catalog slot templates")
+  .option("--optional <ZIP-DOC-NNN...>", "write one or more optional port-index templates")
+  .option("--dry-run", "report selected paths without writing")
+  .option("--json", "write the result as JSON")
+  .action(
+    (options: {
+      slot?: string[];
+      required?: boolean;
+      optional?: string[];
+      dryRun?: boolean;
+      json?: boolean;
+    }) => {
+      try {
+        const result = writeVModelTemplates({
+          repoRoot: process.cwd(),
+          slot: options.slot,
+          required: options.required,
+          optional: options.optional,
+          dryRun: options.dryRun,
+        });
+        if (options.json) {
+          process.stdout.write(`${JSON.stringify(result)}\n`);
+        } else {
+          for (const path of result.written) process.stdout.write(`+ ${path}\n`);
+          for (const path of result.skipped) process.stdout.write(`skip (exists) ${path}\n`);
+        }
+        process.exitCode = 0;
+      } catch (error) {
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    },
+  );
+vmodel
   .command("lint [path]")
   .description("V-model 4 artifact trace lint")
   .action((path?: string) => {
@@ -4138,6 +4202,11 @@ program
     "--consumer-runtime-input <path>",
     "sealed consumer runtime input JSON emitted by the release materializer",
   )
+  .option("--consumer-runtime-release <path>", "offline Pack consumer runtime Release directory")
+  .option(
+    "--expected-consumer-digest <digest>",
+    "external sha256 anchor for the Release checksum asset",
+  )
   .action(
     async (opts: {
       solo?: boolean;
@@ -4148,6 +4217,8 @@ program
       qaTeam?: string;
       poTeam?: string;
       consumerRuntimeInput?: string;
+      consumerRuntimeRelease?: string;
+      expectedConsumerDigest?: string;
     }) => {
       if (opts.solo && opts.team) {
         process.stderr.write("--solo と --team は同時指定できません (どちらか一方)\n");
@@ -4169,12 +4240,68 @@ program
         process.exitCode = 1;
         return;
       }
-      const deps = nodeSetupDeps(process.cwd());
+      if (
+        Boolean(opts.consumerRuntimeRelease) !== Boolean(opts.expectedConsumerDigest) ||
+        (opts.consumerRuntimeRelease && opts.consumerRuntimeInput)
+      ) {
+        process.stderr.write(
+          "consumer_runtime_anchor_mismatch: --consumer-runtime-release requires --expected-consumer-digest and cannot be combined with --consumer-runtime-input.\n",
+        );
+        process.exitCode = 1;
+        return;
+      }
       const phase = opts.solo ? "0-A" : opts.team ? "0-B" : undefined;
       const teams =
         teamCount === 3
           ? { tl: opts.tlTeam as string, qa: opts.qaTeam as string, po: opts.poTeam as string }
           : undefined;
+      if (opts.consumerRuntimeRelease && opts.expectedConsumerDigest) {
+        if (opts.dryRun || opts.team) {
+          process.stderr.write("--consumer-runtime-release requires a non-dry-run solo setup.\n");
+          process.exitCode = 1;
+          return;
+        }
+        try {
+          const moduleName = basename(fileURLToPath(import.meta.url));
+          const suffix = ".ut-tdd.mjs";
+          if (!moduleName.endsWith(suffix))
+            throw new Error("consumer_runtime_self_digest_mismatch");
+          const tag = moduleName.slice(0, -suffix.length);
+          const result = await installConsumerRuntimeRelease({
+            releaseDirectory: opts.consumerRuntimeRelease,
+            expectedConsumerDigest: opts.expectedConsumerDigest,
+            consumerRoot: realpathSync.native(process.cwd()),
+            tag,
+            executingModulePath: fileURLToPath(import.meta.url),
+            setupDeps: () => nodeSetupDeps(realpathSync.native(process.cwd())),
+          });
+          if (result.status === "already-installed") {
+            process.stdout.write("consumer runtime: already installed (no writes)\n");
+            return;
+          }
+          const r = result.setup;
+          process.stdout.write(`phase: ${r.phase}\n`);
+          for (const w of r.written) process.stdout.write(`  + ${w}\n`);
+          process.stdout.write(
+            `branch-protection: ${r.branchProtection.applied ? "applied" : `skipped (${r.branchProtection.reason})`}\n`,
+          );
+          for (const notice of r.notices ?? []) process.stdout.write(`${notice}\n`);
+          if (r.projectIdentity && !r.projectIdentity.ok) {
+            process.stderr.write(
+              `identity: denied (${r.projectIdentity.error.ruleId}): ${r.projectIdentity.error.message}\n`,
+            );
+            for (const command of PROJECT_IDENTITY_ORIGIN_RECOVERY_COMMANDS)
+              process.stderr.write(`recovery: ${command}\n`);
+            process.exitCode = 2;
+          }
+          return;
+        } catch (error) {
+          process.stderr.write(`--consumer-runtime-release invalid: ${String(error)}\n`);
+          process.exitCode = 1;
+          return;
+        }
+      }
+      const deps = nodeSetupDeps(process.cwd());
       let consumerRuntime: SetupArgs["consumerRuntime"];
       if (opts.consumerRuntimeInput) {
         try {
@@ -4287,10 +4414,27 @@ program
           r.branchProtection.applied ? "applied" : `skipped (${r.branchProtection.reason})`
         }\n`,
       );
+      for (const notice of r.notices ?? []) process.stdout.write(`${notice}\n`);
       if (r.phase === "0-B" && r.branchProtection.reason === "emit-only") {
         process.stdout.write(
           "  → scripts/setup-branch-protection.sh を生成。admin 権限の人間が実行してください (本番 merge ゲート変更)\n",
         );
+      }
+      if (r.projectIdentity) {
+        if (!r.projectIdentity.ok) {
+          process.stderr.write(
+            `identity: denied (${r.projectIdentity.error.ruleId}): ${r.projectIdentity.error.message}\n`,
+          );
+          for (const command of PROJECT_IDENTITY_ORIGIN_RECOVERY_COMMANDS) {
+            process.stderr.write(`recovery: ${command}\n`);
+          }
+          process.exitCode = 2;
+        } else if (r.projectIdentity.commitRequired) {
+          process.stdout.write(`identity: commit required (${r.projectIdentity.path})\n`);
+          for (const command of PROJECT_IDENTITY_COMMIT_RECOVERY_COMMANDS) {
+            process.stdout.write(`  ${command}\n`);
+          }
+        }
       }
     },
   );

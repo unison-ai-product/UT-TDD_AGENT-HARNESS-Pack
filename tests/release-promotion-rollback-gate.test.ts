@@ -2,12 +2,25 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { ReviewRequest } from "../src/feedback/review-dispatch.ts";
 import { reviewReceiptDigest } from "../src/kernel/github-closure-receipt.ts";
-import type { ReleaseIdentity, ReleaseManifest } from "../src/schema/release-manifest.ts";
+import {
+  deriveArtifactInventoryDigest,
+  deriveReleaseId,
+  deriveReleaseRecordDigest,
+  type PublicationArtifact,
+  type PublicationReleaseIdentity,
+  type ReleaseIdentity,
+  type ReleaseManifest,
+} from "../src/schema/release-manifest.ts";
 import {
   applySealedReleaseAggregate,
+  type ReleaseChannelMapping,
   type SealedReleaseAggregatePlan,
 } from "../src/setup/release-aggregate-admission.ts";
-import type { MaterializedReleaseEntry } from "../src/setup/release-materializer.ts";
+import type { ReleaseChannelAttestation } from "../src/setup/release-channel-adapter.ts";
+import {
+  digestMaterializedReleaseEntries,
+  type MaterializedReleaseEntry,
+} from "../src/setup/release-materializer.ts";
 import {
   type CanonicalCiEvidence,
   classifyRollbackApply,
@@ -63,6 +76,7 @@ const mapping = {
   destinationPath: "pack/current",
 };
 const plan: SealedReleaseAggregatePlan = {
+  schemaVersion: "v1",
   kind: "release-aggregate" as const,
   channel: "stable",
   releaseId: current.releaseId,
@@ -72,6 +86,216 @@ const plan: SealedReleaseAggregatePlan = {
   actualDigest: current.artifactSetDigest,
   entries: [entry],
 };
+
+interface V2SealedPlan {
+  readonly schemaVersion: "v2";
+  readonly kind: "release-aggregate";
+  readonly channel: string;
+  readonly releaseId: string;
+  readonly sourceRevision: string;
+  readonly expectedDigest: string;
+  readonly actualDigest: string;
+  readonly entries: readonly MaterializedReleaseEntry[];
+}
+
+interface V2ReleaseFixture {
+  readonly release: PublicationReleaseIdentity;
+  readonly entries: readonly MaterializedReleaseEntry[];
+}
+
+interface V2PromotionInput {
+  readonly manifest: ReleaseManifest;
+  readonly currentChannel: string;
+  readonly currentRelease: PublicationReleaseIdentity;
+  readonly targetChannel: string;
+  readonly release: PublicationReleaseIdentity;
+  readonly mappings: readonly ReleaseChannelMapping[];
+  readonly sealedPlan: V2SealedPlan;
+  readonly exactHeadSha: string;
+  readonly planRevision: string;
+  readonly expectedEvidence: PromotionGateInput["expectedEvidence"];
+  readonly ci: CanonicalCiEvidence;
+  readonly qa: QaReleaseGateEvidence;
+  readonly review: ReviewGateEvidence;
+  readonly attestation: ReleaseChannelAttestation;
+}
+
+interface V2RollbackCandidate {
+  readonly channel: string;
+  readonly release: PublicationReleaseIdentity;
+  readonly attestation: ReleaseChannelAttestation;
+  readonly plan: V2SealedPlan;
+  readonly artifactAvailable: true;
+}
+
+interface V2RollbackInput {
+  readonly manifest: ReleaseManifest;
+  readonly currentChannel: string;
+  readonly current: PublicationReleaseIdentity;
+  readonly targetChannel: string;
+  readonly exactHeadSha: string;
+  readonly planRevision: string;
+  readonly expectedReview: RollbackSelectionInput["expectedReview"];
+  readonly review: ReviewGateEvidence;
+  readonly candidates: readonly V2RollbackCandidate[];
+}
+
+function v2Release(character: string): V2ReleaseFixture {
+  const artifactSourceCommit = commit(character);
+  const letters = ["a", "b", "c"] as const;
+  const entries = letters.map((letter) => ({
+    path: `pack/artifact-${letter}.txt`,
+    mode: "100644" as const,
+    content: new Uint8Array(Buffer.from(`${character}:${letter}\n`, "utf8")),
+  }));
+  const artifacts: PublicationArtifact[] = entries.map((materialized, index) => ({
+    sourcePath: `release/${character}/artifact-${letters[index]}.txt`,
+    destinationPath: materialized.path,
+    mode: materialized.mode,
+    size: materialized.content.byteLength,
+    contentDigest: `sha256:${createHash("sha256").update(materialized.content).digest("hex")}`,
+  }));
+  const artifactSetDigest = digestMaterializedReleaseEntries(entries);
+  const artifactInventoryDigest = deriveArtifactInventoryDigest(artifacts);
+  const releaseAssetInventoryDigest = digest("f");
+  const materializerVersion = "2";
+  const releaseRecordDigest = deriveReleaseRecordDigest({
+    materializerVersion,
+    artifactSourceCommit,
+    artifactSetDigest,
+    artifactInventoryDigest,
+    releaseAssetInventoryDigest,
+  });
+  return {
+    release: {
+      releaseId: deriveReleaseId(materializerVersion, artifactSourceCommit, artifactSetDigest),
+      materializerVersion,
+      artifactSourceCommit,
+      artifactSetDigest,
+      artifactInventoryDigest,
+      releaseAssetInventoryDigest,
+      releaseRecordDigest,
+      artifacts,
+    },
+    entries,
+  };
+}
+
+const v2Previous = v2Release("b");
+const v2Current = v2Release("a");
+const v2Manifest: ReleaseManifest = {
+  schemaVersion: "v2",
+  releases: {
+    [v2Previous.release.releaseId]: v2Previous.release,
+    [v2Current.release.releaseId]: v2Current.release,
+  },
+  channels: { canary: v2Previous.release.releaseId, stable: v2Current.release.releaseId },
+  channelOrder: ["canary", "stable"],
+};
+
+function v2Mappings(
+  fixture: V2ReleaseFixture,
+  channel: "canary" | "stable",
+): ReleaseChannelMapping[] {
+  return fixture.release.artifacts.map((artifact) => ({
+    channel,
+    releaseId: fixture.release.releaseId,
+    sourceRevision: fixture.release.artifactSourceCommit,
+    sourcePath: artifact.sourcePath,
+    destinationPath: artifact.destinationPath,
+  }));
+}
+
+function v2SealedPlan(fixture: V2ReleaseFixture, channel: "canary" | "stable"): V2SealedPlan {
+  return {
+    schemaVersion: "v2",
+    kind: "release-aggregate",
+    channel,
+    releaseId: fixture.release.releaseId,
+    sourceRevision: fixture.release.artifactSourceCommit,
+    expectedDigest: fixture.release.artifactSetDigest,
+    actualDigest: fixture.release.artifactSetDigest,
+    entries: fixture.entries,
+  };
+}
+
+function v2Attestation(fixture: V2ReleaseFixture): ReleaseChannelAttestation {
+  return {
+    status: "attested",
+    releaseId: fixture.release.releaseId,
+    artifactSourceCommit: fixture.release.artifactSourceCommit,
+    expectedDigest: fixture.release.artifactSetDigest,
+    actualDigest: fixture.release.artifactSetDigest,
+    entries: fixture.entries,
+  };
+}
+
+function v2PromotionInput(): V2PromotionInput {
+  const existingEvidence = promotionInput();
+  return {
+    manifest: v2Manifest,
+    currentChannel: "canary",
+    currentRelease: v2Previous.release,
+    targetChannel: "stable",
+    release: v2Current.release,
+    mappings: v2Mappings(v2Current, "stable"),
+    sealedPlan: v2SealedPlan(v2Current, "stable"),
+    exactHeadSha: v2Current.release.artifactSourceCommit,
+    planRevision,
+    expectedEvidence: existingEvidence.expectedEvidence,
+    ci,
+    qa: {
+      ...qa,
+      releaseId: v2Current.release.releaseId,
+      sourceRevision: v2Current.release.artifactSourceCommit,
+      artifactDigest: v2Current.release.artifactSetDigest,
+      channel: "stable",
+    },
+    review,
+    attestation: v2Attestation(v2Current),
+  };
+}
+
+function v2RollbackCandidate(
+  sealedPlan: V2SealedPlan = v2SealedPlan(v2Previous, "canary"),
+): V2RollbackCandidate {
+  return {
+    channel: "canary",
+    release: v2Previous.release,
+    attestation: v2Attestation(v2Previous),
+    plan: sealedPlan,
+    artifactAvailable: true,
+  };
+}
+
+function v2RollbackInput(candidates: readonly V2RollbackCandidate[]): V2RollbackInput {
+  const existingEvidence = rollbackInput([]);
+  return {
+    manifest: v2Manifest,
+    currentChannel: "stable",
+    current: v2Current.release,
+    targetChannel: "canary",
+    exactHeadSha: v2Current.release.artifactSourceCommit,
+    planRevision,
+    expectedReview: existingEvidence.expectedReview,
+    review,
+    candidates,
+  };
+}
+
+function asCurrentPromotionInput(input: unknown): PromotionGateInput {
+  return input as PromotionGateInput;
+}
+
+function withV2DestinationScalar(plan: V2SealedPlan): unknown {
+  return { ...plan, destinationPath: "pack/extra-scalar.txt" };
+}
+
+function v1PromotionWithMappings(mappings: readonly ReleaseChannelMapping[]): unknown {
+  const input: Record<string, unknown> = { ...promotionInput(), mappings };
+  delete input.mapping;
+  return input;
+}
 const ci: CanonicalCiEvidence = {
   checkName: "harness-check",
   headSha: current.artifactSourceCommit,
@@ -184,7 +408,7 @@ function promotionInput(): PromotionGateInput {
     currentRelease: previous,
     targetChannel: "stable",
     release: current,
-    mapping,
+    mappings: [mapping],
     sealedPlan: plan,
     exactHeadSha: current.artifactSourceCommit,
     planRevision,
@@ -319,7 +543,10 @@ async function deniedComposition(input: PromotionGateInput) {
   return runPromotionComposition(input);
 }
 
-function expectNoEffects(run: Awaited<ReturnType<typeof deniedComposition>>): void {
+function expectNoEffects(run: {
+  readonly result: { readonly decision: string };
+  readonly harness: ReturnType<typeof compositionHarness>;
+}): void {
   expect(run.result.decision).toBe("deny");
   expect(run.harness.dependencies.snapshotDestination).not.toHaveBeenCalled();
   expect(run.harness.dependencies.writeStaging).not.toHaveBeenCalled();
@@ -494,11 +721,11 @@ describe("S3 promotion / rollback pure gate", () => {
       { ...promotionInput(), release: { ...current, releaseId: previous.releaseId } },
       {
         ...promotionInput(),
-        mapping: { ...mapping, sourceRevision: previous.artifactSourceCommit },
+        mappings: [{ ...mapping, sourceRevision: previous.artifactSourceCommit }],
       },
       { ...promotionInput(), qa: { ...qa, artifactDigest: previous.artifactSetDigest } },
       { ...promotionInput(), release: { ...current, materializerVersion: "v2" } },
-      { ...promotionInput(), mapping: { ...mapping, channel: "canary" } },
+      { ...promotionInput(), mappings: [{ ...mapping, channel: "canary" }] },
     ];
     for (const input of inputs) {
       const run = await deniedComposition(input);
@@ -725,7 +952,7 @@ describe("S3 promotion / rollback pure gate", () => {
         {
           ...promotionInput(),
           ci: undefined,
-          mapping: { ...mapping, releaseId: previous.releaseId },
+          mappings: [{ ...mapping, releaseId: previous.releaseId }],
         },
         "identity_mismatch",
       ],
@@ -902,5 +1129,143 @@ describe("S3 promotion / rollback pure gate", () => {
       expect(run.result.decision).toBe("deny");
       expectNoEffects(run);
     }
+  });
+
+  it("CANDIDATE-U-RELAGGV2-007: v2 N=3 ordered inventory promotionを許可する", () => {
+    const input = v2PromotionInput();
+    expect(input.manifest.schemaVersion).toBe("v2");
+    expect(input.release.artifacts).toHaveLength(3);
+    expect(input.sealedPlan).toMatchObject({ schemaVersion: "v2", kind: "release-aggregate" });
+    expect(input.sealedPlan).not.toHaveProperty("destinationPath");
+    expect(input.sealedPlan.entries.map((value) => value.path)).toEqual(
+      input.release.artifacts.map((value) => value.destinationPath),
+    );
+    expect(input.mappings.map((value) => value.destinationPath)).toEqual(
+      input.release.artifacts.map((value) => value.destinationPath),
+    );
+    expect(input.release.artifactSetDigest).toBe(
+      digestMaterializedReleaseEntries(input.sealedPlan.entries),
+    );
+    expect(input.release.artifactInventoryDigest).toBe(
+      deriveArtifactInventoryDigest(input.release.artifacts),
+    );
+    expect(input.release.releaseRecordDigest).toBe(
+      deriveReleaseRecordDigest({
+        materializerVersion: input.release.materializerVersion,
+        artifactSourceCommit: input.release.artifactSourceCommit,
+        artifactSetDigest: input.release.artifactSetDigest,
+        artifactInventoryDigest: input.release.artifactInventoryDigest,
+        releaseAssetInventoryDigest: input.release.releaseAssetInventoryDigest,
+      }),
+    );
+    expect(evaluatePromotionGate(input)).toMatchObject({
+      decision: "allow",
+      releaseId: input.release.releaseId,
+      sideEffects: "none",
+    });
+  });
+
+  it("CANDIDATE-U-RELAGGV2-008(a-f): promotion inventory identity driftを拒否しports 0", async () => {
+    const input = v2PromotionInput();
+    const cases: Array<[string, unknown]> = [
+      ["mapping order", { ...input, mappings: [...input.mappings].reverse() }],
+      ["mapping missing", { ...input, mappings: input.mappings.slice(0, -1) }],
+      [
+        "entry order",
+        {
+          ...input,
+          sealedPlan: { ...input.sealedPlan, entries: [...input.sealedPlan.entries].reverse() },
+        },
+      ],
+      [
+        "entry missing",
+        {
+          ...input,
+          sealedPlan: { ...input.sealedPlan, entries: input.sealedPlan.entries.slice(0, -1) },
+        },
+      ],
+      [
+        "mapping destination differs from corresponding entry",
+        {
+          ...input,
+          mappings: input.mappings.map((value, index) =>
+            index === 1 ? { ...value, destinationPath: "pack/not-artifact-b.txt" } : value,
+          ),
+        },
+      ],
+      [
+        "v1 mapping cardinality remains exactly one",
+        v1PromotionWithMappings([mapping, { ...mapping, destinationPath: "pack/second-v1.txt" }]),
+      ],
+    ];
+    for (const [axis, malformed] of cases) {
+      const run = await deniedComposition(asCurrentPromotionInput(malformed));
+      expect(run.result, axis).toMatchObject({
+        decision: "deny",
+        reason: "identity_mismatch",
+        sideEffects: "none",
+      });
+      expectNoEffects(run);
+    }
+  });
+
+  it("CANDIDATE-U-RELAGGV2-008(g): v2 promotion planの余剰destinationPathをshape errorにする", async () => {
+    const input = v2PromotionInput();
+    const malformed = {
+      ...input,
+      sealedPlan: withV2DestinationScalar(input.sealedPlan),
+    };
+    expect(evaluatePromotionGate(malformed)).toMatchObject({
+      decision: "deny",
+      reason: "invalid_input",
+      sideEffects: "none",
+    });
+    const run = await deniedComposition(asCurrentPromotionInput(malformed));
+    expect(run.result).toMatchObject({
+      decision: "deny",
+      reason: "invalid_input",
+      sideEffects: "none",
+    });
+    expectNoEffects(run);
+  });
+
+  it("CANDIDATE-U-RELAGGV2-009(a): v2 rollback planは既存候補選択規則を通る", () => {
+    const candidate = v2RollbackCandidate();
+    const input = v2RollbackInput([candidate]);
+    expect(candidate.plan.schemaVersion).toBe("v2");
+    expect(candidate.plan).not.toHaveProperty("destinationPath");
+    expect(candidate.plan.entries.map((value) => value.path)).toEqual(
+      candidate.release.artifacts.map((value) => value.destinationPath),
+    );
+    expect(selectRollbackCandidate(input)).toMatchObject({
+      decision: "allow",
+      sideEffects: "none",
+      candidate: { plan: { schemaVersion: "v2" } },
+    });
+  });
+
+  it("CANDIDATE-U-RELAGGV2-009(b): rollback planの余剰destinationPathを拒否しports 0", async () => {
+    const candidate = v2RollbackCandidate();
+    const malformed = {
+      ...v2RollbackInput([]),
+      candidates: [
+        {
+          ...candidate,
+          plan: withV2DestinationScalar(candidate.plan),
+        },
+      ],
+    };
+    expect(selectRollbackCandidate(malformed)).toMatchObject({
+      decision: "deny",
+      reason: "invalid_input",
+      sideEffects: "none",
+    });
+    const run = await runRollbackComposition(malformed);
+    expect(run.result).toMatchObject({
+      decision: "deny",
+      reason: "invalid_input",
+      sideEffects: "none",
+    });
+    expectNoEffects(run);
   });
 });

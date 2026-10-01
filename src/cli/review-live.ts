@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { Command } from "commander";
 import type { LiveReviewWakeRoutingFailure } from "../feedback/live-review-projection.ts";
@@ -115,17 +115,83 @@ export function executeLiveReviewDelegation(input: {
   args: readonly string[];
   cliPath?: string;
 }): ReviewVerdictProjectionResult {
-  const child = spawnSync(
-    process.execPath,
-    [input.cliPath ?? join(input.repoRoot, "src", "cli.ts"), input.provider, ...input.args],
-    { cwd: input.repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
-  );
+  const resolved = input.cliPath
+    ? { ok: true as const, path: input.cliPath }
+    : resolveLiveReviewDelegationEntrypoint(input.repoRoot, process.argv[1]);
+  if (!resolved.ok) return resolved;
+  const cliPath = resolved.path;
+  const child = spawnSync(process.execPath, [cliPath, input.provider, ...input.args], {
+    cwd: input.repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  });
   if (child.status !== 0) return { ok: false, reason: "reviewer_execution_failed" };
   try {
     const execution = JSON.parse(child.stdout) as { review?: ReviewVerdictProjectionResult };
     return execution.review ?? { ok: false, reason: "review_receipt_missing" };
   } catch {
     return { ok: false, reason: "review_receipt_invalid" };
+  }
+}
+
+type LiveReviewEntrypointResult =
+  | { readonly ok: true; readonly path: string }
+  | {
+      readonly ok: false;
+      readonly reason:
+        | "consumer_runtime_absent"
+        | "consumer_runtime_resolution_denied"
+        | "consumer_runtime_identity_mismatch";
+    };
+
+/** Preserve source-checkout delegation while consumer execution uses only its sealed wrapper. */
+export function resolveLiveReviewDelegationEntrypoint(
+  repoRoot: string,
+  invokedCliPath: string | undefined,
+): LiveReviewEntrypointResult {
+  const sourceCli = join(repoRoot, "src", "cli.ts");
+  const packagePath = join(repoRoot, "package.json");
+  const wrapper = join(repoRoot, ".ut-tdd", "bin", "ut-tdd.mjs");
+  const pointerPath = join(repoRoot, ".ut-tdd", "runtime", "activation", "active.json");
+  try {
+    const sourcePackage = JSON.parse(readFileSync(packagePath, "utf8")) as {
+      name?: unknown;
+      utTdd?: { artifactProfile?: unknown };
+    };
+    if (
+      sourcePackage.name === "ut-tdd" &&
+      sourcePackage.utTdd?.artifactProfile === "source" &&
+      existsSync(sourceCli)
+    ) {
+      return { ok: true, path: sourceCli };
+    }
+  } catch {
+    // No source-checkout identity: resolve only the consumer-local sealed runtime.
+  }
+  if (!existsSync(wrapper) || !existsSync(pointerPath)) {
+    return { ok: false, reason: "consumer_runtime_absent" };
+  }
+  if (!invokedCliPath) return { ok: false, reason: "consumer_runtime_resolution_denied" };
+  let pointer: { entry_path?: unknown };
+  try {
+    pointer = JSON.parse(readFileSync(pointerPath, "utf8")) as { entry_path?: unknown };
+  } catch {
+    return { ok: false, reason: "consumer_runtime_resolution_denied" };
+  }
+  if (typeof pointer.entry_path !== "string") {
+    return { ok: false, reason: "consumer_runtime_resolution_denied" };
+  }
+  try {
+    const invoked = realpathSync.native(invokedCliPath);
+    const samePath = (left: string, right: string) =>
+      process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+    const activeEntry = realpathSync.native(pointer.entry_path);
+    if (!samePath(invoked, activeEntry)) {
+      return { ok: false, reason: "consumer_runtime_identity_mismatch" };
+    }
+    return { ok: true, path: realpathSync.native(wrapper) };
+  } catch {
+    return { ok: false, reason: "consumer_runtime_absent" };
   }
 }
 

@@ -20,6 +20,7 @@ import { HARNESS_DB_VMODEL_TABLES } from "../src/schema/harness-db-tables-vmodel
 import { assertWithinUtTdd, openHarnessDb, upsertRow } from "../src/state-db/index.ts";
 import { ensureHarnessSchema, harnessDbStatus } from "../src/state-db/maintenance.ts";
 import { migrate, missingTables, rowCounts, tableNames } from "../src/state-db/migration.ts";
+import { runSqliteTransaction } from "../src/state-db/sqlite-transaction.ts";
 import { removeTestTree } from "./support/temp-tree.ts";
 
 /**
@@ -219,6 +220,59 @@ describe("IT-DB-01: harness.db state-db foundation", () => {
     expect(second.toVersion).toBe(SCHEMA_VERSION);
     expect(missingTables(db)).toEqual([]);
     db.close();
+  });
+
+  it("migrate rolls back all DDL and user_version when a migration statement fails", () => {
+    const db = openHarnessDb(":memory:");
+    db.setUserVersion(11);
+    let tableDdlCount = 0;
+    const failingDb = {
+      ...db,
+      exec(sql: string) {
+        if (sql.startsWith("CREATE TABLE") && ++tableDdlCount === 2) {
+          throw new Error("injected migration DDL failure");
+        }
+        db.exec(sql);
+      },
+    };
+
+    expect(() => migrate(failingDb)).toThrow("injected migration DDL failure");
+    expect(tableNames(db)).toEqual([]);
+    expect(db.userVersion()).toBe(11);
+    db.close();
+  });
+
+  it("migrate composes with an existing sqlite transaction", () => {
+    const db = openHarnessDb(":memory:");
+    const result = runSqliteTransaction(db, () => migrate(db));
+
+    expect(result.applied).toBe(true);
+    expect(db.userVersion()).toBe(SCHEMA_VERSION);
+    expect(missingTables(db)).toEqual([]);
+    db.close();
+  });
+
+  it("migrate permits a second worker to inspect an already-current schema while a writer holds the DB", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "ut-tdd-migration-current-lock-"));
+    const dbPath = join(repoRoot, ".ut-tdd", "harness.db");
+    const writer = openHarnessDb(dbPath, { repoRoot });
+    let reader: ReturnType<typeof openHarnessDb> | undefined;
+    try {
+      migrate(writer);
+      reader = openHarnessDb(dbPath, { repoRoot });
+      writer.exec("BEGIN IMMEDIATE");
+      expect(migrate(reader)).toMatchObject({
+        fromVersion: SCHEMA_VERSION,
+        toVersion: SCHEMA_VERSION,
+        applied: false,
+      });
+      expect(missingTables(reader)).toEqual([]);
+    } finally {
+      writer.exec("ROLLBACK");
+      reader?.close();
+      writer.close();
+      cleanupRepo(repoRoot);
+    }
   });
 
   it("migrate は v26 DB の既存rowを保持してv27 Forward escape custody表を追加する", () => {

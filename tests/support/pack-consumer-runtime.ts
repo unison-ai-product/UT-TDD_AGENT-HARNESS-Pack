@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -108,7 +109,8 @@ export function createCleanPack(
 }
 
 export function createConsumerProject(repository: string): string {
-  const root = mkdtempSync(join(tmpdir(), "ut-tdd-pack-parity-consumer-"));
+  // PLAN-L7-628 §6.2: consumer_root は 8.3 alias を解決した canonical path で記録する。
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "ut-tdd-pack-parity-consumer-")));
   fixtureRoots.push(root);
   git(root, ["init", "-q", "-b", "main"]);
   git(root, ["config", "user.email", "test@example.invalid"]);

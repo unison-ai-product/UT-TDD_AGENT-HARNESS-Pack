@@ -1,4 +1,6 @@
 import {
+  type PublicationArtifact,
+  type PublicationReleaseIdentity,
   parseReleaseManifest,
   type ReleaseIdentity,
   resolveReleaseChannel,
@@ -54,16 +56,22 @@ export interface ReleaseAggregateAdmissionDependencies {
   ) => ReleaseChannelAttestation | Promise<ReleaseChannelAttestation>;
 }
 
-export interface SealedReleaseAggregatePlan {
+interface SealedReleaseAggregatePlanBase {
   readonly kind: "release-aggregate";
   readonly channel: string;
   readonly releaseId: string;
   readonly sourceRevision: string;
-  readonly destinationPath: string;
   readonly expectedDigest: string;
   readonly actualDigest: string;
   readonly entries: readonly MaterializedReleaseEntry[];
 }
+
+export type SealedReleaseAggregatePlan =
+  | (SealedReleaseAggregatePlanBase & {
+      readonly schemaVersion: "v1";
+      readonly destinationPath: string;
+    })
+  | (SealedReleaseAggregatePlanBase & { readonly schemaVersion: "v2" });
 
 export type ReleaseAggregateAdmissionResult =
   | { readonly ok: true; readonly plan: SealedReleaseAggregatePlan }
@@ -114,27 +122,72 @@ function firstManifestEntry(
   return candidates.length === 1 ? candidates[0] : null;
 }
 
-function selectedMapping(input: {
+export function publicationMappingsMatchArtifacts(
+  mappings: readonly ReleaseChannelMapping[],
+  artifacts: readonly PublicationArtifact[],
+): boolean {
+  return (
+    artifacts.length > 0 &&
+    mappings.length === artifacts.length &&
+    mappings.every(
+      (mapping, index) =>
+        mapping.sourcePath === artifacts[index]?.sourcePath &&
+        mapping.destinationPath === artifacts[index]?.destinationPath,
+    )
+  );
+}
+
+function isPublicationRelease(release: ReleaseIdentity): release is PublicationReleaseIdentity {
+  return "artifacts" in release && Array.isArray(release.artifacts);
+}
+
+function mappingIsValid(input: {
+  readonly mapping: ReleaseChannelMapping;
+  readonly channel: string;
+  readonly release: ReleaseIdentity;
+  readonly sourcePaths: readonly string[];
+  readonly allowlist: ReadonlySet<string>;
+}): boolean {
+  const { mapping } = input;
+  return (
+    mapping.channel === input.channel &&
+    mapping.releaseId === input.release.releaseId &&
+    mapping.sourceRevision === input.release.artifactSourceCommit &&
+    REVISION.test(mapping.sourceRevision) &&
+    validRelativePath(mapping.sourcePath) &&
+    validRelativePath(mapping.destinationPath) &&
+    input.sourcePaths.includes(mapping.sourcePath) &&
+    input.allowlist.has(mapping.destinationPath)
+  );
+}
+
+function selectedMappings(input: {
   readonly mappings: readonly ReleaseChannelMapping[];
   readonly channel: string;
   readonly release: ReleaseIdentity;
   readonly sourcePaths: readonly string[];
   readonly allowlist: ReadonlySet<string>;
-}): ReleaseChannelMapping | null {
+}): readonly ReleaseChannelMapping[] | null {
   const candidates = input.mappings.filter((mapping) => mapping.channel === input.channel);
-  if (candidates.length !== 1) return null;
-  const mapping = candidates[0];
+  if (isPublicationRelease(input.release)) {
+    if (!publicationMappingsMatchArtifacts(candidates, input.release.artifacts)) return null;
+  } else if (candidates.length !== 1) {
+    return null;
+  }
   if (
-    mapping.releaseId !== input.release.releaseId ||
-    mapping.sourceRevision !== input.release.artifactSourceCommit ||
-    !REVISION.test(mapping.sourceRevision) ||
-    !validRelativePath(mapping.sourcePath) ||
-    !validRelativePath(mapping.destinationPath) ||
-    !input.sourcePaths.includes(mapping.sourcePath) ||
-    !input.allowlist.has(mapping.destinationPath)
+    candidates.some(
+      (mapping) =>
+        !mappingIsValid({
+          mapping,
+          channel: input.channel,
+          release: input.release,
+          sourcePaths: input.sourcePaths,
+          allowlist: input.allowlist,
+        }),
+    )
   )
     return null;
-  return mapping;
+  return candidates;
 }
 
 function immutableEntry(entry: MaterializedReleaseEntry): MaterializedReleaseEntry {
@@ -157,18 +210,27 @@ function immutableSnapshot(
 function sealPlan(input: {
   readonly request: ReleaseAggregateAdmissionInput;
   readonly release: ReleaseIdentity;
-  readonly mapping: ReleaseChannelMapping;
+  readonly mappings: readonly ReleaseChannelMapping[];
   readonly attestation: Extract<ReleaseChannelAttestation, { status: "attested" }>;
 }): SealedReleaseAggregatePlan {
-  return Object.freeze({
+  const base = {
     kind: "release-aggregate" as const,
     channel: input.request.channel,
     releaseId: input.release.releaseId,
     sourceRevision: input.release.artifactSourceCommit,
-    destinationPath: input.mapping.destinationPath,
     expectedDigest: input.attestation.expectedDigest,
     actualDigest: input.attestation.actualDigest,
     entries: immutableSnapshot(input.attestation.entries),
+  };
+  if (isPublicationRelease(input.release)) {
+    return Object.freeze({ ...base, schemaVersion: "v2" as const });
+  }
+  const mapping = input.mappings[0];
+  if (!mapping) throw new Error("v1 release requires exactly one channel mapping");
+  return Object.freeze({
+    ...base,
+    schemaVersion: "v1" as const,
+    destinationPath: mapping.destinationPath,
   });
 }
 
@@ -191,14 +253,14 @@ export async function admitReleaseAggregate(
 
   const selected = resolveReleaseChannel(manifest.value, input.channel);
   if (!selected.ok) return { ok: false, phase: "preflight", error: selected.error };
-  const mapping = selectedMapping({
+  const mappings = selectedMappings({
     mappings: input.finalTree.channelMappings,
     channel: input.channel,
     release: selected.release,
     sourcePaths: input.finalTree.sourcePaths,
     allowlist,
   });
-  if (!mapping) return { ok: false, phase: "preflight", error: "missing_channel_mapping" };
+  if (!mappings) return { ok: false, phase: "preflight", error: "missing_channel_mapping" };
 
   let attestation: ReleaseChannelAttestation;
   try {
@@ -224,9 +286,19 @@ export async function admitReleaseAggregate(
   ) {
     return { ok: false, phase: "resolve", error: "invalid_artifact" };
   }
+  const publicationRelease = isPublicationRelease(selected.release) ? selected.release : undefined;
+  if (
+    publicationRelease &&
+    (attestation.entries.length !== publicationRelease.artifacts.length ||
+      attestation.entries.some(
+        (entry, index) => entry.path !== publicationRelease.artifacts[index]?.destinationPath,
+      ))
+  ) {
+    return { ok: false, phase: "resolve", error: "invalid_artifact" };
+  }
   return {
     ok: true,
-    plan: sealPlan({ request: input, release: selected.release, mapping, attestation }),
+    plan: sealPlan({ request: input, release: selected.release, mappings, attestation }),
   };
 }
 

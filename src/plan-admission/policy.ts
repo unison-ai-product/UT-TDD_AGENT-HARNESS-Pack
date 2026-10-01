@@ -1,3 +1,4 @@
+import { ALL_ZERO_PROJECTION_DIGEST_PATTERN } from "../schema/frontmatter.ts";
 import type { Drive, Kind, Layer, SubDoc, WorkflowPhase } from "../schema/index.ts";
 import { routeSignalCandidates } from "../schema/route-map.ts";
 
@@ -30,7 +31,16 @@ export interface PlanAdmissionRequest extends AdmissionTuple {
   branch: string;
   status?: "draft" | "confirmed" | "completed" | "archived";
   subDoc?: SubDoc;
-  issue?: { provider: "github"; issueId: number; episodeId: string; projectionDigest: string };
+  issue?: {
+    provider: "github";
+    issueId: number;
+    episodeId: string;
+    /** PLAN-L7-690 §2.1: projected/unprojected の閉じた enum。未指定の場合、
+     *  projectionDigest の有無から legacy binding を implicit projected として扱う
+     *  (§2.1 legacy 条項、既存 caller の後方互換)。 */
+    projectionState?: "projected" | "unprojected";
+    projectionDigest?: string;
+  };
   origin?: { planId: string; revision: number; digest: string };
   /** 駆動モデルの判定正本。起点種別や実装資産の有無ではなく遷移方向で決める。 */
   transitionDirection?: "implementation_to_design" | "design_to_implementation";
@@ -193,7 +203,27 @@ export function evaluatePlanAdmission(request: PlanAdmissionRequest): AdmissionD
 
   const issueRequired = request.routeMode !== "forward";
   if (issueRequired) {
-    if (!request.issue?.issueId || !request.issue.episodeId || !request.issue.projectionDigest) {
+    // PLAN-L7-690 §2.1/§2.4: Issue binding 自体 (issueId/episodeId) は常に必須。
+    // projection_state 未指定の legacy binding は digest の有無から implicit projected と
+    // みなす (既存 caller 後方互換)。#692 の CLI 配線が無い現状では projectForwardEscapeIssue
+    // が実 digest を発行できないため、projection_state=unprojected (digest なし) も
+    // 正当な Issue binding として admit する — 全ゼロ digest を発行させないための代替表現
+    // であり、#692 配線後の cutoff (unprojected 禁止) は本 PR の対象外 (§2.4)。
+    const issue = request.issue;
+    const impliedProjectionState =
+      issue?.projectionState ?? (issue?.projectionDigest ? "projected" : undefined);
+    // #690 補正: unprojected は projectionDigest を一切持たない (空文字も含む) ことを
+    // API 境界でも強制する。projected は非全ゼロ digest を必須とする (§2.1/§2.2 defence in depth)。
+    const hasProjectionDigest = issue?.projectionDigest !== undefined;
+    const validIssueBinding =
+      Boolean(issue?.issueId) &&
+      Boolean(issue?.episodeId) &&
+      (impliedProjectionState === "unprojected"
+        ? !hasProjectionDigest
+        : impliedProjectionState === "projected" &&
+          Boolean(issue?.projectionDigest) &&
+          !ALL_ZERO_PROJECTION_DIGEST_PATTERN.test(issue?.projectionDigest ?? ""));
+    if (!validIssueBinding) {
       violations.push({
         code: "plan-admission-issue-required",
         message: "Forward外起票にはE4投影済みGitHub Issueが必要です",

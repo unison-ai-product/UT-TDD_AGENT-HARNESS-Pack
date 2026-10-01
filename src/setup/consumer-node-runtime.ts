@@ -158,21 +158,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Stable JSON bytes are the only bytes used for identity digests. */
-function canonical(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   return `{${Object.keys(value as Record<string, unknown>)
     .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`)
+    .map(
+      (key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`,
+    )
     .join(",")}}`;
 }
+
+const canonical = canonicalJson;
 
 export function digestConsumerRuntimeBytes(bytes: Uint8Array): string {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
 
 export function digestConsumerRuntimeValue(value: unknown): string {
-  return digestConsumerRuntimeBytes(Buffer.from(canonical(value), "utf8"));
+  return digestConsumerRuntimeBytes(Buffer.from(canonicalJson(value), "utf8"));
 }
 
 /**
@@ -187,7 +191,7 @@ function digestConsumerRuntimeGenerationIdentity(identity: ConsumerNodeRuntimeId
 }
 
 function jsonBytes(value: unknown): Uint8Array {
-  return Buffer.from(`${canonical(value)}\n`, "utf8");
+  return Buffer.from(`${canonicalJson(value)}\n`, "utf8");
 }
 
 /**
@@ -348,7 +352,7 @@ function contained(parent: string, child: string): boolean {
   return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
-const SAFE_PRODUCT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+export const SAFE_PRODUCT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 function validIdentity(value: unknown): value is ConsumerNodeRuntimeIdentity {
   if (!isRecord(value)) return false;
@@ -627,9 +631,10 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-const consumerRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const pointerPath = resolve(consumerRoot, ".ut-tdd", "runtime", "activation", "active.json");
 const deny = (reason) => { console.error(reason); process.exit(78); };
+let consumerRoot;
+try { consumerRoot = realpathSync.native(resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")); } catch { deny("consumer_runtime_absent"); }
+const pointerPath = resolve(consumerRoot, ".ut-tdd", "runtime", "activation", "active.json");
 let pointer;
 try { pointer = JSON.parse(readFileSync(pointerPath, "utf8")); } catch { deny("consumer_runtime_absent"); }
 if (!pointer || typeof pointer.bundle_path !== "string" || typeof pointer.entry_path !== "string" || typeof pointer.bundle_digest !== "string") deny("consumer_runtime_resolution_denied");
@@ -637,11 +642,12 @@ if (Object.keys(pointer).sort().join("\\0") !== "bundle_digest\\0bundle_path\\0e
 if (pointer.bundle_path !== resolve(pointer.bundle_path) || pointer.entry_path !== resolve(pointer.entry_path)) deny("consumer_runtime_resolution_denied");
 const bundle = resolve(pointer.bundle_path), entry = resolve(pointer.entry_path);
 const runtimeRoot = resolve(consumerRoot, ".ut-tdd", "runtime");
-const runtimeRel = relative(runtimeRoot, bundle);
-const rel = relative(bundle, entry);
-if (runtimeRel === "" || runtimeRel === ".." || runtimeRel.startsWith("..") || rel === "" || rel === ".." || rel.startsWith("..")) deny("consumer_runtime_external_path");
 let runtimeReal, bundleReal, entryReal;
 try { runtimeReal = realpathSync.native(runtimeRoot); bundleReal = realpathSync.native(bundle); entryReal = realpathSync.native(entry); } catch { deny("consumer_runtime_absent"); }
+const rel = relative(bundle, entry);
+if (rel === "" || rel === ".." || rel.startsWith("..")) deny("consumer_runtime_external_path");
+const runtimeConsumerRel = relative(consumerRoot, runtimeReal);
+if (runtimeConsumerRel === "" || runtimeConsumerRel === ".." || runtimeConsumerRel.startsWith("..")) deny("consumer_runtime_external_path");
 const runtimePhysicalRel = relative(runtimeReal, bundleReal);
 if (runtimePhysicalRel === "" || runtimePhysicalRel === ".." || runtimePhysicalRel.startsWith("..")) deny("consumer_runtime_external_path");
 const physicalRel = relative(bundleReal, entryReal);

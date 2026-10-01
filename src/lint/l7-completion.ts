@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { resolveVModelRoots } from "../shared/design-root.ts";
 import { fmValue, normalizePath } from "./shared.ts";
 
 export interface L7CompletionDoc {
@@ -22,12 +23,6 @@ export interface L7CompletionResult {
 }
 
 const ACTIVE_STATUSES = new Set(["", "confirmed", "completed"]);
-const ACTIVE_DESIGN_DIRS = [
-  join("docs", "design", "harness", "L4-basic-design"),
-  join("docs", "design", "harness", "L5-detailed-design"),
-  join("docs", "design", "harness", "L6-function-design"),
-];
-
 function walkMarkdown(root: string, repoRoot: string): L7CompletionDoc[] {
   if (!existsSync(root)) return [];
   const docs: L7CompletionDoc[] = [];
@@ -49,9 +44,15 @@ function walkMarkdown(root: string, repoRoot: string): L7CompletionDoc[] {
 }
 
 export function loadL7CompletionDocs(root = process.cwd()): L7CompletionDoc[] {
-  return ACTIVE_DESIGN_DIRS.flatMap((dir) => walkMarkdown(join(root, dir), root)).sort((a, b) =>
-    a.path.localeCompare(b.path),
-  );
+  const designRoot = resolveVModelRoots(root).designRoot;
+  const activeDesignDirs = [
+    join(designRoot, "L4-basic-design"),
+    join(designRoot, "L5-detailed-design"),
+    join(designRoot, "L6-function-design"),
+  ];
+  return activeDesignDirs
+    .flatMap((dir) => walkMarkdown(join(root, dir), root))
+    .sort((a, b) => a.path.localeCompare(b.path));
 }
 
 function classifyStaleL7Line(line: string): string | null {

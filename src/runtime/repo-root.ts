@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { PROJECT_IDENTITY_ORIGIN_RECOVERY_COMMANDS } from "../kernel/project-identity.ts";
 
 const PROJECT_MARKER = "ut-tdd.project.json";
 
@@ -30,8 +31,14 @@ export function requireRuntimeRepoRoot(
 ): string {
   const repoRoot = resolveRuntimeRepoRoot(input);
   if (!repoRoot && input?.allowCwdFallback) return resolve(input.cwd ?? process.cwd());
-  if (!repoRoot)
-    throw new Error("UT-TDD repository root could not be resolved; runtime state write blocked");
+  if (!repoRoot) {
+    throw new Error(
+      [
+        "UT-TDD repository root could not be resolved; runtime state write blocked",
+        ...PROJECT_IDENTITY_ORIGIN_RECOVERY_COMMANDS.map((command) => `recovery: ${command}`),
+      ].join("\n"),
+    );
+  }
   return repoRoot;
 }
 

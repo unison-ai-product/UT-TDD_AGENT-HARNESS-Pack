@@ -94,20 +94,25 @@ export function releaseArtifactStem(sourceTag: string): string {
 export function releaseArtifactFileNames(sourceTag: string): {
   tarball: string;
   checksum: string;
-  manifest: string;
+  compiledEsm: string;
+  consumerRuntime: string;
+  consumerChecksum: string;
 } {
   const stem = releaseArtifactStem(sourceTag);
   const tarball = `${stem}.tar.gz`;
   return {
     tarball,
     checksum: `${tarball}.sha256`,
-    manifest: `${stem}.manifest.json`,
+    compiledEsm: `${stem}.ut-tdd.mjs`,
+    consumerRuntime: `${stem}.consumer-runtime.json`,
+    consumerChecksum: `${stem}.consumer.sha256`,
   };
 }
 
 const CLEAN_REQUIRED_PATHS = [
   "README.md",
   "LICENSE",
+  "NOTICE",
   "package.json",
   ".node-version",
   "src/cli.ts",
@@ -160,6 +165,7 @@ const CLEAN_ALLOW_FILES = new Set([
   ".github/workflows/harness-check.yml",
   "CHANGELOG.md",
   "LICENSE",
+  "NOTICE",
   "README.md",
   "biome.json",
   "package-lock.json",

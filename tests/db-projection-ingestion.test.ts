@@ -104,7 +104,10 @@ describe("db projection ingestion detector", () => {
       expect(result.ok).toBe(true);
       expect(result.messages.join("\n")).not.toContain("db-projection-ingestion profile");
       expect(result.timingSubsteps?.map((timing) => timing.id)).toEqual(
-        expect.arrayContaining(["plans", "graph-impact", "runtime-model-telemetry"]),
+        expect.arrayContaining(["plans", "graph-impact"]),
+      );
+      expect(result.timingSubsteps?.map((timing) => timing.id)).not.toContain(
+        "runtime-model-telemetry",
       );
     } finally {
       if (previousClaude === undefined) {

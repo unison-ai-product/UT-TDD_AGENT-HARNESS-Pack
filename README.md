@@ -18,7 +18,7 @@ provider の API キーはリポジトリへ置かず、ローカル CLI と機�
 ![Architecture](https://img.shields.io/badge/architecture-ADR--001-8B5CF6?style=flat-square)
 ![Typecheck](https://img.shields.io/badge/tsc-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Zod](https://img.shields.io/badge/schema-Zod-3E67B1?style=flat-square&logo=zod&logoColor=white)
-![License](https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square)
+![License](https://img.shields.io/badge/license-Apache--2.0-2ea44f?style=flat-square)
 ![Distribution](https://img.shields.io/badge/distribution-clean%20Pack-blue?style=flat-square)
 
 <sub><b>しばくべし</b> · <b>コンセプト</b> · <b>V-model</b> · <b>駆動モデル</b> · <b>クイックスタート</b> · <b>コマンド早見表</b> · <b>検証</b></sub>
@@ -428,14 +428,13 @@ rules are enforced by schema, lint, doctor gates, and hooks — not by prose.
 
 ## 📄 License
 
-MIT License.
+Apache License, Version 2.0.
 
-Copyright (c) 2026 UNISON-TECHNOLOGY
+Copyright 2026 UNISON-TECHNOLOGY
 
-This software may be used, copied, modified, merged, published, distributed,
-sublicensed, and/or sold, provided that the copyright notice and MIT License
-notice are included in all copies or substantial portions of the software. See
-[`LICENSE`](./LICENSE) for the full license text.
+Licensed under the Apache License, Version 2.0. See [`LICENSE`](./LICENSE) for
+the full license text and [`NOTICE`](./NOTICE) for attribution notices that
+must accompany redistributions.
 
 ## ✅ 検証
 

@@ -4,6 +4,14 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 
 const projectPath = "ut-tdd.project.json";
+export const PROJECT_IDENTITY_ORIGIN_RECOVERY_COMMANDS = [
+  "git remote add origin <url>",
+  "ut-tdd setup --solo",
+] as const;
+export const PROJECT_IDENTITY_COMMIT_RECOVERY_COMMANDS = [
+  "git add ut-tdd.project.json",
+  'git commit -m "chore: add project identity"',
+] as const;
 type ObjectFormat = "sha1" | "sha256";
 type RuleId =
   | "plan-repository-identity-missing"

@@ -262,20 +262,48 @@ describe("runtime adapter plan", () => {
       const explicit = join(root, process.platform === "win32" ? "codex.cmd" : "codex");
       writeFileSync(explicit, "");
       const seen: string[] = [];
+      let probeOptions: { windowsHide: boolean } | undefined;
       const ok = isProviderCommandSpawnable("codex", {
         env: { UT_TDD_CODEX_BIN: explicit },
         platform: process.platform,
-        runProbe: (command, args) => {
+        runProbe: ({ command, args, options }) => {
           seen.push(`${command} ${args.join(" ")}`);
+          probeOptions = options;
           return { status: 0 };
         },
       });
 
       expect(ok).toBe(true);
       expect(seen[0]).toContain("--version");
+      expect(probeOptions?.windowsHide).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("U-ADAPTER-011: hides the Windows PATH lookup child process", () => {
+    const seen: Array<{
+      finder: string;
+      args: string[];
+      windowsHide: true;
+    }> = [];
+    const resolved = resolveCodexNativeCommand({
+      platform: "win32",
+      env: { SystemRoot: "C:\\Windows" },
+      runPathLookup: (finder, args, options) => {
+        seen.push({ finder, args, windowsHide: options.windowsHide });
+        return "C:\\tools\\codex.exe\r\n";
+      },
+    });
+
+    expect(resolved).toBe("C:\\tools\\codex.exe");
+    expect(seen).toEqual([
+      {
+        finder: "C:\\Windows\\System32\\where.exe",
+        args: ["codex"],
+        windowsHide: true,
+      },
+    ]);
   });
 
   it("U-ADAPTER-007: delivers the codex prompt via stdin so Windows .cmd shell-wrapping cannot truncate it", () => {

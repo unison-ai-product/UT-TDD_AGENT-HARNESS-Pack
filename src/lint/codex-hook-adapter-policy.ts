@@ -54,7 +54,8 @@ export const CODEX_REQUIRED = [
   {
     id: "post-tool-use",
     event: "PostToolUse",
-    matcher: "apply_patch|write_file|exec_command|local_shell",
+    // PLAN-L7-668 §1.1 実測: shell 実行は tool_name=Bash で PreToolUse/PostToolUse に渡る。
+    matcher: "apply_patch|write_file|exec_command|local_shell|Bash",
     commandParts: ["src/cli.ts", "hook post-tool-use"],
     sourceArgs: codexSourceArgs("post-tool-use"),
     wrapperArgs: wrapperHookArgs("post-tool-use"),

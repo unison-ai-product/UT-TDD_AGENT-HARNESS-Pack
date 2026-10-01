@@ -21,7 +21,7 @@ export const MODEL_IDS = {
   },
   codex: {
     /** T0 フロンティア (検証/設計/相談の最上位帯)。 */
-    frontier: "gpt-5.6-sol",
+    frontier: "gpt-6.1-sol",
     /** テスト実装専門 (PO 割当 2026-07-14)。 */
     worker: "gpt-5.6-terra",
     /** 実装 / ドキュメント修正の主力 (PO 採用 2026-07-14、effort=high 基準)。 */

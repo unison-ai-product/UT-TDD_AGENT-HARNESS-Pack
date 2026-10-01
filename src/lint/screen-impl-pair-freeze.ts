@@ -19,6 +19,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { resolveVModelRoots } from "../shared/design-root.ts";
 
 export interface ScreenImplPairFreezeInput {
   /** screen-list.md が存在したか (不在 = scope 0、OK)。 */
@@ -101,7 +102,7 @@ function isPairFreezeReached(repoRoot: string, nextPairFreeze: string | null): b
   const layerMatch = nextPairFreeze.match(/^L(\d+)$/);
   if (!layerMatch) return false;
   const n = layerMatch[1];
-  const designRoot = join(repoRoot, "docs", "design", "harness");
+  const designRoot = join(repoRoot, resolveVModelRoots(repoRoot).designRoot);
   if (!existsSync(designRoot)) return false;
   const dirRe = new RegExp(`^L${n}(?:-|$)`);
   for (const entry of readdirSync(designRoot, { withFileTypes: true })) {
@@ -113,7 +114,12 @@ function isPairFreezeReached(repoRoot: string, nextPairFreeze: string | null): b
 }
 
 export function loadScreenImplPairFreezeInput(repoRoot: string): ScreenImplPairFreezeInput {
-  const screenListPath = join(repoRoot, "docs", "design", "harness", "L2-screen", "screen-list.md");
+  const screenListPath = join(
+    repoRoot,
+    resolveVModelRoots(repoRoot).designRoot,
+    "L2-screen",
+    "screen-list.md",
+  );
   if (!existsSync(screenListPath)) {
     return {
       screenDesignPresent: false,

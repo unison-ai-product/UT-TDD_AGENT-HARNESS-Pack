@@ -1,18 +1,12 @@
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import {
   type MaybeVacuumOptions,
   type MaybeVacuumResult,
   maybeVacuumHarnessDb,
 } from "./db-maintenance.ts";
-import { defaultHarnessDbPath, openHarnessDb } from "./index.ts";
-import { migrate } from "./migration.ts";
-import {
-  projectModelEvaluations,
-  projectTokenUsage,
-  rebuildHarnessDb,
-} from "./projection-writer.ts";
+import { defaultHarnessDbPath } from "./index.ts";
+import { rebuildHarnessDb } from "./projection-writer.ts";
 import {
   acquireStopRefreshLease,
   claimStopRefreshDemand,
@@ -25,11 +19,11 @@ import {
   retryStopRefreshDemand,
   transferStopRefreshLease,
 } from "./stop-refresh-coordinator.ts";
-import { loadRuntimeSessionUsage } from "./token-tracker.ts";
 
 export interface StopRefreshResult {
   ok: boolean;
   rebuilt: boolean;
+  /** PR-1 の互換出力。常時 scan を退役したため常に 0。 */
   tokenRunsIngested: number;
   /** ok=false のときの skip 理由 (fail-open: 例外は握って理由へ落とす)。 */
   skippedReason?: string;
@@ -39,11 +33,6 @@ export interface StopRefreshResult {
 
 export interface StopRefreshOptions {
   repoRoot: string;
-  /** token ingest の走査対象 (test 注入用)。未指定は telemetry scan と同じ OS default。 */
-  claudeSessionsDir?: string;
-  codexSessionsDir?: string;
-  /** token ingest 自体を止める (rebuild のみ)。 */
-  skipTokenIngest?: boolean;
   /** test 注入用。未指定は maybeVacuumHarnessDb (PLAN-L7-457)。 */
   vacuum?: (dbPath: string, options?: MaybeVacuumOptions) => MaybeVacuumResult;
 }
@@ -53,17 +42,17 @@ export interface StopRefreshOptions {
  *
  * - persisted harness.db を決定的に full rebuild し、他ランタイム merge 由来の
  *   plan registry stale (db-currency violation) を session 境界で自動収束させる。
- * - token/cost ingest (`telemetry scan` 相当) を統合し、別コマンド依存を解消する。
- * - fail-open: rebuild/ingest のどんな失敗 (DB lock 含む) も session 終了を妨げない。
+ * - token/cost ingest は行わない。手動 telemetry scan の所有は PR-2 で整理する。
+ * - fail-open: rebuild の失敗 (DB lock 含む) は session 終了を妨げない。
  *   doctor は read-only のまま (自動修復は doctor でなく Stop 境界に置く設計判断)。
  */
 export function refreshHarnessDbOnStop(options: StopRefreshOptions): StopRefreshResult {
   const { repoRoot } = options;
   let rebuilt = false;
-  let tokenRunsIngested = 0;
+  const tokenRunsIngested = 0;
   let vacuum: MaybeVacuumResult | undefined;
   try {
-    const rebuild = rebuildHarnessDb({ repoRoot });
+    const rebuild = rebuildHarnessDb({ repoRoot, skipTokenTelemetry: true });
     rebuilt = rebuild.ok;
     if (!rebuild.ok) {
       return { ok: false, rebuilt, tokenRunsIngested, skippedReason: "rebuild-failed" };
@@ -78,40 +67,6 @@ export function refreshHarnessDbOnStop(options: StopRefreshOptions): StopRefresh
       tokenRunsIngested,
       vacuum,
       skippedReason: `rebuild-error: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-
-  if (options.skipTokenIngest === true) {
-    return { ok: true, rebuilt, tokenRunsIngested, vacuum };
-  }
-
-  try {
-    const claudeDir =
-      options.claudeSessionsDir ??
-      process.env.UT_TDD_CLAUDE_SESSIONS_DIR ??
-      join(homedir(), ".claude", "projects");
-    const codexDir =
-      options.codexSessionsDir ??
-      process.env.UT_TDD_CODEX_SESSIONS_DIR ??
-      join(homedir(), ".codex", "sessions");
-    const usages = loadRuntimeSessionUsage({ claudeDirs: [claudeDir], codexDirs: [codexDir] });
-    const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
-    try {
-      migrate(db);
-      projectTokenUsage(db, usages);
-      projectModelEvaluations(db, repoRoot);
-    } finally {
-      db.close();
-    }
-    tokenRunsIngested = usages.length;
-  } catch (error) {
-    // rebuild は成功済みなので currency は回復している。ingest 失敗のみ理由付きで報告。
-    return {
-      ok: false,
-      rebuilt,
-      tokenRunsIngested,
-      vacuum,
-      skippedReason: `token-ingest-error: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 
