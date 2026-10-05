@@ -1,10 +1,10 @@
 schema_version: v2
 releases:
-  rel-sha256:a62b3536445d00a762cf0e142623c5346c71d69ef432b695d22fc72fa921e29f:
+  rel-sha256:81b203576d77ffe6267f08f2ffde16ce2d625c0b9eb86bc5a0fcca5cf0dcc765:
     materializerVersion: "1"
-    artifactSourceCommit: 7f91d75ec28843a3c335a3031e44ac954d8a5cf3
-    artifactSetDigest: sha256:f1bc143a0ed4bcb1dd409999003db415dfed3ff9b0e1720506aefdec3b2a9d7b
-    artifactInventoryDigest: sha256:3e51e9c673a6726820891b11c33e5ec5c9bb61fa967c27e59fc19f4f669caf9b
+    artifactSourceCommit: f8d22ac9e48dac0d6101f3d268877607269b4f97
+    artifactSetDigest: sha256:768bfc53f849e47fe552f790a4b24372f8291187f11d06b0c4cc431b9cbab61c
+    artifactInventoryDigest: sha256:48ae10b8a07ec38506d4496cae4e218cc7eb73d6a7f99829938b5f15a183ec9c
     artifacts:
       - sourcePath: .editorconfig
         destinationPath: .editorconfig
@@ -1249,8 +1249,8 @@ releases:
       - sourcePath: src/doctor/test-repository-isolation.ts
         destinationPath: src/doctor/test-repository-isolation.ts
         mode: "100644"
-        size: 24783
-        contentDigest: sha256:0b31696950c005226643eb385bce1b028ce41f3705b3c44fb986776e7cc20fef
+        size: 24805
+        contentDigest: sha256:a79041f7781c1bfa5bdf55f6c484203621756e4a45643551a53dd893a97e8290
       - sourcePath: src/doctor/toolchain.ts
         destinationPath: src/doctor/toolchain.ts
         mode: "100644"
@@ -1514,8 +1514,8 @@ releases:
       - sourcePath: src/gate/right-arm-static.ts
         destinationPath: src/gate/right-arm-static.ts
         mode: "100644"
-        size: 45787
-        contentDigest: sha256:2c62687e576536e4db9eed49c8fa9468a666bd067d2c7fd347ddff6970e4fa5f
+        size: 54472
+        contentDigest: sha256:e8305e0c3cfb62bef924687287315d7dbf255a7f65dfd66be567ffca401320bc
       - sourcePath: src/gate/run-evidence.ts
         destinationPath: src/gate/run-evidence.ts
         mode: "100644"
@@ -1524,8 +1524,8 @@ releases:
       - sourcePath: src/gate/static.ts
         destinationPath: src/gate/static.ts
         mode: "100644"
-        size: 12906
-        contentDigest: sha256:d2eb7679d3b8b93369c53cb7ec68e7134d38f2d21d9ac49913151ab010a11106
+        size: 12923
+        contentDigest: sha256:9ea45b95ae438f43af34a0579187c662d76316833bfeeec73cdf9a9f862c6456
       - sourcePath: src/git/default-branch.ts
         destinationPath: src/git/default-branch.ts
         mode: "100644"
@@ -2844,8 +2844,8 @@ releases:
       - sourcePath: src/setup/pack-publication-admission.ts
         destinationPath: src/setup/pack-publication-admission.ts
         mode: "100644"
-        size: 30879
-        contentDigest: sha256:fbcaaf8d789e4d297df9b1d3468cf62c9fbfe2609a4699e9ff31e883fc52bc1d
+        size: 31357
+        contentDigest: sha256:bb218426849c327f517031c0a24dc5031cbd85de659243626aa884905d0a47e2
       - sourcePath: src/setup/pack-publication-assets.ts
         destinationPath: src/setup/pack-publication-assets.ts
         mode: "100644"
@@ -3376,6 +3376,11 @@ releases:
         mode: "100644"
         size: 5485
         contentDigest: sha256:dc466ad22959f26e4dfd952a9feb1192ff3c13bb4ec828b77f71f3528f0b301d
+      - sourcePath: tests/consumer-g14-static.test.ts
+        destinationPath: tests/consumer-g14-static.test.ts
+        mode: "100644"
+        size: 19816
+        contentDigest: sha256:57cfffe6127393fd53e21f6d12477947e52c2022aba3b2f5035ad399403a2392
       - sourcePath: tests/consumer-local-runtime-admission.test.ts
         destinationPath: tests/consumer-local-runtime-admission.test.ts
         mode: "100644"
@@ -4079,8 +4084,8 @@ releases:
       - sourcePath: tests/pack-publication-admission.test.ts
         destinationPath: tests/pack-publication-admission.test.ts
         mode: "100644"
-        size: 20250
-        contentDigest: sha256:85e47f6a865487379577380cb7ad41ca5d991fc52e62b0bc8cbfebe14ece1b14
+        size: 22890
+        contentDigest: sha256:5ea9924190b274774d4e0da3c01da44abfa14c52dda6914364256946e1dfdfd7
       - sourcePath: tests/pack-publication-assets.test.ts
         destinationPath: tests/pack-publication-assets.test.ts
         mode: "100644"
@@ -4384,8 +4389,8 @@ releases:
       - sourcePath: tests/release-consumer-dev-start-identity.test.ts
         destinationPath: tests/release-consumer-dev-start-identity.test.ts
         mode: "100644"
-        size: 6887
-        contentDigest: sha256:1d674595050b727054e101fff7e96cf095b5fb1e449703f6358a0d37ebd2e70b
+        size: 7891
+        contentDigest: sha256:6f583743ee926253e96a80b5c8880a8554818e0cc7b2d1779231028a44fd5f97
       - sourcePath: tests/release-consumer-gates.test.ts
         destinationPath: tests/release-consumer-gates.test.ts
         mode: "100644"
@@ -4971,11 +4976,11 @@ releases:
         mode: "100644"
         size: 446
         contentDigest: sha256:6cba97b40eadc261a38110433192d8c2d5359a6c9ac0daef34d0686433127e07
-    releaseAssetInventoryDigest: sha256:00bf7849212c5f1b81b62355a3c84eef507b56448a1b4ce4c2cda56823480ae4
-    releaseRecordDigest: sha256:f533951806b0385c81dc718566b9a30af5794916f852a422a9e38fc3fba0bc7c
+    releaseAssetInventoryDigest: sha256:c5f2b64474a7589e26ef94d6f4681942268f5e3eab725afcfa26f0ce8cd52603
+    releaseRecordDigest: sha256:c4804e5b86a6e46886d1daf386e1190e445f4fd0686838f33e61cd940ae90d4a
 channels:
-  canary: rel-sha256:a62b3536445d00a762cf0e142623c5346c71d69ef432b695d22fc72fa921e29f
-  stable: rel-sha256:a62b3536445d00a762cf0e142623c5346c71d69ef432b695d22fc72fa921e29f
+  canary: rel-sha256:81b203576d77ffe6267f08f2ffde16ce2d625c0b9eb86bc5a0fcca5cf0dcc765
+  stable: rel-sha256:81b203576d77ffe6267f08f2ffde16ce2d625c0b9eb86bc5a0fcca5cf0dcc765
 channelOrder:
   - canary
   - stable

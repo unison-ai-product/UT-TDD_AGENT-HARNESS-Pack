@@ -27,6 +27,10 @@ export const PACK_PUBLICATION_ADMISSION_COVERAGE = Object.freeze({
     "CANDIDATE-PACKPUB-ADM-010",
     "CANDIDATE-PACKPUB-ADM-011",
     "CANDIDATE-PACKPUB-ADM-012",
+    "CANDIDATE-PACKPUB-ADM-013",
+    "CANDIDATE-PACKPUB-ADM-014",
+    "CANDIDATE-PACKPUB-ADM-015",
+    "CANDIDATE-PACKPUB-ADM-020",
     "CANDIDATE-PACKPUB-ADM-036",
     "CANDIDATE-PACKPUB-ADM-040",
     "CANDIDATE-PACKPUB-ADM-042",
@@ -34,7 +38,8 @@ export const PACK_PUBLICATION_ADMISSION_COVERAGE = Object.freeze({
     "CANDIDATE-PACKPUB-ADM-057",
   ] as const,
   deferred: [
-    "CANDIDATE-PACKPUB-ADM-013..035",
+    "CANDIDATE-PACKPUB-ADM-016..019",
+    "CANDIDATE-PACKPUB-ADM-021..035",
     "CANDIDATE-PACKPUB-ADM-037..039",
     "CANDIDATE-PACKPUB-ADM-041",
     "CANDIDATE-PACKPUB-ADM-043..047",
@@ -496,6 +501,7 @@ function findReplay(
     readonly operationId: string;
     readonly idempotencyKey: string;
     readonly pullRequest: string;
+    readonly expectedMainOid: string;
     readonly observationBundleDigest: string;
   },
 ): PackPublicationAdmissionLedgerRecord | PackPublicationAdmissionResult | null {
@@ -513,16 +519,20 @@ function findReplay(
       record.pullRequest === input.pullRequest &&
       record.observationBundleDigest === input.observationBundleDigest,
   );
-  return (
-    exact ??
-    deny(
-      matching.some((record) => record.operationId === input.operationId)
-        ? "admission_operation_replay"
-        : matching.some((record) => record.idempotencyKey === input.idempotencyKey)
-          ? "admission_idempotency_replay"
-          : "admission_pr_replay",
+  if (exact) return exact;
+  if (matching.some((record) => record.operationId === input.operationId))
+    return deny("admission_operation_replay");
+  if (matching.some((record) => record.idempotencyKey === input.idempotencyKey))
+    return deny("admission_idempotency_replay");
+  if (
+    matching.some(
+      (record) =>
+        record.pullRequest === input.pullRequest &&
+        record.sealed.expectedMainOid !== input.expectedMainOid,
     )
-  );
+  )
+    return deny("admission_pr_expected_main_conflict");
+  return deny("admission_pr_replay");
 }
 
 export async function admitPackPublication(
@@ -753,6 +763,7 @@ export async function admitPackPublication(
     operationId: receipt.binding.operationId,
     idempotencyKey: staging.idempotencyKey,
     pullRequest: pr.pullRequest,
+    expectedMainOid: staging.expectedMainOid,
     observationBundleDigest,
   });
   if (replay && !("ok" in replay))

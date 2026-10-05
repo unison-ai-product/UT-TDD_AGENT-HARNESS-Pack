@@ -44,7 +44,8 @@ function testEnv(root: string): NodeJS.ProcessEnv {
 }
 
 function runCli(cwd: string, args: readonly string[], input = "", env: NodeJS.ProcessEnv = {}) {
-  return spawnSync(process.execPath, [cliPath, ...args], {
+  const startedAt = performance.now();
+  const result = spawnSync(process.execPath, [cliPath, ...args], {
     cwd,
     input,
     encoding: "utf8",
@@ -59,6 +60,23 @@ function runCli(cwd: string, args: readonly string[], input = "", env: NodeJS.Pr
     maxBuffer: 64 * 1024 * 1024,
     windowsHide: true,
   });
+  return {
+    ...result,
+    diagnostic: JSON.stringify({
+      command: args,
+      status: result.status,
+      signal: result.signal,
+      elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
+      error: result.error
+        ? {
+            name: result.error.name,
+            code: (result.error as NodeJS.ErrnoException).code,
+            message: result.error.message,
+          }
+        : null,
+      stderrTail: result.stderr?.slice(-4_000) ?? "",
+    }),
+  };
 }
 
 function setup(root: string) {
@@ -78,7 +96,7 @@ describe("U-RCDEV PR-1: identity / repo-root", () => {
     const root = fixture();
     const run = setup(root);
 
-    expect(run.status).toBe(2);
+    expect(run.status, run.diagnostic).toBe(2);
     expect(run.stdout).toContain("phase: 0-A");
     expect(run.stdout).toContain("AGENTS.md");
     expect(existsSync(join(root, ".ut-tdd", "state", "setup.json"))).toBe(true);
@@ -95,7 +113,7 @@ describe("U-RCDEV PR-1: identity / repo-root", () => {
     const root = fixture();
     const first = setup(root);
     const paths = writtenPaths(first.stdout);
-    expect(paths.length).toBeGreaterThan(0);
+    expect(paths.length, first.diagnostic).toBeGreaterThan(0);
     const before = new Map(paths.map((path) => [path, readFileSync(join(root, path))]));
 
     execFileSync("git", ["remote", "add", "origin", "https://github.com/example/probe.git"], {
@@ -103,7 +121,7 @@ describe("U-RCDEV PR-1: identity / repo-root", () => {
     });
     const second = setup(root);
 
-    expect(second.status).toBe(0);
+    expect(second.status, second.diagnostic).toBe(0);
     expect(existsSync(join(root, "ut-tdd.project.json"))).toBe(true);
     for (const [path, bytes] of before) {
       expect(readFileSync(join(root, path)), path).toEqual(bytes);
@@ -112,7 +130,8 @@ describe("U-RCDEV PR-1: identity / repo-root", () => {
 
   it("U-RCDEV-003: setup identity marker resolves root for all five hook/session routes", () => {
     const withOrigin = fixture("https://github.com/example/probe.git");
-    expect(setup(withOrigin).status).toBe(0);
+    const withOriginSetup = setup(withOrigin);
+    expect(withOriginSetup.status, withOriginSetup.diagnostic).toBe(0);
     const nested = join(withOrigin, "nested", "hook-cwd");
     mkdirSync(nested, { recursive: true });
     expect(resolveRuntimeRepoRoot({ cwd: nested, env: {} })).toBe(withOrigin);
@@ -126,7 +145,9 @@ describe("U-RCDEV PR-1: identity / repo-root", () => {
     ];
     for (const route of routes) {
       const run = runCli(nested, route, "{}\n", testEnv(withOrigin));
-      expect(run.stderr, route.join(" ")).not.toContain("repository root could not be resolved");
+      expect(run.stderr, `${route.join(" ")}\n${run.diagnostic}`).not.toContain(
+        "repository root could not be resolved",
+      );
     }
 
     const markerlessParent = fixture();
@@ -135,13 +156,18 @@ describe("U-RCDEV PR-1: identity / repo-root", () => {
     expect(resolveRuntimeRepoRoot({ cwd: markerlessNested, env: {} })).toBeNull();
 
     const withoutOrigin = fixture();
-    expect(setup(withoutOrigin).status).toBe(2);
+    const withoutOriginSetup = setup(withoutOrigin);
+    expect(withoutOriginSetup.status, withoutOriginSetup.diagnostic).toBe(2);
     const deniedNested = join(withoutOrigin, "nested", "hook-cwd");
     mkdirSync(deniedNested, { recursive: true });
     for (const route of routes) {
       const run = runCli(deniedNested, route, "{}\n", testEnv(withoutOrigin));
-      expect(run.stderr, route.join(" ")).toContain("recovery: git remote add origin <url>");
-      expect(run.stderr, route.join(" ")).toContain("recovery: ut-tdd setup --solo");
+      expect(run.stderr, `${route.join(" ")}\n${run.diagnostic}`).toContain(
+        "recovery: git remote add origin <url>",
+      );
+      expect(run.stderr, `${route.join(" ")}\n${run.diagnostic}`).toContain(
+        "recovery: ut-tdd setup --solo",
+      );
     }
   }, 60_000);
 
@@ -149,7 +175,7 @@ describe("U-RCDEV PR-1: identity / repo-root", () => {
     const root = fixture("https://github.com/example/probe.git");
     const run = setup(root);
 
-    expect(run.status).toBe(0);
+    expect(run.status, run.diagnostic).toBe(0);
     expect(run.stdout).toContain("identity: commit required (ut-tdd.project.json)");
     expect(run.stdout).toContain("git add ut-tdd.project.json");
     expect(run.stdout).toContain('git commit -m "chore: add project identity"');
@@ -157,10 +183,11 @@ describe("U-RCDEV PR-1: identity / repo-root", () => {
 
   it("U-RCDEV-005: session start keeps HEAD-strict identity and prints commit recovery", () => {
     const root = fixture("https://github.com/example/probe.git");
-    expect(setup(root).status).toBe(0);
+    const setupResult = setup(root);
+    expect(setupResult.status, setupResult.diagnostic).toBe(0);
 
     const beforeCommit = runCli(root, ["session", "start"], "{}\n", testEnv(root));
-    expect(beforeCommit.status).toBe(1);
+    expect(beforeCommit.status, beforeCommit.diagnostic).toBe(1);
     expect(beforeCommit.stderr).toContain("project_memory_root_project_identity_unavailable");
     expect(beforeCommit.stderr).toContain("recovery: git add ut-tdd.project.json");
     expect(beforeCommit.stderr).toContain('recovery: git commit -m "chore: add project identity"');
@@ -168,6 +195,8 @@ describe("U-RCDEV PR-1: identity / repo-root", () => {
     execFileSync("git", ["add", "ut-tdd.project.json"], { cwd: root });
     execFileSync("git", ["commit", "-qm", "test: commit project identity"], { cwd: root });
     const afterCommit = runCli(root, ["session", "start"], "{}\n", testEnv(root));
-    expect(afterCommit.stderr).not.toContain("project_memory_root_project_identity_unavailable");
+    expect(afterCommit.stderr, afterCommit.diagnostic).not.toContain(
+      "project_memory_root_project_identity_unavailable",
+    );
   }, 60_000);
 });
