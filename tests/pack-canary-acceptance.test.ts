@@ -532,14 +532,15 @@ describe("manual canary acceptance publish-record boundary", () => {
     ).toThrow("install-evidence-not-verifiable");
   });
 
-  it("U-ST-PACKCANARY-015: accepts exact canary.4 for the agent lane and canary.2 for the standard lane", () => {
-    const anchor = sha("canary.4 anchor");
-    expect(buildInstallerInvocation("C:/c4-release", anchor, "v0.2.0-canary.4")).toEqual([
-      join("C:/c4-release", "v0.2.0-canary.4.ut-tdd.mjs"),
+  it("U-ST-PACKCANARY-015: accepts exact canary.5 for the agent lane and canary.2 for the standard lane", () => {
+    const anchor = sha("canary.5 anchor");
+    expect(CANARY_TAG).toBe("v0.2.0-canary.2");
+    expect(buildInstallerInvocation("C:/c5-release", anchor, "v0.2.0-canary.5")).toEqual([
+      join("C:/c5-release", "v0.2.0-canary.5.ut-tdd.mjs"),
       "setup",
       "--solo",
       "--consumer-runtime-release",
-      "C:/c4-release",
+      "C:/c5-release",
       "--expected-consumer-digest",
       anchor,
     ]);
@@ -553,9 +554,11 @@ describe("manual canary acceptance publish-record boundary", () => {
       anchor,
     ]);
     for (const tag of [
+      "v0.2.0-canary.4",
       "v0.2.0-canary.3",
       "v0.1.4",
       "latest",
+      "v0.2.0-canary.5-preview",
       "v0.2.0-canary.4-preview",
       "prefix-v0.2.0-canary.4",
     ]) {
@@ -908,27 +911,27 @@ describe("manual canary acceptance publish-record boundary", () => {
     ).toThrow("acceptance-tag-not-canary-2");
   });
 
-  it("U-ST-PACKCANARY-015: the AT-DIST-003 lane accepts only exact canary.4 bytes and its record anchor", () => {
+  it("U-ST-PACKCANARY-015: the AT-DIST-003 lane accepts only exact canary.5 bytes and its record anchor", () => {
     const input = agentRecord();
-    expect(input.value.tag).toBe("v0.2.0-canary.4");
+    expect(input.value.tag).toBe("v0.2.0-canary.5");
     const parsed = parseAgentE2ERecord(input.value, commentUrl);
     const dir = agentReleaseDir(input.assetBytes);
-    expect(parsed.value.tag).toBe("v0.2.0-canary.4");
+    expect(parsed.value.tag).toBe("v0.2.0-canary.5");
     expect(Object.keys(verifyReleaseDirectory(dir, parsed).actualDigests).sort()).toEqual(
-      [...canaryAssetsForTag("v0.2.0-canary.4")].sort(),
+      [...canaryAssetsForTag("v0.2.0-canary.5")].sort(),
     );
-    expect(buildAgentE2EInstallerInvocation("C:/c4-release", parsed.consumerAnchorDigest)).toEqual([
-      join("C:/c4-release", "v0.2.0-canary.4.ut-tdd.mjs"),
+    expect(buildAgentE2EInstallerInvocation("C:/c5-release", parsed.consumerAnchorDigest)).toEqual([
+      join("C:/c5-release", "v0.2.0-canary.5.ut-tdd.mjs"),
       "setup",
       "--solo",
       "--consumer-runtime-release",
-      "C:/c4-release",
+      "C:/c5-release",
       "--expected-consumer-digest",
       parsed.consumerAnchorDigest,
     ]);
     expect(
-      buildInstallerInvocation("C:/c4-release", parsed.consumerAnchorDigest, AGENT_E2E_TAG),
-    ).toEqual(buildAgentE2EInstallerInvocation("C:/c4-release", parsed.consumerAnchorDigest));
+      buildInstallerInvocation("C:/c5-release", parsed.consumerAnchorDigest, AGENT_E2E_TAG),
+    ).toEqual(buildAgentE2EInstallerInvocation("C:/c5-release", parsed.consumerAnchorDigest));
     expect(() => parseAgentE2ERecord(record().value, commentUrl)).toThrow(
       "publish-record-tag-not-exact",
     );
@@ -937,8 +940,10 @@ describe("manual canary acceptance publish-record boundary", () => {
     c2Bytes.tag = CANARY_TAG;
     expect(() => parseAgentE2ERecord(c2Bytes, commentUrl)).toThrow("publish-record-tag-not-exact");
     for (const tag of [
+      "v0.2.0-canary.4",
       "v0.2.0-canary.3",
       "latest",
+      "v0.2.0-canary.5-preview",
       "v0.2.0-canary.4-preview",
       "prefix-v0.2.0-canary.4",
     ]) {

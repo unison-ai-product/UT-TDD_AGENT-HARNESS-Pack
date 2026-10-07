@@ -70,9 +70,14 @@ function screenIds(text: string): Set<string> {
 }
 
 export function extractG1BusinessIds(business: string): Set<string> {
-  const out = ids(business, /\|\s*\*\*((?:BR|UX)-\d{2})\*\*\s*\|/g);
-  for (const m of business.matchAll(/\|\s*\*\*ID\*\*\s*\|\s*(BR-\d{2})\s*\|/g)) {
-    out.add(m[1]);
+  const out = new Set<string>();
+  for (const line of business.split(/\r?\n/)) {
+    const firstCell = line.match(
+      /^[ \t]*\|[ \t]*(?:\*\*((?:BR|UX)-\d{2})\*\*|((?:BR|UX)-\d{2}))[ \t]*\|/,
+    );
+    const legacyIdCell = line.match(/^[ \t]*\|[ \t]*\*\*ID\*\*[ \t]*\|[ \t]*(BR-\d{2})[ \t]*\|/);
+    const id = firstCell?.[1] ?? firstCell?.[2] ?? legacyIdCell?.[1];
+    if (id) out.add(id);
   }
   return out;
 }
@@ -96,7 +101,10 @@ export function extractG1BusinessTrace(screen: string): Map<string, Set<string>>
   const allScreens = extractG1ScreenIds(screen);
   const r1 = section(screen, /^###\s*§5\.1\b[^\n]*\n/m, /^###\s*§5\.3\b/m);
   for (const line of r1.split(/\r?\n/)) {
-    const id = line.match(/\|\s*\*\*((?:BR|UX)-\d{2})\*\*\s*\|/)?.[1];
+    const firstCell = line.match(
+      /^[^\S\r\n]*\|[^\S\r\n]*(?:\*\*((?:BR|UX)-\d{2})\*\*|((?:BR|UX)-\d{2}))[^\S\r\n]*\|/,
+    );
+    const id = firstCell?.[1] ?? firstCell?.[2];
     if (id) trace.set(id, line.includes("全画面") ? new Set(allScreens) : screenIds(line));
   }
   return trace;
