@@ -216,7 +216,7 @@ describe("forced-stop (PLAN-L7-02 add-impl / U-FSF)", () => {
     expect(req.output_schema.attention).toContain("high");
   });
 
-  it("U-FSF-007: scanDanglingStops は dangling session のみ forced_stop 記録 / idempotent / current 除外 / fail-open", () => {
+  it("U-835-007 / U-FSF-007: scanDanglingStops は dangling session のみ forced_stop 記録 / idempotent / current 除外 / fail-open", () => {
     const deps = mockDeps();
     // s1 = dangling (tool_use 後 session_end 無し) / s2 = 正常終了 / cur = 起動中
     deps.files.set(

@@ -58,22 +58,14 @@ Every `.claude/agents/<name>.md` must carry:
 | Field | Purpose | Enforcement |
 |---|---|---|
 | `name` (frontmatter) | Must match the kebab filename | `agent-guard.ts` key lookup |
-| `model` | Explicit model string (no omission) | Guard blocks omitted model — parent is NOT inherited |
+| `model` | Explicit model string (no omission) | Guard blocks omitted model (`src/runtime/agent-guard.ts:137`) |
 | `description` | One-line capability summary | Used by `ut-tdd skill suggest` |
-| `tools` | Declared tool list | Guard validates against allowed surfaces |
+| `tools` | Declared tool list | (operational; not guard-checked) |
 
-The `subagent_type` in the Agent call must match one of the guard allowlist
-entries exactly (case-sensitive). Current allowlist:
-
-```
-pmo-sonnet  pmo-haiku  pmo-project-explorer  pmo-project-scout
-pmo-tech-docs  pmo-tech-fork  pmo-tech-news
-pdm-tech-innovation  pdm-marketing-innovation  pdm-innovation-manager
-code-reviewer  security-audit  qa-test
-```
-
-Any role outside this list is blocked fail-close. To add a role, update
-`agent-guard.ts` allowlist and document the capability class here.
+The `subagent_type` must be in `SUBAGENT_ALLOWLIST`
+(`src/runtime/agent-guard-policy.ts:2`; the list is not copied here — it drifts);
+unlisted roles are blocked fail-close. To add a role, update that list with a
+test (`tests/agent-guard.test.ts`) and document the capability class here.
 
 ## Capability class taxonomy
 
@@ -85,13 +77,12 @@ Any role outside this list is blocked fail-close. To add a role, update
 | QA / trace verification | `qa-test` | Mid-tier |
 | Innovation / market analysis | `pdm-*` | Mid-tier |
 
-Assign the minimum capable tier. An omitted `model` field causes the guard to
-reject the spawn — it does not silently inherit the parent.
+Assign the minimum capable tier (an omitted `model` is rejected, see above).
 
 ## Guard bypass
 
-`UT_TDD_ALLOW_RAW_AGENT=1` bypasses the guard. Use only in a diagnosed
-emergency. Bypassing must leave an audit entry in `.ut-tdd/audit/` recording:
+`UT_TDD_ALLOW_RAW_AGENT=1` bypasses the guard (`src/runtime/agent-guard.ts:100`).
+Use only in a diagnosed emergency. Bypassing must leave an audit entry in `.ut-tdd/audit/` recording:
 who set the flag, which agent call was made, and why the normal path was
 unsuitable.
 

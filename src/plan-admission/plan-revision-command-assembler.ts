@@ -120,7 +120,7 @@ export function assemblePlanRevisionCommand(input: {
     actor: environment.actor,
     reason: admission.escapeReason ?? `route:${admission.routeSignal}`,
     routeTupleDigest: sha(stableJson(admission)),
-    certificateId: `certificate:${sha(manifest.command_id).slice(0, 32)}`,
+    certificateId: deriveTrackedReceiptId(manifest.command_id),
     occurredAt: manifest.recorded_at,
   };
   const ledgerInput: AppendPlanRevisionInput | BootstrapLegacyPlanRevisionInput = input.legacy
@@ -161,6 +161,16 @@ export function planRevisionReplayBindingDigest(
   admission: PlanAdmissionRequest,
 ): `sha256:${string}` {
   return `sha256:${sha(stableJson({ manifest, admission }))}`;
+}
+
+/**
+ * `certificate_id` / `receipt_id` の正規導出式。PLAN-L6-711 §2.3-6 の re-chain verifier が
+ * H 側 `command_id` に `:rechain-<n>` suffix を付けた R 側 `command_id` から、独立に
+ * `receipt_id` を再導出するために export する (node-plan-revision-runner.ts の同一計算と
+ * ロジックを共有する意図。呼び出し側を変えない最小 export)。
+ */
+export function deriveTrackedReceiptId(commandId: string): string {
+  return `certificate:${sha(commandId).slice(0, 32)}`;
 }
 
 export function canonicalPlanPayload(source: string): { payload: string; body: string } {

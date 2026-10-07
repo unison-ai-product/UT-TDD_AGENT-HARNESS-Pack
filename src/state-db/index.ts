@@ -55,11 +55,28 @@ interface NativeDatabase {
   close(): void;
 }
 
+export interface ReadOnlyHarnessDb {
+  readonly path: string;
+  readonly driver: "node";
+  prepare(sql: string): HarnessStatement;
+  userVersion(): number;
+  beginReadTransaction(): void;
+  commitReadTransaction(): void;
+  close(): void;
+}
+
 function openNative(path: string): NativeDatabase {
   const { DatabaseSync } = nodeRequire("node:sqlite") as {
     DatabaseSync: new (p: string) => NativeDatabase;
   };
   return new DatabaseSync(path);
+}
+
+function openNativeReadOnly(path: string): NativeDatabase {
+  const { DatabaseSync } = nodeRequire("node:sqlite") as {
+    DatabaseSync: new (p: string, options: { readOnly: true }) => NativeDatabase;
+  };
+  return new DatabaseSync(path, { readOnly: true });
 }
 
 function wrapStatement(stmt: NativeStatement): HarnessStatement {
@@ -122,6 +139,33 @@ export function openHarnessDb(path: string, options: { repoRoot?: string } = {})
       }
       // PRAGMA はパラメータバインド不可のため数値検証後に埋め込む (上で整数を保証)。
       native.exec(`PRAGMA user_version = ${version}`);
+    },
+    close: () => native.close(),
+  };
+}
+
+export function openReadOnlyHarnessDb(
+  path: string,
+  options: { repoRoot?: string } = {},
+): ReadOnlyHarnessDb {
+  const repoRoot = options.repoRoot ?? process.cwd();
+  assertWithinUtTdd(path, repoRoot);
+  const native = openNativeReadOnly(path);
+  return {
+    path,
+    driver: "node",
+    prepare: (sql: string) => wrapStatement(native.prepare(sql)),
+    userVersion: () => {
+      const row = native.prepare("PRAGMA user_version").get() as
+        | { user_version?: number }
+        | undefined;
+      return Number(row?.user_version ?? 0);
+    },
+    beginReadTransaction: () => {
+      native.exec("BEGIN");
+    },
+    commitReadTransaction: () => {
+      native.exec("COMMIT");
     },
     close: () => native.close(),
   };

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
@@ -5,6 +6,7 @@ import type {
   PublicationArtifact,
   PublicationReleaseIdentity,
 } from "../src/schema/release-manifest.ts";
+import { AUTHORING_TEMPLATE_ARTIFACT_PATHS } from "../src/setup/authoring-template-inventory.ts";
 import {
   buildPackPublicationAssets,
   derivePackPublicationAssets,
@@ -35,6 +37,49 @@ function fixture(content = Buffer.from("hi\n"), destinationPath = "a.txt") {
     artifacts: [artifact],
   };
   return { release, entries: [{ ...artifact, content }] };
+}
+
+type ProjectionEntry = PublicationArtifact & { readonly content: Uint8Array };
+
+function trackedTeamProjectionFixture(): {
+  release: PublicationReleaseIdentity;
+  entries: ProjectionEntry[];
+} {
+  const teamSource = ".ut-tdd/teams/example-review-team.yaml";
+  const teamArtifact = "docs/templates/team/example-review-team.yaml";
+  const teamBytes = execFileSync("git", [
+    "cat-file",
+    "blob",
+    "0c5e267a46b97699bd5ce7956eba41b3b6138fbf",
+  ]);
+  const entries = AUTHORING_TEMPLATE_ARTIFACT_PATHS.map((destinationPath) => {
+    const content =
+      destinationPath === teamArtifact ? teamBytes : Buffer.from(`${destinationPath}\n`);
+    return {
+      sourcePath: destinationPath === teamArtifact ? teamSource : destinationPath,
+      destinationPath,
+      mode: "100644" as const,
+      size: content.length,
+      contentDigest: digest(content),
+      content,
+    };
+  }).sort((left, right) =>
+    Buffer.compare(Buffer.from(left.destinationPath), Buffer.from(right.destinationPath)),
+  );
+  const artifacts = entries.map(({ content: _content, ...artifact }) => artifact);
+  return {
+    release: {
+      releaseId,
+      materializerVersion: "1",
+      artifactSourceCommit: "a".repeat(40),
+      artifactSetDigest: `sha256:${"2".repeat(64)}`,
+      artifactInventoryDigest: `sha256:${"3".repeat(64)}`,
+      releaseAssetInventoryDigest: `sha256:${"4".repeat(64)}`,
+      releaseRecordDigest: `sha256:${"5".repeat(64)}`,
+      artifacts,
+    },
+    entries,
+  };
 }
 
 describe("Pack publication deterministic assets", () => {
@@ -211,5 +256,36 @@ describe("Pack publication deterministic assets", () => {
         entries: [...base.entries, { ...base.entries[0], destinationPath: "extra.txt" }],
       }),
     ).toEqual({ ok: false, error: "artifact_mismatch" });
+
+    const projection = trackedTeamProjectionFixture();
+    expect(derivePackPublicationAssets(projection).ok).toBe(true);
+    const teamIndex = projection.entries.findIndex(
+      (entry) => entry.sourcePath === ".ut-tdd/teams/example-review-team.yaml",
+    );
+    const expectProjectionMutationDenied = (
+      mutate: (entry: ProjectionEntry) => ProjectionEntry,
+    ) => {
+      const entries = projection.entries.map((entry, index) =>
+        index === teamIndex ? mutate(entry) : entry,
+      );
+      const artifacts = entries.map(({ content: _content, ...artifact }) => artifact);
+      expect(
+        derivePackPublicationAssets({
+          release: { ...projection.release, artifacts },
+          entries,
+        }),
+      ).toEqual({ ok: false, error: "artifact_mismatch" });
+    };
+    expectProjectionMutationDenied((entry) => ({ ...entry, sourcePath: ".ut-tdd/harness.db" }));
+    expectProjectionMutationDenied((entry) => ({
+      ...entry,
+      destinationPath: "docs/templates/team/unexpected.yaml",
+    }));
+    expectProjectionMutationDenied((entry) => ({ ...entry, mode: "100755" }));
+    expectProjectionMutationDenied((entry) => {
+      const content = Buffer.alloc(entry.content.length, 0);
+      return { ...entry, content, contentDigest: digest(content) };
+    });
+    expectProjectionMutationDenied((entry) => ({ ...entry, size: entry.size + 1 }));
   });
 });

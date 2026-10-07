@@ -19,9 +19,9 @@ decision_points:
   - when: "Setting the has_existing_tests flag in the evidence map"
     choose: "Set it explicitly to true or false based on actual test files found for the subject scope"
     over: "Leaving it omitted or inferring it later"
-    because: "The gate to R1/R2 requires has_existing_tests to be explicitly set, not omitted"
+    because: "R1/R2 branch on has_existing_tests, so it must be explicitly set, not omitted; this is an operational rule — ut-tdd plan lint and doctor do not read the field"
   - when: "The subject scope involves inter-module contracts"
-    choose: "Run ut-tdd graph or ut-tdd find to identify dependency edges"
+    choose: "Run ut-tdd graph impact or ut-tdd find to identify dependency edges"
     over: "Skipping dependency-edge analysis and relying on manual file inspection"
     because: "Contract-bearing subjects need mapped dependency edges as input for R1's contract extraction"
   - when: "The evidence map is incomplete at the R0-to-R1/R2 phase boundary"
@@ -92,7 +92,7 @@ type skips R1), verify:
 
 - [ ] `R0-evidence-map.yaml` exists and is complete (no null fields except
   intentional).
-- [ ] `has_existing_tests` is explicitly set (not omitted).
+- [ ] `has_existing_tests` is explicitly set (not omitted). (Manual check; not machine-enforced.)
 - [ ] All drift signals are listed (even if unresolved -- resolution is R3/R4).
 - [ ] `ut-tdd plan lint` exits 0 with the updated PLAN `workflow_phase: R1`
   (or `R2` for design/normalization types).

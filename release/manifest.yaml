@@ -1,10 +1,10 @@
 schema_version: v2
 releases:
-  rel-sha256:81b203576d77ffe6267f08f2ffde16ce2d625c0b9eb86bc5a0fcca5cf0dcc765:
+  rel-sha256:a23382fed99f7bde9847028093a1e0ca2de8a9767d933b4ff395d4c045e28068:
     materializerVersion: "1"
-    artifactSourceCommit: f8d22ac9e48dac0d6101f3d268877607269b4f97
-    artifactSetDigest: sha256:768bfc53f849e47fe552f790a4b24372f8291187f11d06b0c4cc431b9cbab61c
-    artifactInventoryDigest: sha256:48ae10b8a07ec38506d4496cae4e218cc7eb73d6a7f99829938b5f15a183ec9c
+    artifactSourceCommit: 4f4597202c6664a526813df72c27158ad743fbdc
+    artifactSetDigest: sha256:f692d2d24c3b47fd13cf94b1f5aff2bd19de8c538899fc43b887da49d3e48a08
+    artifactInventoryDigest: sha256:48753e1c1c36f13e192368adb1f9fd38308badd5f6954063d01696d596fda219
     artifacts:
       - sourcePath: .editorconfig
         destinationPath: .editorconfig
@@ -79,8 +79,8 @@ releases:
       - sourcePath: docs/governance/document-system-map.md
         destinationPath: docs/governance/document-system-map.md
         mode: "100644"
-        size: 30068
-        contentDigest: sha256:62cba94e1fcb3c69edb6361b4d3b80411c519a999b45ee785ba770d19996353d
+        size: 30412
+        contentDigest: sha256:d0a4be4f4b032e52c2ab86786784ee05e6f9c8b52cd3bb12d4126eebcee28dc9
       - sourcePath: docs/governance/gate-design.md
         destinationPath: docs/governance/gate-design.md
         mode: "100644"
@@ -94,18 +94,18 @@ releases:
       - sourcePath: docs/governance/repository-structure.md
         destinationPath: docs/governance/repository-structure.md
         mode: "100644"
-        size: 18878
-        contentDigest: sha256:56f4748fba8a3286bad92ad72f878ef0dc49af6e22c08eabbd3a77fff50c2040
+        size: 19266
+        contentDigest: sha256:97d5bf67eccaa7412a267c5c97025373b9705d9fcc5e24ab6377cb8e456e9802
       - sourcePath: docs/governance/ut-tdd-agent-harness-concept_v3.1.md
         destinationPath: docs/governance/ut-tdd-agent-harness-concept_v3.1.md
         mode: "100644"
-        size: 136575
-        contentDigest: sha256:4b2b5d9339dfcec8ee0ade8bfdb25706cd68840d3731565a1e03cf21b922ab12
+        size: 136897
+        contentDigest: sha256:4f5a620d3ffc3d265de3e9d5c19373e9ff6ca7685858973853b295f245a70205
       - sourcePath: docs/governance/ut-tdd-agent-harness-requirements_v1.2.md
         destinationPath: docs/governance/ut-tdd-agent-harness-requirements_v1.2.md
         mode: "100644"
-        size: 227655
-        contentDigest: sha256:b569f6355c3ecf834c75926d81ab9828eb0d5e4d31a6eb58c4d15b41f67ac67d
+        size: 229119
+        contentDigest: sha256:92fbf9ddb3d22dc7557b1d9e701e6abdfc799a644b042276a7fe996d77e763ce
       - sourcePath: docs/process/.gitkeep
         destinationPath: docs/process/.gitkeep
         mode: "100644"
@@ -399,8 +399,8 @@ releases:
       - sourcePath: docs/templates/adapter/.claude/settings.json
         destinationPath: docs/templates/adapter/.claude/settings.json
         mode: "100644"
-        size: 2507
-        contentDigest: sha256:339d8ea7846b0bb8d757c770822d387d30c09d2ca0fae25b429e4586909008b0
+        size: 2508
+        contentDigest: sha256:a1a88eee90e8fdc3a5fe0169169298a1ffe2424817416c7bbaae2a5715b609ec
       - sourcePath: docs/templates/adapter/.codex/config.toml
         destinationPath: docs/templates/adapter/.codex/config.toml
         mode: "100644"
@@ -484,8 +484,8 @@ releases:
       - sourcePath: docs/templates/plan/design/template.md
         destinationPath: docs/templates/plan/design/template.md
         mode: "100644"
-        size: 4671
-        contentDigest: sha256:4a88e50d7b595a9593238c2261efbd2df18796fa42f789769cf3f83bca64fd27
+        size: 5227
+        contentDigest: sha256:b5f1071197bf5a90645dd5c58d08699b66780f73cb9c44f6bee2f3d4a74f461a
       - sourcePath: docs/templates/plan/impl/template.md
         destinationPath: docs/templates/plan/impl/template.md
         mode: "100644"
@@ -544,8 +544,8 @@ releases:
       - sourcePath: scripts/pack-canary-acceptance.mjs
         destinationPath: scripts/pack-canary-acceptance.mjs
         mode: "100644"
-        size: 39161
-        contentDigest: sha256:f362552a913cbc5e3b24c91ba46ddf27c1d977a6b0177261c9f79dcd3785064c
+        size: 73272
+        contentDigest: sha256:1f023b92edc0bfffb367236f307c31af1f52e62c2c420a075cdfa5abfd252022
       - sourcePath: scripts/run-vitest-snapshot.ts
         destinationPath: scripts/run-vitest-snapshot.ts
         mode: "100644"
@@ -584,13 +584,13 @@ releases:
       - sourcePath: skills/agent-design.md
         destinationPath: skills/agent-design.md
         mode: "100644"
-        size: 4981
-        contentDigest: sha256:c451802e218fd39752a046910945a4fbd06f66ac16953e2361959835162ea4ff
+        size: 4747
+        contentDigest: sha256:d974c66098377b75464e9f58835cb924d6f28138bdd8e81d0dba04192ac4cbf1
       - sourcePath: skills/agent-teams.md
         destinationPath: skills/agent-teams.md
         mode: "100644"
-        size: 5518
-        contentDigest: sha256:c13d48ff964087e02c57f55955c33a2866d8c9346c9d8baf916b3244675a235d
+        size: 5618
+        contentDigest: sha256:ae8c6c73f078afa5136cf9819b57ae3160ccb0a002df2cb7a28a8da0f33a3fde
       - sourcePath: skills/api-and-interface-design.md
         destinationPath: skills/api-and-interface-design.md
         mode: "100644"
@@ -614,13 +614,13 @@ releases:
       - sourcePath: skills/ci-deploy-and-rollback.md
         destinationPath: skills/ci-deploy-and-rollback.md
         mode: "100644"
-        size: 6440
-        contentDigest: sha256:8cde615e847d422e6516598142e13ca386563cfad76a84a3823cca9a763bd327
+        size: 6845
+        contentDigest: sha256:64c1b01e4b81672df7deaf9e31b5dff0355d3bd9b43d258101e27a08ab8eaef7
       - sourcePath: skills/ci-gate-design.md
         destinationPath: skills/ci-gate-design.md
         mode: "100644"
-        size: 5344
-        contentDigest: sha256:182e4e009c363bf9c01ba1ff6b1790d7fca2b1c87648c68a668fdf31b46d7d5e
+        size: 5498
+        contentDigest: sha256:efe1cd2fb4f7652c611e255460d9dccefef8659ace89d743d276e73447bfa11c
       - sourcePath: skills/code-minimalism.md
         destinationPath: skills/code-minimalism.md
         mode: "100644"
@@ -669,23 +669,23 @@ releases:
       - sourcePath: skills/debugging-and-error-recovery.md
         destinationPath: skills/debugging-and-error-recovery.md
         mode: "100644"
-        size: 10599
-        contentDigest: sha256:f190f44eb62a09691703e63a48bba8d3a104c9ef5d3cf544c90aefb18b424d39
+        size: 10697
+        contentDigest: sha256:53b9646d3db353e0b0f81f1c6cdb8bed3ab073f7e8c923e609f3d3c013e7c081
       - sourcePath: skills/dependency-map.md
         destinationPath: skills/dependency-map.md
         mode: "100644"
-        size: 5706
-        contentDigest: sha256:78f5663c8a85df0f13b055e9d5814b024fa0fa14e959116253479562ec11202f
+        size: 5729
+        contentDigest: sha256:22d31457e4fa88185e9b26779336134d9833478d11f645e68ad5855194eef000
       - sourcePath: skills/deprecation-cutover.md
         destinationPath: skills/deprecation-cutover.md
         mode: "100644"
-        size: 5175
-        contentDigest: sha256:d227756db2c53ca87579cc1717950a5f89b880b64da7e8b0d9fba43a8659544c
+        size: 5193
+        contentDigest: sha256:60c490c6b3564bc1265702379d3eb24c457f08a2edb32dee75ff917304666ed2
       - sourcePath: skills/design-decision-elicitation.md
         destinationPath: skills/design-decision-elicitation.md
         mode: "100644"
-        size: 3206
-        contentDigest: sha256:61ec0bc7d8cdd7555638fc563b9e9b8e919695e47526c6d39ef3d99d3ba08e01
+        size: 3386
+        contentDigest: sha256:bedb557c93790022e69529a8723e94045de758a5a558e2e796564ff48023093e
       - sourcePath: skills/design-doc.md
         destinationPath: skills/design-doc.md
         mode: "100644"
@@ -749,8 +749,8 @@ releases:
       - sourcePath: skills/documentation-and-adrs.md
         destinationPath: skills/documentation-and-adrs.md
         mode: "100644"
-        size: 5381
-        contentDigest: sha256:cdcb83314220a66e7ed18c1a326bf43f83131f084a522c831631a6e4845a1521
+        size: 6066
+        contentDigest: sha256:3d49f30d942de9d3892920ada916ca27da04da37c1135be28bea7103ca3e012e
       - sourcePath: skills/documentation.md
         destinationPath: skills/documentation.md
         mode: "100644"
@@ -769,13 +769,13 @@ releases:
       - sourcePath: skills/gate-planning.md
         destinationPath: skills/gate-planning.md
         mode: "100644"
-        size: 5751
-        contentDigest: sha256:ba256700cd5843f8ce17efeff52f5eca15143bd69acc93cb23074e713e1f8584
+        size: 11329
+        contentDigest: sha256:e76d4886a18b07dfb6d0cfabe6a975af51825d8579e56cdadb1190a0eb320e1e
       - sourcePath: skills/git.md
         destinationPath: skills/git.md
         mode: "100644"
-        size: 5467
-        contentDigest: sha256:bceb559ba02e7e4f989c74a87d78b5d3c210d89a4fbcc399c8a01dde44a27914
+        size: 5487
+        contentDigest: sha256:ac9025bd1a46700f6b5633df68488f340252df2f4cc37011b48f7e7bb7f5a5c9
       - sourcePath: skills/harness-observability.md
         destinationPath: skills/harness-observability.md
         mode: "100644"
@@ -794,13 +794,13 @@ releases:
       - sourcePath: skills/llm-agent-routing.md
         destinationPath: skills/llm-agent-routing.md
         mode: "100644"
-        size: 5226
-        contentDigest: sha256:57dfa4bf3844e5441f00bbe4368e42e1a5fc46d03b940da1feca20e1f843ca3e
+        size: 5179
+        contentDigest: sha256:0327f0c34710e58ee0bc3085564b22eaec35e97e812d0b9494b3ec8f3d184f69
       - sourcePath: skills/planning-and-task-breakdown.md
         destinationPath: skills/planning-and-task-breakdown.md
         mode: "100644"
-        size: 5943
-        contentDigest: sha256:7927dd3a79efefa14f9d759dddaad3956dc7ba514af8819512f47ae87a4622d0
+        size: 6502
+        contentDigest: sha256:438c12bc807e52f857d81a9278c98fe5c3c3836547391f9e7ce535c1d8aa78e5
       - sourcePath: skills/poc.md
         destinationPath: skills/poc.md
         mode: "100644"
@@ -814,8 +814,8 @@ releases:
       - sourcePath: skills/project-management.md
         destinationPath: skills/project-management.md
         mode: "100644"
-        size: 7943
-        contentDigest: sha256:028c8bfcd369c739290ee0fb91cfc9d0b92c29b1195a9c3a7a0f1902f498304f
+        size: 7975
+        contentDigest: sha256:7744f3455a5dfa2112e02ef5461b6a514f00bc022670650eef78825cd5ed5d45
       - sourcePath: skills/refactoring.md
         destinationPath: skills/refactoring.md
         mode: "100644"
@@ -839,8 +839,8 @@ releases:
       - sourcePath: skills/reverse-r0.md
         destinationPath: skills/reverse-r0.md
         mode: "100644"
-        size: 4526
-        contentDigest: sha256:52b535fcd72dc311474c7e4b039e7da7e11c0509fdf8a032f895cedcd2226214
+        size: 4652
+        contentDigest: sha256:30475f4c4946c15ec5817a9af999fb12cc444d1214d8911cceef711aaa815fb4
       - sourcePath: skills/reverse-r1.md
         destinationPath: skills/reverse-r1.md
         mode: "100644"
@@ -854,8 +854,8 @@ releases:
       - sourcePath: skills/reverse-r3.md
         destinationPath: skills/reverse-r3.md
         mode: "100644"
-        size: 5707
-        contentDigest: sha256:144bf7cfdfeaeadcf871b25743e66e7079e17e60dba6c7dc3889feffbf00b7da
+        size: 5984
+        contentDigest: sha256:a1aee27c6f676dd58543644bdb2ab1218eedf35ce9871188692f9c0adfc4f2b1
       - sourcePath: skills/reverse-r4.md
         destinationPath: skills/reverse-r4.md
         mode: "100644"
@@ -879,8 +879,8 @@ releases:
       - sourcePath: skills/security-and-hardening.md
         destinationPath: skills/security-and-hardening.md
         mode: "100644"
-        size: 7025
-        contentDigest: sha256:8098cc8a13bef17ee3ac6a8ea685489cd36628d3a958f192d849666a499d24ab
+        size: 7504
+        contentDigest: sha256:8b2143d5578f3e50085153a265de10390c5e2e45402ec6edcb15d194246228f4
       - sourcePath: skills/security.md
         destinationPath: skills/security.md
         mode: "100644"
@@ -924,13 +924,13 @@ releases:
       - sourcePath: skills/threat-model.md
         destinationPath: skills/threat-model.md
         mode: "100644"
-        size: 5705
-        contentDigest: sha256:11dc3d47a5f6f6db11ddf578de59d7f8d06531ed77b8d89314e839acfeda0b74
+        size: 5840
+        contentDigest: sha256:2b7c5d5ad6f0642bcad0bbe5c573c46ea15b6b98258af623bca8f1dd658822d1
       - sourcePath: skills/verification.md
         destinationPath: skills/verification.md
         mode: "100644"
-        size: 6762
-        contentDigest: sha256:71afb78532bbf1eac42086c7ae951d84403bbe3daaf167074aeaf568fd90aa45
+        size: 6913
+        contentDigest: sha256:755d45881afb7db67f511c49a14786942c7b9a740f7d6e04e91dc823725c0867
       - sourcePath: skills/visual-state-verification.md
         destinationPath: skills/visual-state-verification.md
         mode: "100644"
@@ -1045,7 +1045,7 @@ releases:
         destinationPath: src/cli.ts
         mode: "100644"
         size: 186474
-        contentDigest: sha256:9bd9b79d6c4d37672705d385a8b85e1e1ecdc6dcdb13b8f486c0c884c6e64d2a
+        contentDigest: sha256:0bb477a06df507d424803257d4efad0d140d827cf7964557894d63b5a4a8ebe0
       - sourcePath: src/cli/delegation.ts
         destinationPath: src/cli/delegation.ts
         mode: "100644"
@@ -1054,8 +1054,8 @@ releases:
       - sourcePath: src/cli/distribution.ts
         destinationPath: src/cli/distribution.ts
         mode: "100644"
-        size: 48407
-        contentDigest: sha256:40972d166cfcf55cec121c853c30e5e9364c184fcfb782a32282edcd57868cef
+        size: 50538
+        contentDigest: sha256:b150ed46289405890e72edf857ee3347176801d189634e73d58a1d180d0ce395
       - sourcePath: src/cli/feedback.ts
         destinationPath: src/cli/feedback.ts
         mode: "100644"
@@ -1069,8 +1069,8 @@ releases:
       - sourcePath: src/cli/plan-asset.ts
         destinationPath: src/cli/plan-asset.ts
         mode: "100644"
-        size: 1591
-        contentDigest: sha256:48b8ae6dfef3e2a6b6326a939990079c59003d42d02138a5be5016fa0ace7562
+        size: 2623
+        contentDigest: sha256:b8bb972c345c5d8f1cf898d40a3a636a8ece9c82a2250941bc18330fa5e8f159
       - sourcePath: src/cli/plan-draft.ts
         destinationPath: src/cli/plan-draft.ts
         mode: "100644"
@@ -1249,8 +1249,8 @@ releases:
       - sourcePath: src/doctor/test-repository-isolation.ts
         destinationPath: src/doctor/test-repository-isolation.ts
         mode: "100644"
-        size: 24805
-        contentDigest: sha256:a79041f7781c1bfa5bdf55f6c484203621756e4a45643551a53dd893a97e8290
+        size: 25074
+        contentDigest: sha256:2b8ce68c54abdd8104e1e86b18b8829227ae77369a9c052ac54f1a94cd2a7ed1
       - sourcePath: src/doctor/toolchain.ts
         destinationPath: src/doctor/toolchain.ts
         mode: "100644"
@@ -2229,8 +2229,8 @@ releases:
       - sourcePath: src/plan-admission/plan-revision-command-assembler.ts
         destinationPath: src/plan-admission/plan-revision-command-assembler.ts
         mode: "100644"
-        size: 10049
-        contentDigest: sha256:b5e27a9f029df22a691bbcb71e7bb7c37367022155946058715fa1d10d1b4904
+        size: 10567
+        contentDigest: sha256:e7c2c0d918c582a1e950a641fa67bf0c92851ace73e07a205f8346c4d611eec5
       - sourcePath: src/plan-admission/plan-revision-ledger-adapter.ts
         destinationPath: src/plan-admission/plan-revision-ledger-adapter.ts
         mode: "100644"
@@ -2241,6 +2241,11 @@ releases:
         mode: "100644"
         size: 10246
         contentDigest: sha256:309b5eb91ce565d33b617fdb76ff04e9760c59fbbea340ae8938791d3be9965a
+      - sourcePath: src/plan-admission/rechain-verifier.ts
+        destinationPath: src/plan-admission/rechain-verifier.ts
+        mode: "100644"
+        size: 32972
+        contentDigest: sha256:15da40126c6ef008de1c5572441d145bfba4a4afef3067bd8ecf97da694ce550
       - sourcePath: src/plan-admission/sqlite-draft-journal.ts
         destinationPath: src/plan-admission/sqlite-draft-journal.ts
         mode: "100644"
@@ -2254,8 +2259,8 @@ releases:
       - sourcePath: src/plan-admission/tracked-receipt-renderer.ts
         destinationPath: src/plan-admission/tracked-receipt-renderer.ts
         mode: "100644"
-        size: 10986
-        contentDigest: sha256:fc977df412d5cdfa7bf7f1301bc291d4fbc80790fc02731c76098bc101ca4e41
+        size: 11879
+        contentDigest: sha256:9ffa68c68dfb50e45a89a7ad91b8c5a96b1e46a0b6cf7c56a4c6518c803e3e2c
       - sourcePath: src/plan-asset/adapters/hmac-evidence-attestation-authority.ts
         destinationPath: src/plan-asset/adapters/hmac-evidence-attestation-authority.ts
         mode: "100644"
@@ -2376,6 +2381,11 @@ releases:
         mode: "100644"
         size: 18682
         contentDigest: sha256:2ba163a50da2fb65add1950dddfda0dfa9eed87975dee7196a67fc5803363f24
+      - sourcePath: src/plan-asset/ledger/plan-revision-digest-query.ts
+        destinationPath: src/plan-asset/ledger/plan-revision-digest-query.ts
+        mode: "100644"
+        size: 5005
+        contentDigest: sha256:671ffb66251ae36b7480134a23cb036711c14e5d8c3293d0df5684c2cf87ef57
       - sourcePath: src/plan-asset/ledger/plan-revision-ledger.ts
         destinationPath: src/plan-asset/ledger/plan-revision-ledger.ts
         mode: "100644"
@@ -2384,8 +2394,8 @@ releases:
       - sourcePath: src/plan-asset/ledger/schema.ts
         destinationPath: src/plan-asset/ledger/schema.ts
         mode: "100644"
-        size: 54199
-        contentDigest: sha256:df3e964349b0819f4b7d4eb9d7c19624f9d50185dcf0176214b1857f89512773
+        size: 54486
+        contentDigest: sha256:b4e22993eb53c774044d613463943a2b5b0d28f9bb28ce04aa57f2dfd5d4069a
       - sourcePath: src/plan-asset/ledger/sealed-lineage-local-migration.ts
         destinationPath: src/plan-asset/ledger/sealed-lineage-local-migration.ts
         mode: "100644"
@@ -2509,13 +2519,13 @@ releases:
       - sourcePath: src/runtime/adapter.ts
         destinationPath: src/runtime/adapter.ts
         mode: "100644"
-        size: 14943
-        contentDigest: sha256:90faeb053f9e19e15f8bd66d3aae0062e601a306f2cad5866885a32f414a95a9
+        size: 15113
+        contentDigest: sha256:4fb45dd08252a844f6c422cca1f356cba79dda37d94e2f7d22aee1a00e8555c7
       - sourcePath: src/runtime/agent-guard-policy.ts
         destinationPath: src/runtime/agent-guard-policy.ts
         mode: "100644"
-        size: 1298
-        contentDigest: sha256:60272739efeb62519b219aa83fc19df6d82da88f7b560b7732aac9ed527525cd
+        size: 1552
+        contentDigest: sha256:aec64be7207742fed9cb2005092e1d299395ff7ad0b1987585b75781ec2c369f
       - sourcePath: src/runtime/agent-guard.ts
         destinationPath: src/runtime/agent-guard.ts
         mode: "100644"
@@ -2849,8 +2859,8 @@ releases:
       - sourcePath: src/setup/pack-publication-assets.ts
         destinationPath: src/setup/pack-publication-assets.ts
         mode: "100644"
-        size: 12003
-        contentDigest: sha256:d4b06fd5d461393d599cb2ca6155bf2fe97d000a9e0142551db7ab4e9c189b76
+        size: 12554
+        contentDigest: sha256:d38b5975c59221c2ff3ab0de0e68cd346c301da0b62565eab55154575721e787
       - sourcePath: src/setup/pack-publication-staging.ts
         destinationPath: src/setup/pack-publication-staging.ts
         mode: "100644"
@@ -2889,8 +2899,8 @@ releases:
       - sourcePath: src/setup/templates.ts
         destinationPath: src/setup/templates.ts
         mode: "100644"
-        size: 29590
-        contentDigest: sha256:78d92e82fb3b62482e79dc150d0a7be950f25b2d265a09bed0bd2552c90851bb
+        size: 29591
+        contentDigest: sha256:097e371398ce18a401180e2d49bb0678705307e2bd07fbc838df30b1e8277618
       - sourcePath: src/setup/update-check.ts
         destinationPath: src/setup/update-check.ts
         mode: "100644"
@@ -2999,8 +3009,8 @@ releases:
       - sourcePath: src/state-db/index.ts
         destinationPath: src/state-db/index.ts
         mode: "100644"
-        size: 6595
-        contentDigest: sha256:4a49b22e0074cd5ed9144f8299baa9c52aa549b0bf357273a19434cfea68ffe1
+        size: 7836
+        contentDigest: sha256:2de521bdd93797da0252ea5c576be193d75071c47815bdbb308122329f6d794a
       - sourcePath: src/state-db/maintenance.ts
         destinationPath: src/state-db/maintenance.ts
         mode: "100644"
@@ -3419,8 +3429,8 @@ releases:
       - sourcePath: tests/db-currency.test.ts
         destinationPath: tests/db-currency.test.ts
         mode: "100644"
-        size: 37074
-        contentDigest: sha256:08fff146c5c25ec5bd0c7851574276726cdd1d07b86602c2ba590e987e41b811
+        size: 37157
+        contentDigest: sha256:665f368d1355de9357c1f4bcd18d310fe402651e872845caf37cff007e107523
       - sourcePath: tests/db-maintenance.test.ts
         destinationPath: tests/db-maintenance.test.ts
         mode: "100644"
@@ -3719,8 +3729,8 @@ releases:
       - sourcePath: tests/forced-stop.test.ts
         destinationPath: tests/forced-stop.test.ts
         mode: "100644"
-        size: 9710
-        contentDigest: sha256:10d40c1250dd5ea083423faae52ca0548a9cfd9852d72a7ff1e0385c40d5053a
+        size: 9722
+        contentDigest: sha256:82f0da7a82ff74545f592cffc2544fa11c90375af22ba55bfa3654f865d33aaf
       - sourcePath: tests/forward-convergence.test.ts
         destinationPath: tests/forward-convergence.test.ts
         mode: "100644"
@@ -3879,8 +3889,8 @@ releases:
       - sourcePath: tests/handover.test.ts
         destinationPath: tests/handover.test.ts
         mode: "100644"
-        size: 40811
-        contentDigest: sha256:ca84096f06bb19b475c53c47922545b6582c2c786f93f33c712b3535d25b64dd
+        size: 40837
+        contentDigest: sha256:d8365e7db10d40367ac2f344a66de9fe6ad6d8691ecd1f3122058b44bfda4577
       - sourcePath: tests/harness-db-constraints.test.ts
         destinationPath: tests/harness-db-constraints.test.ts
         mode: "100644"
@@ -4064,13 +4074,13 @@ releases:
       - sourcePath: tests/pack-canary-acceptance.test.ts
         destinationPath: tests/pack-canary-acceptance.test.ts
         mode: "100644"
-        size: 23091
-        contentDigest: sha256:befe3b9847eba6fa57d69053268dd83dc143fea3b511b02e1e9831c5ecaee807
+        size: 54110
+        contentDigest: sha256:9f2095fa0001be63e6b357310d6657bf123f43c229d2790d623a9e43f6efcb4d
       - sourcePath: tests/pack-consumer-runtime-release.test.ts
         destinationPath: tests/pack-consumer-runtime-release.test.ts
         mode: "100644"
-        size: 74685
-        contentDigest: sha256:95daf63fcbf9a8e1fa6bfca5e00c7ca349f9349ce18a379c172d964f14a86e5b
+        size: 88963
+        contentDigest: sha256:f73f74bd91669efa9d812d6b8be05804b3dbedd0015e0a98825e724d4007f4b7
       - sourcePath: tests/pack-internal-canary-boundary.test.ts
         destinationPath: tests/pack-internal-canary-boundary.test.ts
         mode: "100644"
@@ -4089,8 +4099,8 @@ releases:
       - sourcePath: tests/pack-publication-assets.test.ts
         destinationPath: tests/pack-publication-assets.test.ts
         mode: "100644"
-        size: 8697
-        contentDigest: sha256:a1e4d2b805de2c1d033b4db49d5876ae8e253582b965cf12f826d0bf6995aa8f
+        size: 11705
+        contentDigest: sha256:fd1e7ceeb951a949d7db1ac9309d1ce2fc6ea306dfa4ef44d77b2d39bc1c733f
       - sourcePath: tests/pack-publication-staging.test.ts
         destinationPath: tests/pack-publication-staging.test.ts
         mode: "100644"
@@ -4266,6 +4276,11 @@ releases:
         mode: "100644"
         size: 16222
         contentDigest: sha256:523d4da0b30e12f4b2695e6283ce180326fb8d5596190c06f1b4c7196b26afcf
+      - sourcePath: tests/plan-revision-digest-query.test.ts
+        destinationPath: tests/plan-revision-digest-query.test.ts
+        mode: "100644"
+        size: 38992
+        contentDigest: sha256:4af899d6c95b28634788184b67cb815a1d4f526d71877d7f9a420ad461dd5783
       - sourcePath: tests/plan-supersession.test.ts
         destinationPath: tests/plan-supersession.test.ts
         mode: "100644"
@@ -4361,6 +4376,11 @@ releases:
         mode: "100644"
         size: 5549
         contentDigest: sha256:b27ad7a8cb8a8d4d64486b08666c3feb00aabea4bbaffec72f454989f40e1275
+      - sourcePath: tests/rechain-verifier.test.ts
+        destinationPath: tests/rechain-verifier.test.ts
+        mode: "100644"
+        size: 70402
+        contentDigest: sha256:45fc91c32a301193019446a33d58bdb1144c088894cf760810bb7cf232135b04
       - sourcePath: tests/relation-graph-loader.test.ts
         destinationPath: tests/relation-graph-loader.test.ts
         mode: "100644"
@@ -4404,8 +4424,8 @@ releases:
       - sourcePath: tests/release-consumer-skills.test.ts
         destinationPath: tests/release-consumer-skills.test.ts
         mode: "100644"
-        size: 11686
-        contentDigest: sha256:3ea6acd324efc3ad19b55b3f3a4098c79f5fd6df23a839de76b59d0993169697
+        size: 13088
+        contentDigest: sha256:b54184e2d5ffb335c791fd2e3b3f9343e3881742eb99f7c8ab54168f5ee69868
       - sourcePath: tests/release-consumer-vmodel-template.test.ts
         destinationPath: tests/release-consumer-vmodel-template.test.ts
         mode: "100644"
@@ -4539,13 +4559,13 @@ releases:
       - sourcePath: tests/runtime-adapter.test.ts
         destinationPath: tests/runtime-adapter.test.ts
         mode: "100644"
-        size: 18144
-        contentDigest: sha256:b5ace7fd2607261d6810b78fccba210f92b01265a6203e086936ba94df86b640
+        size: 20435
+        contentDigest: sha256:1a1ada543298bc543c48e18d0c67a8818d78bbdc6919ea88aad551ef5c2722c5
       - sourcePath: tests/runtime-hook-entrypoints.test.ts
         destinationPath: tests/runtime-hook-entrypoints.test.ts
         mode: "100644"
-        size: 18305
-        contentDigest: sha256:365feb43c6a5a92f77cd47685da4f876e0b9ff617ddd950ab90182f79b237258
+        size: 29077
+        contentDigest: sha256:7f9ccb786710a20b1b8a9be8867b18a95e8484da6b9223d525c3fc8a22950bda
       - sourcePath: tests/runtime-image-observer.test.ts
         destinationPath: tests/runtime-image-observer.test.ts
         mode: "100644"
@@ -4744,8 +4764,8 @@ releases:
       - sourcePath: tests/support/pack-internal-canary.ts
         destinationPath: tests/support/pack-internal-canary.ts
         mode: "100644"
-        size: 26846
-        contentDigest: sha256:f3314e7465a08ffa699467e940cce0bebb6f7bad82ae001179f395ea35e61e74
+        size: 26801
+        contentDigest: sha256:13c9c3d3058a812aac156d04005d7d7b293536525fb3f53e8ddae84e5d2b1ba5
       - sourcePath: tests/support/project-identity-fixture.ts
         destinationPath: tests/support/project-identity-fixture.ts
         mode: "100644"
@@ -4809,8 +4829,8 @@ releases:
       - sourcePath: tests/token-tracker.test.ts
         destinationPath: tests/token-tracker.test.ts
         mode: "100644"
-        size: 33719
-        contentDigest: sha256:27fec707238f335957b2a2233ebdc668c28c494b3f01f1f4dc718b73e6f3fadd
+        size: 33847
+        contentDigest: sha256:abd6693587014f530dbc1fbec4b203092e05082968eba5d1cf08c183a6b8d355
       - sourcePath: tests/tool-adapter.test.ts
         destinationPath: tests/tool-adapter.test.ts
         mode: "100644"
@@ -4924,8 +4944,8 @@ releases:
       - sourcePath: tests/workflow-contracts.test.ts
         destinationPath: tests/workflow-contracts.test.ts
         mode: "100644"
-        size: 23803
-        contentDigest: sha256:7912ad1fdea1daabba6db35618e52f4fbd727e66d2064ac70be5d5fb68fef671
+        size: 23805
+        contentDigest: sha256:4e21462d08e524d2a36e6d9ad5a956312ffe3340f0b2b17a78ff8c7801632084
       - sourcePath: tests/workspace-roots.test.ts
         destinationPath: tests/workspace-roots.test.ts
         mode: "100644"
@@ -4934,8 +4954,8 @@ releases:
       - sourcePath: tests/worktree-lifecycle-application.test.ts
         destinationPath: tests/worktree-lifecycle-application.test.ts
         mode: "100644"
-        size: 10302
-        contentDigest: sha256:b2b19f83908a47093f4914348fd4c994816e759a3a7b6422b5b1a35044f0a7b2
+        size: 10304
+        contentDigest: sha256:80131bef3f386107106b783e2354cde700b82ebf77313cf19147a363aef3b0ba
       - sourcePath: tests/worktree-lifecycle-domain.test.ts
         destinationPath: tests/worktree-lifecycle-domain.test.ts
         mode: "100644"
@@ -4976,11 +4996,11 @@ releases:
         mode: "100644"
         size: 446
         contentDigest: sha256:6cba97b40eadc261a38110433192d8c2d5359a6c9ac0daef34d0686433127e07
-    releaseAssetInventoryDigest: sha256:c5f2b64474a7589e26ef94d6f4681942268f5e3eab725afcfa26f0ce8cd52603
-    releaseRecordDigest: sha256:c4804e5b86a6e46886d1daf386e1190e445f4fd0686838f33e61cd940ae90d4a
+    releaseAssetInventoryDigest: sha256:0b548fbecce1b31f1a2511e7c49d1138786422cce1791364b1897b3577714fb7
+    releaseRecordDigest: sha256:6633be6028c78ccb90b7081042536b16c1907bdfe076777f87a546eb6e1c5c27
 channels:
-  canary: rel-sha256:81b203576d77ffe6267f08f2ffde16ce2d625c0b9eb86bc5a0fcca5cf0dcc765
-  stable: rel-sha256:81b203576d77ffe6267f08f2ffde16ce2d625c0b9eb86bc5a0fcca5cf0dcc765
+  canary: rel-sha256:a23382fed99f7bde9847028093a1e0ca2de8a9767d933b4ff395d4c045e28068
+  stable: rel-sha256:a23382fed99f7bde9847028093a1e0ca2de8a9767d933b4ff395d4c045e28068
 channelOrder:
   - canary
   - stable

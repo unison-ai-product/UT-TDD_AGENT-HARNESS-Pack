@@ -32,18 +32,18 @@ decision_points:
   - when: "An ADR reaches the point of setting Status"
     choose: "leave Status at `Proposed` until `ut-tdd review --uncommitted` is clean and `ut-tdd doctor` exits 0"
     over: "setting Status to `Accepted` as soon as the Decision text is written"
-    because: "PLAN `dependencies` reference ADRs by Status; a prematurely Accepted ADR with unresolved review findings fails governance lint downstream"
+    because: "PLAN `dependencies` reference ADRs by Status; a prematurely Accepted ADR with unresolved review findings misleads downstream readers (operational rule; no lint checks ADR Status)"
   - when: "A new term is introduced in a design doc or ADR"
     choose: "match the existing L0 glossary spelling, or add the term to the glossary in the same change"
     over: "using a near-synonym that reads naturally in context"
-    because: "synonym drift between docs and the glossary causes `rule-drift` / adapter checks to fail even when the prose is correct"
+    because: "terminology consistency is an operational duty checked by hand at review; no code compares doc terms with the glossary (`rule-drift` only checks fixed adapter markers and forbidden exec forms, `src/lint/rule-drift.ts`)"
 ---
 
 # documentation and adrs
 
 Writing a V-model design doc or ADR that survives freeze and cross-agent review.
 Apply when authoring/updating any `docs/design/` doc or `docs/adr/ADR-NNN-*.md`,
-or when a freeze gate needs a readability check.
+or when a freeze needs the manual readability checklist below.
 
 ## When to load this skill
 
@@ -66,18 +66,25 @@ Context, Decision, Consequences, and Status.
 - One claim per sentence; name the actor (active voice). Gate conditions are
   executable contracts — "CI must be green and `ut-tdd doctor` must exit 0
   before pair-freeze" beats "the freeze passes when tests are green".
-- Uniform terminology: match the spelling `ut-tdd doctor` / `rule-drift` checks;
-  synonym drift causes adapter rule-drift failures.
+- Uniform terminology: match the L0 glossary spelling. This is a manual review
+  duty; no code checks it (`rule-drift` verifies only fixed adapter markers and
+  forbidden exec forms, `src/lint/rule-drift.ts`).
 - No bare pronouns ("this", "it") without an explicit referent — a freeze-review
   failure.
 
 ## Freeze readability check (pre-pair-freeze)
 
+Only item 1 is machine-enforced: the `ut-tdd doctor` `readability` check scans
+the whole `docs/` tree plus root instruction docs for mojibake markers and
+byte-integrity violations (`src/lint/readability.ts:31-46,117`). Items 2-4 are a
+manual checklist; no code checks Objective length, glossary spelling, or
+Scope/Non-goals.
+
 1. Scan for half-width kana (U+FF61–FF9F) and U+FFFD — these mark a
-   mojibake-corrupted save; do not freeze a corrupted doc.
-2. Objective/TL;DR present and ≤ 5 sentences.
-3. Every introduced term matches the L0 glossary spelling.
-4. Scope and Non-goals present; no bare `TODO` without a PLAN cross-reference.
+   mojibake-corrupted save; do not freeze a corrupted doc (doctor-enforced).
+2. Objective/TL;DR present and ≤ 5 sentences (manual).
+3. Every introduced term matches the L0 glossary spelling (manual).
+4. Scope and Non-goals present; no bare `TODO` without a PLAN cross-reference (manual).
 5. Run `ut-tdd plan lint` for schema-level issues and `ut-tdd review
    --uncommitted` for review findings before peer review.
 
@@ -90,14 +97,15 @@ Context, Decision, Consequences, and Status.
 4. List Consequences: positive, negative, risks-to-monitor.
 5. Set Status `Proposed`; move to `Accepted` only after `ut-tdd review
    --uncommitted` is clean and `ut-tdd doctor` exits 0. ADRs are referenced by
-   PLAN `dependencies`; a missing/mis-titled ADR fails governance lint.
+   PLAN `dependencies`; keep the ADR title and ID accurate (manual; no lint checks ADR Status or title).
 
 ## Reverse back-fill (R2–R4)
 
 R2 describes as-is architecture from the code as observed (not aspirational); R3
 maps modules back to L3 functional requirements; R4 writes the L1/L3 requirement
 update as if Forward had authored it (scope + acceptance + verification). A
-back-filled doc passes the same readability check before trace-freeze.
+back-filled doc passes the same readability checklist (doctor mojibake check
+plus the manual items) before trace-freeze.
 
 ## Self-edit checklist before any freeze
 

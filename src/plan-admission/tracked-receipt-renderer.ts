@@ -134,28 +134,16 @@ export class TrackedReceiptRenderer<
   }
 }
 
-function receiptFrontmatter(input: {
-  command: PlanDraftCommand<AdmissionBearingPayload>;
-  receipt: TrackedReceiptDraftReceipt;
-  contentDigest: string;
-  decisionDigest: string;
-}): Record<string, unknown> {
-  const { admission } = input.command.payload;
+/**
+ * admission から frontmatter へ投影される部分だけを切り出す。receipt/command 由来の
+ * 欄 (schema_version・receipt_id・decision_digest 等) は含まない。
+ * PLAN-L6-711 §2.3-6 の re-chain verifier が同じ投影を独立に再現するために export する
+ * (receiptFrontmatter とロジックを重複させない)。
+ */
+export function projectAdmissionForFrontmatter(
+  admission: PlanAdmissionRequest,
+): Record<string, unknown> {
   return {
-    schema_version: "v2",
-    receipt_id: input.receipt.certificateId,
-    command_id: input.command.commandId,
-    admitted_at: input.command.recordedAt,
-    source_digest: input.contentDigest,
-    decision_digest: input.decisionDigest,
-    receipt_digest: prefixed(input.receipt.certificateDigest),
-    binding: {
-      path: input.command.source.path,
-      plan_id: input.command.planId,
-      asset_id: input.receipt.assetId,
-      revision: input.receipt.revision,
-      content_digest: input.contentDigest,
-    },
     route: { signal: admission.routeSignal, mode: admission.routeMode },
     ...(admission.issue
       ? {
@@ -212,6 +200,40 @@ function receiptFrontmatter(input: {
       : {}),
     ...(admission.escapeReason ? { escape_reason: admission.escapeReason } : {}),
     ...(admission.supersedes ? { supersedes: [...admission.supersedes] } : {}),
+  };
+}
+
+/**
+ * PLAN-L6-711 §2.3-6 の re-chain verifier が H 側候補 A_H / R 側期待値 A_R の decision_digest を
+ * 独立に再計算するために export する (tracked-receipt-renderer 内部の digest() と同一関数)。
+ */
+export function admissionDecisionDigest(admission: PlanAdmissionRequest): string {
+  return digest(admission);
+}
+
+function receiptFrontmatter(input: {
+  command: PlanDraftCommand<AdmissionBearingPayload>;
+  receipt: TrackedReceiptDraftReceipt;
+  contentDigest: string;
+  decisionDigest: string;
+}): Record<string, unknown> {
+  const { admission } = input.command.payload;
+  return {
+    schema_version: "v2",
+    receipt_id: input.receipt.certificateId,
+    command_id: input.command.commandId,
+    admitted_at: input.command.recordedAt,
+    source_digest: input.contentDigest,
+    decision_digest: input.decisionDigest,
+    receipt_digest: prefixed(input.receipt.certificateDigest),
+    binding: {
+      path: input.command.source.path,
+      plan_id: input.command.planId,
+      asset_id: input.receipt.assetId,
+      revision: input.receipt.revision,
+      content_digest: input.contentDigest,
+    },
+    ...projectAdmissionForFrontmatter(admission),
   };
 }
 

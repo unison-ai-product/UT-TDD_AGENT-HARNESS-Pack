@@ -95,7 +95,7 @@ passing the gate silently.
 
 ## Judgement gate behaviour
 
-`ut-tdd gate <id>` reads execution mode from `ut-tdd status`. In hybrid mode a
+`ut-tdd gate <id>` resolves execution mode via `detectMode()` (the same detection `ut-tdd status` reports; `--mode <mode>` overrides it for tests, `src/cli.ts`). In hybrid mode a
 cross-family reviewer verdict is required. In single-runtime mode an
 `intra_runtime_subagent` record is the minimum — document the limitation and
 escalate if the risk is high.

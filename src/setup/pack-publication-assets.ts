@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import type { PublicationReleaseIdentity } from "../schema/release-manifest.ts";
-import { validateAuthoringArtifactSet } from "./authoring-template-inventory.ts";
+import {
+  projectTrackedTeamBlob,
+  validateAuthoringArtifactSet,
+} from "./authoring-template-inventory.ts";
 
 const RELEASE_ID = /^rel-sha256:([a-f0-9]{64})$/;
 const SHA256 = /^sha256:([a-f0-9]{64})$/;
@@ -266,6 +269,19 @@ function exactEntries(
   });
 }
 
+function isCanonicalTrackedTeamProjection(entry: SealedPublicationEntry): boolean {
+  const projection = projectTrackedTeamBlob({
+    blobs: [{ path: entry.sourcePath, mode: entry.mode, bytes: entry.content }],
+  });
+  return (
+    projection.ok &&
+    entry.sourcePath === projection.sourcePath &&
+    entry.destinationPath === projection.artifactPath &&
+    entry.mode === projection.mode &&
+    entry.size === projection.bytes.length
+  );
+}
+
 export function derivePackPublicationAssets(input: {
   readonly release: PublicationReleaseIdentity;
   readonly entries: readonly SealedPublicationEntry[];
@@ -275,7 +291,13 @@ export function derivePackPublicationAssets(input: {
   const authoringSet = validateAuthoringArtifactSet(
     input.entries.map((entry) => entry.destinationPath),
   );
-  if (!authoringSet.ok || input.entries.some((entry) => entry.sourcePath.startsWith(".ut-tdd/")))
+  if (
+    !authoringSet.ok ||
+    input.entries.some(
+      (entry) =>
+        entry.sourcePath.startsWith(".ut-tdd/") && !isCanonicalTrackedTeamProjection(entry),
+    )
+  )
     return { ok: false, error: "artifact_mismatch" };
   const manifestError = validateManifestArtifacts(input.release.artifacts);
   if (manifestError) return { ok: false, error: manifestError };

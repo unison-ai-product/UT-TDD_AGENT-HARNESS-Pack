@@ -59,6 +59,73 @@ describe("runtime adapter plan", () => {
     expect(plan.plan_id).toBe("PLAN-L4-99-x");
   });
 
+  it("U-ADAPTER-SANDBOX-001: grants workspace-write exactly once to the six approved Codex workers", () => {
+    const writers = ["se", "docs", "be-api", "be-logic", "db-schema", "devops-deploy"];
+    for (const role of writers) {
+      const plan = buildAdapterPlan(
+        { provider: "codex", role, task: "implement", model: "gpt-6-luna", effort: "high" },
+        "hybrid",
+      );
+      expect(plan.args.filter((arg) => arg === "--sandbox")).toHaveLength(1);
+      expect(plan.args.filter((arg) => arg === "workspace-write")).toHaveLength(1);
+      expect(plan.args).toEqual([
+        CODEX_STDIN_ARGS[0],
+        "--sandbox",
+        "workspace-write",
+        CODEX_MODEL_FLAG,
+        "gpt-6-luna",
+        "-c",
+        "model_reasoning_effort=high",
+        CODEX_STDIN_ARGS[1],
+      ]);
+      expect(plan.stdin).toBe("implement");
+    }
+  });
+
+  it("U-ADAPTER-SANDBOX-002: preserves existing invocations without workspace-write for non-writers, advisor, aim, reviewer, and unknown direct-adapter roles", () => {
+    const nonWriters = ["advisor", "aim", "qa", "blind-reviewer", "unknown-worker"];
+    for (const role of nonWriters) {
+      const plan = buildAdapterPlan(
+        { provider: "codex", role, task: "inspect", model: "gpt-6.1-sol", effort: "low" },
+        "hybrid",
+      );
+      expect(plan.command).toBe("codex");
+      expect(plan.args).toEqual([
+        CODEX_STDIN_ARGS[0],
+        CODEX_MODEL_FLAG,
+        "gpt-6.1-sol",
+        "-c",
+        "model_reasoning_effort=low",
+        CODEX_STDIN_ARGS[1],
+      ]);
+      expect(plan.args).not.toContain("--sandbox");
+      expect(plan.args).not.toContain("workspace-write");
+    }
+  });
+
+  it("U-ADAPTER-SANDBOX-003: keeps Claude invocation unchanged even for a writer-named role", () => {
+    const plan = buildAdapterPlan(
+      {
+        provider: "claude",
+        role: "se",
+        task: "implement",
+        model: "claude-sonnet-5",
+        effort: "middle",
+      },
+      "hybrid",
+    );
+    expect(plan.args).toEqual([
+      ...CLAUDE_STDIN_ARGS,
+      "--model",
+      "claude-sonnet-5",
+      "--effort",
+      "medium",
+    ]);
+    expect(plan.env).toEqual({ [CLAUDE_EFFORT_ENV]: "medium" });
+    expect(plan.stdin).toBe("implement");
+    expect(plan.args).not.toContain("--sandbox");
+  });
+
   it("marks unavailable provider as not available", () => {
     const plan = buildAdapterPlan({ provider: "claude", role: "tl", task: "review" }, "codex-only");
     expect(plan.available).toBe(false);

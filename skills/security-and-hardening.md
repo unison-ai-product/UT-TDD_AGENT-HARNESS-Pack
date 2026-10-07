@@ -34,9 +34,9 @@ decision_points:
   - when: "A Vitest fixture needs a credential-shaped string for a test case."
     choose: "use a `\"FAKE_KEY_FOR_TESTING\"` sentinel string"
     over: "using a realistic-looking key format that a scanner might miss or a human might mistake for real"
-    because: "the guardrail is expected to recognize sentinel strings and skip them; real-shaped fixture strings risk false secret leaks or false negatives depending on scanner behavior."
-  - when: "`ut-tdd guardrail` timing must be decided for a working session."
-    choose: "run it after every commit touching `docs/`, `.ut-tdd/`, or `src/`"
+    because: "the secret scan (`src/lint/secret-scan.ts`) is tuned around sentinel strings; real-shaped fixture strings risk false secret leaks or false negatives depending on scanner behavior."
+  - when: "secret-scan timing must be decided for a working session."
+    choose: "rely on the `pre-push` hook (`scripts/git-hooks/pre-push`; requires `git config core.hooksPath scripts/git-hooks`, warn-only unless `UT_TDD_PRE_PUSH_SECRET_SCAN_MODE=fail-close`), which scans each pushed commit's changed files under `docs/`, `.ut-tdd/audit/`, `.ut-tdd/logs/`, `.ut-tdd/memory/` only"
     over: "running it only once at the end of a sprint"
     because: "the anti-patterns section identifies end-of-sprint-only scanning as a named failure mode that lets secrets accumulate undetected across many commits."
 ---
@@ -54,7 +54,7 @@ a PLAN crosses the accept gate.
 - A PLAN adds or upgrades a runtime dependency (`package.json` changes).
 - A Retrofit or Refactor PLAN must demonstrate the hardened surface is not
   expanded.
-- `ut-tdd guardrail` exits non-zero after a dependency change.
+- The `pre-push` secret scan fails after a dependency change.
 - A harness release (L11/L12) requires a full hardening attestation.
 
 ## Hardening sweep checklist
@@ -62,7 +62,7 @@ a PLAN crosses the accept gate.
 Run in order before accept gate:
 
 ```
-ut-tdd guardrail          # secret pattern scan across all text files
+git push --dry-run        # pre-push hook scans pushed blobs under docs/ and .ut-tdd/{audit,logs,memory}/ only; src/ and skills/ are NOT covered (guardrail is a decision ledger, not a scanner)
 npm run lint              # Biome check: includes security-adjacent lint rules
 npm run test              # Vitest: confirm no fixture file leaks credentials
 ut-tdd doctor             # structural governance: no orphaned hook or agent path
@@ -82,11 +82,11 @@ For every new or updated entry in `package.json`:
 
 ### 2. Secret and credential redaction
 
-- [ ] `ut-tdd guardrail` exits 0 — no API key patterns, no session tokens, no
+- [ ] The `pre-push` secret scan (`src/lint/secret-scan.ts`) passes — no API key patterns, no session tokens, no
       personal absolute paths in committed files.
 - [ ] `.env*` files are listed in `.gitignore`; confirm no `.env` is tracked.
 - [ ] Vitest fixtures do not contain real credential-like strings. Use
-      `"FAKE_KEY_FOR_TESTING"` sentinel strings; the guardrail should recognize
+      `"FAKE_KEY_FOR_TESTING"` sentinel strings; the secret scan should recognize
       and skip them — if it does not, file an improvement entry.
 
 ### 3. Biome security-lint surface
@@ -124,7 +124,7 @@ For Retrofit/Refactor PLANs and L11/L12 gates, write:
   "plan_id": "<id>",
   "gate": "accept | L12",
   "dependency_audit": "pass | advisory-accepted:<reference>",
-  "guardrail": "pass | finding:<description>",
+  "secret_scan": "pass | finding:<description>",
   "biome_clean": true | false,
   "surface_reduction": "no-expansion | expansion-justified:<reference>",
   "reviewer": "<agent-slug or intra_runtime_subagent>",
@@ -136,8 +136,8 @@ Link this file from the PLAN `review_evidence` field.
 
 ## Anti-patterns
 
-- Running `ut-tdd guardrail` only at the end of a sprint — run it after every
-  commit that touches `docs/`, `.ut-tdd/`, or `src/`.
+- Checking for secrets only at the end of a sprint — the `pre-push` hook scans each pushed commit (within its
+  scan scope: `docs/` and `.ut-tdd/{audit,logs,memory}/`), so do not defer pushes to the end of a sprint.
 - Treating a floating dependency range as "safe for now" without a PLAN to pin
   it — floating ranges are a supply-chain risk even in development.
 - Conflating this skill with `security.md` — this skill is the *hardening sweep*

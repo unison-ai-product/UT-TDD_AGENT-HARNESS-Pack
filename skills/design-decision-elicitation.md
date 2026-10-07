@@ -32,7 +32,7 @@ decision_points:
     over: "非対話セッションで AskUserQuestion を呼ぶ / フォーマットなしの自由文で聞く"
     because: "非対話では応答を待てず、Codex には構造化質問ツールが無い。markdown 表が両ランタイム共通の代替表現"
   - when: "PO の回答を得た"
-    choose: "採択した選択肢と理由を PLAN の設計判断節 (または ADR) に記録する"
+    choose: "採択した選択肢と理由を PLAN の設計判断節 (または ADR) に記録する。4 項目規則の対象 (design / add-design PLAN) では設計文書 (または ADR) に記録する"
     over: "チャット止まりにする"
     because: "設計判断はチャットで消える。正本は PLAN / ADR (永続教訓は HARNESS メモリへ)"
 ---
@@ -54,4 +54,4 @@ PO への設計判断の聞き方を固定する skill。正本フォーマッ�
 2. 前提 2〜3 行 + 選択肢 2〜4 個 + 各 trade-off + 推奨 1 つ (先頭、理由 1 行) を組む。
 3. Claude 対話セッション: AskUserQuestion (必要なら preview 付き)。
    非対話 / Codex: `## 設計判断依頼` markdown 表を出力して停止。
-4. 回答を PLAN の設計判断節 / ADR に記録してから実装を進める。
+4. 回答を PLAN の設計判断節 / ADR (4 項目規則の対象 design / add-design PLAN では設計文書 / ADR) に記録してから実装を進める。

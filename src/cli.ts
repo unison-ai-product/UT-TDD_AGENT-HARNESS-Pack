@@ -1242,8 +1242,8 @@ session
     const input = readHookInput(HOOK_EVENT_SESSION_START, opts.session);
     const repoRoot = requireRuntimeRepoRoot();
     const deps = nodeDeps(repoRoot, gitBranch, gitHead);
-    runSessionStartSideEffects({ repoRoot, input, deps });
     dispatch(input, deps, HOOK_EVENT_SESSION_START);
+    runSessionStartSideEffects({ repoRoot, input, deps });
     process.stdout.write(`session-log: start ${input.session_id ?? "ut-tdd-cli"}\n`);
   });
 

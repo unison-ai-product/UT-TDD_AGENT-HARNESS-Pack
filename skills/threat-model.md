@@ -23,10 +23,10 @@ decision_points:
     choose: "docs/design/L3/<plan-id>-threat-model.md"
     over: "writing the threat model directly into handover files"
     because: "docs/design/L3/ is versioned and discoverable by ut-tdd doctor; handover files are transient"
-  - when: "`ut-tdd guardrail` reports no findings"
+  - when: "the secret scan (`pre-push`, `src/lint/secret-scan.ts`) reports no findings"
     choose: "treat it as one input and still manually enumerate novel attack surfaces"
-    over: "treating guardrail-green as a complete threat model"
-    because: "guardrail checks secrets and known patterns only; it does not enumerate new attack surfaces"
+    over: "treating secret-scan-green as a complete threat model"
+    because: "the secret scan checks secrets and known patterns only; it does not enumerate new attack surfaces"
   - when: "the agent-guard hook receives an unknown subagent_type or missing model field"
     choose: "fail closed (exit non-zero)"
     over: "failing open and allowing the call through"
@@ -51,7 +51,7 @@ code.
   slot, MCP endpoint).
 - An L2 or L3 design doc adds a new trust boundary (runtime -> OS, agent ->
   harness DB, external API -> harness).
-- `ut-tdd guardrail` reports an unresolved finding.
+- The `pre-push` secret scan reports an unresolved finding.
 - A Recovery PLAN must demonstrate the threat that caused the incident is
   modelled and mitigated.
 
@@ -91,8 +91,8 @@ link to a mitigation PLAN before pair-freeze.
 - **Agent guard fail-close.** The `agent-guard.ts` hook must exit non-zero for
   any unknown `subagent_type` or missing model field. Fail-open is not acceptable.
 - **No credentials in state.** `.ut-tdd/`, `docs/`, audit evidence, and handover
-  files must not contain API keys, passwords, or session tokens. Run
-  `ut-tdd guardrail` before accepting any PLAN that touches these paths.
+  files must not contain API keys, passwords, or session tokens. Confirm the
+  `pre-push` secret scan (`src/lint/secret-scan.ts`) passes before accepting any PLAN that touches these paths.
 - **Audit trail.** Every guard bypass (via `UT_TDD_ALLOW_RAW_AGENT=1`) must
   write an evidence record to `.ut-tdd/audit/`. No bypass without a trace.
 - **Input validation.** Hook stdin JSON must be validated against a schema; an
@@ -122,6 +122,6 @@ Link this doc from the PLAN `review_evidence` field before pair-freeze.
 - Writing threat model output directly into handover files — use
   `docs/design/L3/` so the artifact is versioned and `ut-tdd doctor` can find
   it.
-- Treating `ut-tdd guardrail` green as a complete threat model — guardrail
+- Treating the secret scan (`pre-push` hook, `src/lint/secret-scan.ts`) green as a complete threat model — it
   checks secrets and known patterns; novel attack surfaces must be enumerated
   manually.

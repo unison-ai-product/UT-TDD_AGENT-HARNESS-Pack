@@ -78,6 +78,8 @@ UT-TDD-agent-harness/
 │   ├── evidence/                 #   verification-profiles 等の正規化 evidence JSON (tracked、secret/PII 禁止)
 │   ├── cache/                    #   (.gitkeep のみ tracked)
 │   ├── handover/                 #   CURRENT.* / *.bak は gitignored。provider/ (provider 間 handover 記録) は tracked
+│   ├── memory/                   #   共有 HARNESS memory の正本 root (`ut-tdd memory add` 経由のみ、手書き禁止、PLAN-L7-189)。変更 (2026-09-29): 本ツリーへ追記
+│   ├── review/                   #   review request / verdict / receipt の custody (PLAN-L7-493 repo-local verdict custody、PLAN-L6-600)。変更 (2026-09-29): 本ツリーへ追記
 │   ├── teams/                    #   teams/*.yaml (local* は gitignored)
 │   └── adapters/                 #   optional adapter 設定 (local* は gitignored)
 │

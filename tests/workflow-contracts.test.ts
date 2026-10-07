@@ -310,7 +310,7 @@ describe("L7 workflow contract implementations", () => {
     expect(legacyCommandRoute.findings[0]?.code).toBe("legacy-runtime-command");
     const routeConfigViolations = validateRouteConfigText({
       path: ".ut-tdd/config/route-map.yaml",
-      text: "source: legacy DB\nowner: C:\\Users\\micro\\legacy\n",
+      text: "source: legacy DB\nowner: C:\\Users\\example\\legacy\n",
     });
     expect(routeConfigViolations.map((v) => v.code)).toEqual([
       "legacy-db-dependency",

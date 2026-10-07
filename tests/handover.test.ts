@@ -106,18 +106,18 @@ function digest(over: Partial<PlanDigestRef> = {}): PlanDigestRef {
 }
 
 describe("PLAN-L7-145 handover #1: relativizeTouchedFile (absolute-path leak fix)", () => {
-  const WINROOT = "C:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness";
+  const WINROOT = "C:\\Users\\example\\OneDrive\\Desktop\\UT-TDD-agent-harness";
 
   it("relativizes a Windows abs path whose casing MISMATCHES repoRoot (lowercase entry vs uppercase cwd)", () => {
     // process.cwd() returns uppercase 'C:\\...'; on-disk digests store lowercase 'c:\\...'.
     // A case-sensitive compare would leave the leak intact — this is the regression that matters.
-    const entry = "Write c:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness\\src\\a.ts";
+    const entry = "Write c:\\Users\\example\\OneDrive\\Desktop\\UT-TDD-agent-harness\\src\\a.ts";
     expect(relativizeTouchedFile(entry, WINROOT)).toBe("Write src/a.ts");
   });
 
   it("relativizes when casing mismatches the other direction (uppercase entry vs lowercase root)", () => {
-    const entry = "Edit C:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness\\src\\b.ts";
-    const lowerRoot = "c:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness";
+    const entry = "Edit C:\\Users\\example\\OneDrive\\Desktop\\UT-TDD-agent-harness\\src\\b.ts";
+    const lowerRoot = "c:\\Users\\example\\OneDrive\\Desktop\\UT-TDD-agent-harness";
     expect(relativizeTouchedFile(entry, lowerRoot)).toBe("Edit src/b.ts");
   });
 
@@ -137,16 +137,16 @@ describe("PLAN-L7-145 handover #1: relativizeTouchedFile (absolute-path leak fix
 
   it("masks the user-home prefix of out-of-repo personal paths (no username leak)", () => {
     // outside repo but under the user home (Temp scratch, ~/.codex) -> home prefix masked to ~
-    expect(relativizeTouchedFile("Write c:\\Users\\micro\\.codex\\config.toml", WINROOT)).toBe(
+    expect(relativizeTouchedFile("Write c:\\Users\\example\\.codex\\config.toml", WINROOT)).toBe(
       "Write ~/.codex/config.toml",
     );
     expect(
-      relativizeTouchedFile("Write c:\\Users\\micro\\AppData\\Local\\Temp\\dbq.ts", WINROOT),
+      relativizeTouchedFile("Write c:\\Users\\example\\AppData\\Local\\Temp\\dbq.ts", WINROOT),
     ).toBe("Write ~/AppData/Local/Temp/dbq.ts");
-    expect(relativizeTouchedFile("Edit /Users/micro/scratch/y.ts", "/repo")).toBe(
+    expect(relativizeTouchedFile("Edit /Users/example/scratch/y.ts", "/repo")).toBe(
       "Edit ~/scratch/y.ts",
     );
-    expect(relativizeTouchedFile("/home/micro/scratch/z.ts", "/repo")).toBe("~/scratch/z.ts");
+    expect(relativizeTouchedFile("/home/example/scratch/z.ts", "/repo")).toBe("~/scratch/z.ts");
   });
 
   it("is fail-open on odd input (never throws)", () => {
@@ -160,9 +160,9 @@ describe("PLAN-L7-145 handover #1: relativizeTouchedFile (absolute-path leak fix
         digest({
           plan_id: "PLAN-X",
           files_touched: [
-            "Write c:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness\\src\\a.ts",
-            "Write C:\\Users\\micro\\OneDrive\\Desktop\\UT-TDD-agent-harness\\src\\a.ts",
-            "Write c:\\Users\\micro\\.codex\\config.toml",
+            "Write c:\\Users\\example\\OneDrive\\Desktop\\UT-TDD-agent-harness\\src\\a.ts",
+            "Write C:\\Users\\example\\OneDrive\\Desktop\\UT-TDD-agent-harness\\src\\a.ts",
+            "Write c:\\Users\\example\\.codex\\config.toml",
           ],
         }),
       ],
@@ -172,8 +172,8 @@ describe("PLAN-L7-145 handover #1: relativizeTouchedFile (absolute-path leak fix
     relativizeDeliverableFiles(doc, WINROOT);
     const serialized = JSON.stringify(doc);
     // NO username-bearing personal path (drive-letter home or /Users|/home) survives anywhere
-    expect(/[A-Za-z]:[\\/]Users[\\/]micro/.test(serialized)).toBe(false);
-    expect(serialized.includes("Users/micro")).toBe(false);
+    expect(/[A-Za-z]:[\\/]Users[\\/]example/.test(serialized)).toBe(false);
+    expect(serialized.includes("Users/example")).toBe(false);
     const files = doc.deliverables[0]?.files ?? [];
     // both casings of src/a.ts collapse to one relativized entry (dedup)
     expect(files.filter((f) => f === "Write src/a.ts").length).toBe(1);

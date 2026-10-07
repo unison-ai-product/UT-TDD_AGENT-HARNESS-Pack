@@ -61,9 +61,10 @@ surface.
 2. How many references remain? Run `grep -r "<target>" docs/ src/ tests/`. Zero
    references is the cutover exit condition.
 3. Is the target named with a legacy runtime prefix or a legacy vendor path?
-   The `asset-drift` gate in `ut-tdd doctor` fails on legacy runtime
-   command/name/env residue and legacy source paths in enrolled agent, skill,
-   and prompt assets (FR-L1-49). Removing it is required, not optional.
+   The `asset-drift` doctor gate fails on such residue in enrolled assets
+   (`src/lint/asset-drift.ts:114` analyzeAssetDrift, wired at
+   `src/doctor/check-definition-groups.ts:172`; FR-L1-49). Removing it is
+   required, not optional.
 4. What is the rollback path if the replacement is broken post-cutover?
 
 ## UT-TDD naming contract

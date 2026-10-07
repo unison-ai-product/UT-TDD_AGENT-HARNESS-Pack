@@ -134,7 +134,7 @@ describe("worktree lifecycle application saga", () => {
     const fixture = ports({
       path: {
         resolve: () => ({
-          canonicalWorktreeRealpath: "C:/Users/micro/escape",
+          canonicalWorktreeRealpath: "C:/Users/example/escape",
           adminEntryRealpath: "C:/dev/.git/worktrees/escape",
         }),
       },

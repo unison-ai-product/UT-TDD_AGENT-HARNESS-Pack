@@ -58,9 +58,9 @@ UT-TDD externalises provider calls into `ut-tdd claude --role <role>`,
 1. If the call is an agent delegation declared in the PLAN `agent_slots`, route
    it through the wrappers so session lifecycle, handover warnings, and cost
    telemetry are captured.
-2. The `PreToolUse(Agent)` guard (`.claude/hooks/agent-guard.ts`) blocks an
-   agent call whose `subagent_type` is not allowlisted, or whose model does not
-   match the agent frontmatter family — never hard-code a mismatched model.
+2. The `PreToolUse(Agent)` guard (`src/runtime/agent-guard.ts:93`
+   `evaluateAgentGuard`) blocks disallowed `subagent_type` / model downgrades —
+   never hard-code a mismatched model.
 3. Apply low-cost-first: use the lightest viable model for mechanical subtasks;
    reserve the frontier model for judgement gates and design decisions (see the
    `agent-cost-design` skill). Model choice and outcome are recorded in

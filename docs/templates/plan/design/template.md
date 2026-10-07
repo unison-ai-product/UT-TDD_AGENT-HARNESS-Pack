@@ -21,7 +21,7 @@ generates:
     artifact_type: design_doc
   - artifact_path: docs/adr/ADR-NNN-<topic>.md
     artifact_type: adr_snapshot
-  - artifact_path: docs/v2/L2-test-design/PLAN-NNN-overall-test-design.md
+  - artifact_path: docs/test-design/<project>/<topic>-test-design.md
     artifact_type: test_design
 dependencies:
   parent: null
@@ -31,6 +31,11 @@ related_adr: []
 related_docs:
   - docs/governance/ut-tdd-agent-harness-requirements_v1.2.md
 ---
+
+> **採用規則に関する注記**: 「設計系 PLAN の本文 4 項目」規則を採用しているリポジトリ (本リポジトリでは
+> `CLAUDE.md` §設計系 PLAN の本文 4 項目、issue #648) では、新規の design / add-design PLAN の本文を
+> その 4 項目 (上流の設計 revision digest / 引き渡し物 / 検証の対 / 完了条件) だけにし、設計の契約本文は
+> `docs/design/` の設計文書に置く。この規則を採用していないリポジトリでは、以下の §0-§7 本文をそのまま使う。
 
 ## §0 PLAN
 

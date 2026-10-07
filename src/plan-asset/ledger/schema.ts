@@ -19,6 +19,7 @@ import { type HarnessDb, openHarnessDb } from "../../state-db/index.ts";
 import { deriveLegacyAssetId } from "../adapters/legacy-plan-adapter.ts";
 
 export const LEDGER_SCHEMA_VERSION = 7;
+export type PlanLedgerReadDb = Pick<HarnessDb, "prepare" | "userVersion">;
 
 export interface LedgerSchemaMigrationFaultPort {
   after(boundary: string): void;
@@ -904,14 +905,14 @@ export function migratePlanLedger(
         return { ok: false, ruleId: "plan-ledger-unavailable" };
       }
       installV7(db);
-      if (!schemaMatches(db) || !ledgerRowsValid(db)) throw new Error("v6-v7-verification-failed");
+      if (!validatePlanLedgerReadOnly(db)) throw new Error("v6-v7-verification-failed");
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
       throw error;
     }
   }
-  return schemaMatches(db) && ledgerRowsValid(db)
+  return validatePlanLedgerReadOnly(db)
     ? { ok: true, version: LEDGER_SCHEMA_VERSION }
     : { ok: false, ruleId: "plan-ledger-unavailable" };
 }
@@ -1115,7 +1116,9 @@ export function ledgerRowDigest(
   return createHash("sha256").update(JSON.stringify(frame)).digest("hex");
 }
 
-function schemaObjects(db: HarnessDb): readonly { type: string; name: string; sql: string }[] {
+function schemaObjects(
+  db: PlanLedgerReadDb,
+): readonly { type: string; name: string; sql: string }[] {
   return db
     .prepare(
       "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
@@ -1128,12 +1131,12 @@ function schemaObjects(db: HarnessDb): readonly { type: string; name: string; sq
     }));
 }
 
-function schemaMatches(db: HarnessDb): boolean {
+function schemaMatches(db: PlanLedgerReadDb): boolean {
   return schemaMatchesVersion(db, { tables, indexes, triggers });
 }
 
 function schemaMatchesVersion(
-  db: HarnessDb,
+  db: PlanLedgerReadDb,
   expected: {
     tables: readonly TableDef[];
     indexes: readonly IndexDef[];
@@ -1162,7 +1165,7 @@ function schemaMatchesVersion(
   return String(integrity?.integrity_check ?? "") === "ok" && foreignKeys.length === 0;
 }
 
-function ledgerRowsValid(db: HarnessDb): boolean {
+function ledgerRowsValid(db: PlanLedgerReadDb): boolean {
   for (const [table, digestColumn] of [
     ["plan_alias_events", "event_digest"],
     ["plan_id_reservation_events", "event_digest"],
@@ -1211,7 +1214,11 @@ function ledgerRowsValid(db: HarnessDb): boolean {
   );
 }
 
-function artifactOperationEventsValid(db: HarnessDb): boolean {
+export function validatePlanLedgerReadOnly(db: PlanLedgerReadDb): boolean {
+  return schemaMatches(db) && ledgerRowsValid(db);
+}
+
+function artifactOperationEventsValid(db: PlanLedgerReadDb): boolean {
   const rows = db
     .prepare("SELECT * FROM plan_draft_artifact_operation_events ORDER BY command_id, sequence")
     .all();
@@ -1264,7 +1271,7 @@ function artifactOperationEventsValid(db: HarnessDb): boolean {
   return committed.every((row) => sequence.has(String(row.command_id)));
 }
 
-function legacyUnknownOperationValid(db: HarnessDb, row: Record<string, unknown>): boolean {
+function legacyUnknownOperationValid(db: PlanLedgerReadDb, row: Record<string, unknown>): boolean {
   let operation: unknown;
   try {
     operation = JSON.parse(String(row.operation_json));
@@ -1306,7 +1313,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function bootstrapProvenanceValid(db: HarnessDb): boolean {
+function bootstrapProvenanceValid(db: PlanLedgerReadDb): boolean {
   const rows = db
     .prepare(
       `SELECT provenance.*, revision.source_path AS revision_source_path,
@@ -1340,7 +1347,7 @@ function bootstrapProvenanceValid(db: HarnessDb): boolean {
   });
 }
 
-function draftJournalReductionsValid(db: HarnessDb): boolean {
+function draftJournalReductionsValid(db: PlanLedgerReadDb): boolean {
   const currents = db.prepare("SELECT * FROM plan_draft_journal").all();
   const events = db
     .prepare("SELECT * FROM plan_draft_journal_events ORDER BY command_id, sequence")
@@ -1378,7 +1385,7 @@ function draftJournalReductionsValid(db: HarnessDb): boolean {
   return true;
 }
 
-function admissionReductionsValid(db: HarnessDb): boolean {
+function admissionReductionsValid(db: PlanLedgerReadDb): boolean {
   const eventsWithoutReceipt = db
     .prepare(
       `SELECT COUNT(*) AS n FROM plan_admission_events event
@@ -1409,7 +1416,7 @@ function admissionReductionsValid(db: HarnessDb): boolean {
   return Number(eventsWithoutReceipt?.n ?? 0) === 0 && Number(receiptsWithoutEvent?.n ?? 0) === 0;
 }
 
-function migrationReceiptsValid(db: HarnessDb): boolean {
+function migrationReceiptsValid(db: PlanLedgerReadDb): boolean {
   const orphanEvents = db
     .prepare(
       `SELECT COUNT(*) AS n FROM legacy_plan_migration_events event
@@ -1439,7 +1446,7 @@ function migrationReceiptsValid(db: HarnessDb): boolean {
   return Number(orphanEvents?.n ?? 0) === 0 && Number(orphanReceipts?.n ?? 0) === 0;
 }
 
-function reservationReceiptsValid(db: HarnessDb): boolean {
+function reservationReceiptsValid(db: PlanLedgerReadDb): boolean {
   const orphanEvents = db
     .prepare(
       `SELECT COUNT(*) AS n FROM plan_id_reservation_events event
@@ -1469,7 +1476,7 @@ function reservationReceiptsValid(db: HarnessDb): boolean {
   return Number(orphanEvents?.n ?? 0) === 0 && Number(orphanReceipts?.n ?? 0) === 0;
 }
 
-function aliasReductionsValid(db: HarnessDb): boolean {
+function aliasReductionsValid(db: PlanLedgerReadDb): boolean {
   return db
     .prepare("SELECT * FROM plan_aliases")
     .all()
@@ -1491,7 +1498,7 @@ function aliasReductionsValid(db: HarnessDb): boolean {
     });
 }
 
-function reservationReductionsValid(db: HarnessDb): boolean {
+function reservationReductionsValid(db: PlanLedgerReadDb): boolean {
   return db
     .prepare("SELECT * FROM plan_id_reservations")
     .all()
@@ -1539,7 +1546,7 @@ function reservationReductionsValid(db: HarnessDb): boolean {
     });
 }
 
-function migrationReductionsValid(db: HarnessDb): boolean {
+function migrationReductionsValid(db: PlanLedgerReadDb): boolean {
   const currents = db.prepare("SELECT * FROM legacy_plan_migrations").all();
   const streamCount = Number(
     db.prepare("SELECT COUNT(DISTINCT legacy_plan_id) AS n FROM legacy_plan_migration_events").get()
