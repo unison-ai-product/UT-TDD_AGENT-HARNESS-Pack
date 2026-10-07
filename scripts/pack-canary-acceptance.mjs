@@ -18,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 
 export const CANARY_TAG = "v0.2.0-canary.2";
-export const AGENT_E2E_TAG = "v0.2.0-canary.4";
+export const AGENT_E2E_TAG = "v0.2.0-canary.5";
 export const PACK_RELEASE_PREFIX =
   "https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/releases/tag/";
 export const SOURCE_ISSUE_PREFIX =
@@ -125,7 +125,7 @@ export function parseAgentE2ERecord(value, commentUrl) {
   return parsePublishRecord(value, commentUrl, { expectedTag: AGENT_E2E_TAG });
 }
 
-/** Build only the canary.4 Release-assets installer command used by AT-DIST-003. */
+/** Build only the canary.5 Release-assets installer command used by AT-DIST-003. */
 export function buildAgentE2EInstallerInvocation(releaseDirectory, anchorDigest) {
   if (!digestPattern.test(anchorDigest)) throw new Error("agent-e2e-anchor-invalid");
   return [
