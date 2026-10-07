@@ -27,7 +27,7 @@ decision_points:
   - when: "R3 is about to advance to R4 but PO has not reviewed the intent hypotheses"
     choose: "Block the advance until po_reviewed=true and po_review_evidence is populated"
     over: "Advancing to R4 on the hypotheses alone"
-    because: "PO verification is mandatory for R3; ut-tdd plan lint machine-checks po_reviewed and treats a missing sign-off as a blocking violation"
+    because: "PO verification is mandatory for R3; this is an operational rule — ut-tdd plan lint does not read po_reviewed / po_review_evidence (it only requires a po agent slot on an R3 reverse PLAN, src/plan/lint.ts:242), so the reviewer must confirm the sign-off by hand"
   - when: "Drafting the forward_routing candidate for a gap"
     choose: "Select the routing layer using the reverse.md §4 routing table"
     over: "Choosing a layer ad hoc based on where the gap seems to fit"
@@ -120,5 +120,7 @@ Before advancing `workflow_phase` to `R4`, verify:
 - [ ] `ut-tdd plan lint` exits 0 with `workflow_phase: R4`.
 - [ ] `ut-tdd doctor` exits 0.
 
-Advancing R3 without PO verification is a blocking violation. The `po_reviewed`
-field is machine-checked by `ut-tdd plan lint` when the schema enforces it.
+Advancing R3 without PO verification is a blocking violation by operational rule.
+`po_reviewed` / `po_review_evidence` are not machine-checked: `ut-tdd plan lint`
+only requires a `po` agent slot on a `reverse` PLAN at `workflow_phase: R3`
+(`src/plan/lint.ts:242`), which does not prove sign-off happened.

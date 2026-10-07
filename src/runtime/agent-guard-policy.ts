@@ -22,6 +22,16 @@ export const SUBAGENT_ALLOWLIST: ReadonlySet<string> = new Set([
   "ut-tdd-tl",
 ]);
 
+/** Codex adapter workspace-write grant is limited to approved artifact workers (Issue #676). */
+export const CODEX_WORKSPACE_WRITE_ROLES: ReadonlySet<string> = new Set([
+  "se",
+  "docs",
+  "be-api",
+  "be-logic",
+  "db-schema",
+  "devops-deploy",
+]);
+
 /**
  * Claude model family catalog for guard normalization (PLAN-L7-414).
  * Kept as a runtime-layer literal because the module-boundary rule forbids

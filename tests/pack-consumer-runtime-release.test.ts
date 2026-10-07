@@ -19,8 +19,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { stringify } from "yaml";
+import { projectTrackedTeamBlob } from "../src/setup/authoring-template-inventory.ts";
 import * as setupApi from "../src/setup/index.ts";
 
 const installerExecutionRoot = resolve(process.cwd());
@@ -56,6 +58,7 @@ import {
   digestConsumerRuntimeBytes,
   digestMaterializedReleaseEntries,
   releaseArtifactFileNames,
+  transformCleanDistributionArtifact,
 } from "../src/setup/index.ts";
 import {
   createLocalGitObjectReader,
@@ -138,6 +141,126 @@ const receipt = Buffer.from(
 
 function fixtureGit(root: string, args: readonly string[]): string {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+}
+
+interface RawGitTreeEntry {
+  readonly path: string;
+  readonly mode: string;
+  readonly bytes: Buffer;
+}
+
+interface TarReadbackEntry {
+  readonly path: string;
+  readonly mode: "100644" | "100755";
+  readonly bytes: Buffer;
+}
+
+function readRawGitTree(root: string, revision: string): Map<string, RawGitTreeEntry> {
+  const records = execFileSync("git", ["ls-tree", "-r", "-z", "--full-tree", revision], {
+    cwd: root,
+    encoding: "buffer",
+  })
+    .toString("utf8")
+    .split("\0")
+    .filter(Boolean);
+  const treeEntries: { mode: string; objectId: string; path: string }[] = [];
+  const paths = new Set<string>();
+  for (const record of records) {
+    const match = /^(\d{6}) blob ([a-f0-9]{40})\t(.+)$/.exec(record);
+    if (!match) throw new Error(`unexpected raw Git tree record: ${record}`);
+    if (paths.has(match[3])) throw new Error(`duplicate raw Git tree path: ${match[3]}`);
+    paths.add(match[3]);
+    treeEntries.push({ mode: match[1], objectId: match[2], path: match[3] });
+  }
+
+  const objectIds = [...new Set(treeEntries.map((entry) => entry.objectId))];
+  if (objectIds.length === 0) return new Map();
+  const batch = execFileSync("git", ["cat-file", "--batch"], {
+    cwd: root,
+    input: Buffer.from(`${objectIds.join("\n")}\n`, "ascii"),
+    encoding: "buffer",
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  const blobs = new Map<string, Buffer>();
+  let offset = 0;
+  for (const expectedObjectId of objectIds) {
+    const headerEnd = batch.indexOf(0x0a, offset);
+    if (headerEnd < 0) throw new Error("raw Git batch response is missing a header terminator");
+    const header = batch.subarray(offset, headerEnd).toString("ascii");
+    const match = /^([a-f0-9]{40}) blob (0|[1-9][0-9]*)$/.exec(header);
+    if (!match || match[1] !== expectedObjectId)
+      throw new Error(`unexpected raw Git batch header: ${header}`);
+    const size = Number(match[2]);
+    const contentStart = headerEnd + 1;
+    const contentEnd = contentStart + size;
+    if (!Number.isSafeInteger(size) || contentEnd >= batch.length)
+      throw new Error(`invalid raw Git batch blob size: ${header}`);
+    if (batch[contentEnd] !== 0x0a)
+      throw new Error(`raw Git batch blob delimiter missing: ${expectedObjectId}`);
+    const bytes = Buffer.from(batch.subarray(contentStart, contentEnd));
+    const actualObjectId = createHash("sha1")
+      .update(Buffer.from(`blob ${size}\0`, "ascii"))
+      .update(bytes)
+      .digest("hex");
+    if (actualObjectId !== expectedObjectId)
+      throw new Error(`raw Git batch blob hash mismatch: ${expectedObjectId}`);
+    blobs.set(expectedObjectId, bytes);
+    offset = contentEnd + 1;
+  }
+  if (offset !== batch.length) throw new Error("raw Git batch response has trailing bytes");
+
+  const entries = new Map<string, RawGitTreeEntry>();
+  for (const entry of treeEntries) {
+    const bytes = blobs.get(entry.objectId);
+    if (!bytes) throw new Error(`raw Git batch blob missing: ${entry.objectId}`);
+    entries.set(entry.path, { path: entry.path, mode: entry.mode, bytes });
+  }
+  return entries;
+}
+
+function readTarEntries(tarballBytes: Uint8Array): TarReadbackEntry[] {
+  const archive = gunzipSync(tarballBytes);
+  const entries: TarReadbackEntry[] = [];
+  let offset = 0;
+  let longName: string | undefined;
+  while (offset + 512 <= archive.length) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const readString = (start: number, length: number) =>
+      header
+        .subarray(start, start + length)
+        .toString("utf8")
+        .replace(/\0.*$/s, "");
+    const parseOctal = (start: number, length: number) => {
+      const value = readString(start, length).trim();
+      return value ? Number.parseInt(value, 8) : 0;
+    };
+    const size = parseOctal(124, 12);
+    const type = header[156] ?? 0;
+    const name = readString(0, 100);
+    const prefix = readString(345, 155);
+    const rawPath = longName ?? (prefix ? `${prefix}/${name}` : name);
+    longName = undefined;
+    const contentStart = offset + 512;
+    const content = archive.subarray(contentStart, contentStart + size);
+    if (type === 0x4c) {
+      longName = content.toString("utf8").replace(/[\0\n]+$/, "");
+    } else if (type === 0x78) {
+      const pathRecord = content
+        .toString("utf8")
+        .split("\n")
+        .find((line) => line.includes(" path="));
+      if (pathRecord) longName = pathRecord.slice(pathRecord.indexOf(" path=") + 6);
+    } else if (type === 0 || type === 0x30 || type === 0x37) {
+      const path = rawPath.replace(/^\.\//, "");
+      if (path && !path.endsWith("/")) {
+        const mode = parseOctal(100, 8) & 0o111 ? "100755" : "100644";
+        entries.push({ path, mode, bytes: Buffer.from(content) });
+      }
+    }
+    offset = contentStart + Math.ceil(size / 512) * 512;
+  }
+  return entries;
 }
 
 function releaseManifestForFixture(artifactSourceCommit: string): Record<string, unknown> {
@@ -395,6 +518,82 @@ async function createProducerFixture(
   fixtureGit(root, ["commit", "--quiet", "-m", "release manifest"]);
   fixtureGit(root, ["tag", tag]);
   return { root, tag, c1 };
+}
+
+async function createPackrt013Fixture(): Promise<ProducerFixture> {
+  const fixture = await createProducerFixture(true, "v0.2.0-canary-013", false);
+  const scriptPath = join(fixture.root, "scripts", "ut-tdd.ps1");
+  mkdirSync(dirname(scriptPath), { recursive: true });
+  writeFileSync(scriptPath, "Write-Output 'packrt-013 LF blob'\n", "utf8");
+  writeFileSync(
+    join(fixture.root, "scripts", "executable.sh"),
+    "#!/bin/sh\nprintf 'packrt-013\\n'\n",
+    "utf8",
+  );
+  writeFileSync(join(fixture.root, ".gitattributes"), "*.ps1 text eol=crlf\n", "utf8");
+  fixtureGit(fixture.root, ["config", "core.autocrlf", "true"]);
+  fixtureGit(fixture.root, [
+    "add",
+    "--",
+    ".gitattributes",
+    "scripts/ut-tdd.ps1",
+    "scripts/executable.sh",
+  ]);
+  fixtureGit(fixture.root, ["update-index", "--chmod=+x", "--", "scripts/executable.sh"]);
+  fixtureGit(fixture.root, ["commit", "--quiet", "--amend", "--no-edit"]);
+  fixtureGit(fixture.root, ["checkout", "--force", "HEAD"]);
+  fixture.c1 = fixtureGit(fixture.root, ["rev-parse", "HEAD"]);
+
+  const resolved = await resolveReleaseArtifacts(
+    {
+      repository: fixture.root,
+      release: {
+        releaseId: "fixture-release",
+        materializerVersion: "1",
+        artifactSourceCommit: fixture.c1,
+        artifactSetDigest: `sha256:${"0".repeat(64)}`,
+      },
+    },
+    { git: createLocalGitObjectReader(), materialize: materializeReleaseArtifacts },
+  );
+  if (!resolved.ok) throw new Error(`U-PACKRT-013 resolver fixture failed: ${resolved.error}`);
+  const tree = readRawGitTree(fixture.root, fixture.c1);
+  const publicationArtifacts = resolved.entries.map((entry) => {
+    const raw = tree.get(cleanDistributionSourcePath(entry.path, [...tree.keys()]));
+    if (!raw) throw new Error(`U-PACKRT-013 source blob is missing: ${entry.path}`);
+    if (entry.mode !== "100644" && entry.mode !== "100755")
+      throw new Error(`U-PACKRT-013 fixture has unsupported mode: ${entry.path}`);
+    return {
+      sourcePath: cleanDistributionSourcePath(entry.path, [...tree.keys()]),
+      destinationPath: entry.path,
+      mode: entry.mode,
+      size: entry.content.length,
+      contentDigest: digestConsumerRuntimeBytes(entry.content),
+    };
+  });
+  const publicationBase = {
+    materializerVersion: "1",
+    artifactSourceCommit: fixture.c1,
+    artifactSetDigest: resolved.digest,
+    artifactInventoryDigest: deriveArtifactInventoryDigest(publicationArtifacts),
+    releaseAssetInventoryDigest: `sha256:${"c".repeat(64)}`,
+    artifacts: publicationArtifacts,
+  };
+  const id = deriveReleaseId("1", fixture.c1, resolved.digest);
+  const releaseManifest = {
+    schema_version: "v2" as const,
+    releases: {
+      [id]: { ...publicationBase, releaseRecordDigest: deriveReleaseRecordDigest(publicationBase) },
+    },
+    channels: { canary: id, stable: id },
+    channelOrder: ["canary", "stable"],
+  };
+  mkdirSync(join(fixture.root, "release"), { recursive: true });
+  writeFileSync(join(fixture.root, "release", "manifest.yaml"), stringify(releaseManifest), "utf8");
+  fixtureGit(fixture.root, ["add", "--", "release/manifest.yaml"]);
+  fixtureGit(fixture.root, ["commit", "--quiet", "-m", "release manifest for U-PACKRT-013"]);
+  fixtureGit(fixture.root, ["tag", fixture.tag]);
+  return fixture;
 }
 
 async function createPackrt012Fixture(schemaVersion: "v1" | "v2" = "v2"): Promise<{
@@ -1161,6 +1360,108 @@ describe("Pack consumer runtime release producer byte and fail-close oracles", (
       ...(options.moveStagedAssets ? { moveStagedAssets: options.moveStagedAssets } : {}),
     });
 
+  it("U-PACKRT-013: stages tar entries from C1 Git object bytes and modes", async () => {
+    const packrt013 = await createPackrt013Fixture();
+    const outDir = mkdtempSync(join(tmpdir(), "ut-tdd-packrt-013-assets-"));
+    try {
+      const rawTree = readRawGitTree(packrt013.root, packrt013.c1);
+      expect(rawTree.get("scripts/executable.sh")?.mode).toBe("100755");
+      const paths = [...rawTree.keys()];
+      const plan = buildCleanDistributionPlan({ paths, sourceTag: packrt013.tag });
+      expect(plan.ok).toBe(true);
+      if (!plan.ok) throw new Error("U-PACKRT-013 clean distribution plan failed");
+
+      const expected = plan.artifactPaths.map((artifactPath) => {
+        const sourcePath = cleanDistributionSourcePath(artifactPath, paths);
+        const source = rawTree.get(sourcePath);
+        if (!source) throw new Error(`U-PACKRT-013 raw Git source is missing: ${sourcePath}`);
+        if (source.mode !== "100644" && source.mode !== "100755")
+          throw new Error(
+            `U-PACKRT-013 unsupported public source mode: ${source.mode}:${sourcePath}`,
+          );
+        let bytes = Buffer.from(source.bytes);
+        if (sourcePath === ".ut-tdd/teams/example-review-team.yaml") {
+          const projection = projectTrackedTeamBlob({
+            blobs: [{ path: source.path, mode: source.mode as "100644", bytes: source.bytes }],
+          });
+          expect(projection.ok).toBe(true);
+          if (!projection.ok)
+            throw new Error(`U-PACKRT-013 team projection failed: ${projection.error}`);
+          bytes = Buffer.from(projection.bytes);
+          expect(bytes).toEqual(source.bytes);
+        }
+        if (artifactPath === "package.json") {
+          bytes = Buffer.from(
+            transformCleanDistributionArtifact(artifactPath, source.bytes.toString("utf8")),
+            "utf8",
+          );
+        }
+        return { path: artifactPath, mode: source.mode, bytes };
+      });
+
+      const originalConfigCount = process.env.GIT_CONFIG_COUNT;
+      const originalConfigKey0 = process.env.GIT_CONFIG_KEY_0;
+      const originalConfigValue0 = process.env.GIT_CONFIG_VALUE_0;
+      process.env.GIT_CONFIG_COUNT = "1";
+      process.env.GIT_CONFIG_KEY_0 = "core.autocrlf";
+      process.env.GIT_CONFIG_VALUE_0 = "true";
+      try {
+        await packageConsumerRuntimeRelease({
+          repoRoot: packrt013.root,
+          tag: packrt013.tag,
+          outDir,
+          homeDirectory: join(packrt013.root, "synthetic-home"),
+          installDependencies: () => undefined,
+          buildGeneration: async (input) => {
+            if (typeof input === "string")
+              throw new Error("fixture generation input must be structured");
+            if (!input.repoRoot) throw new Error("fixture generation repo root is missing");
+            expect(input.candidateRevision).toBe(packrt013.c1);
+            expect(fixtureGit(input.repoRoot, ["rev-parse", "HEAD"])).toBe(packrt013.c1);
+            return fakeGenerationBuilder()(input);
+          },
+        });
+      } finally {
+        if (originalConfigCount === undefined) delete process.env.GIT_CONFIG_COUNT;
+        else process.env.GIT_CONFIG_COUNT = originalConfigCount;
+        if (originalConfigKey0 === undefined) delete process.env.GIT_CONFIG_KEY_0;
+        else process.env.GIT_CONFIG_KEY_0 = originalConfigKey0;
+        if (originalConfigValue0 === undefined) delete process.env.GIT_CONFIG_VALUE_0;
+        else process.env.GIT_CONFIG_VALUE_0 = originalConfigValue0;
+      }
+
+      const names = releaseArtifactFileNames(packrt013.tag);
+      const tarball = readFileSync(join(outDir, names.tarball));
+      const readback = readTarEntries(tarball).sort((left, right) =>
+        left.path.localeCompare(right.path),
+      );
+      const expectedSorted = expected
+        .map((entry) => ({ ...entry, mode: entry.mode as "100644" | "100755" }))
+        .sort((left, right) => left.path.localeCompare(right.path));
+      expect(readback).toEqual(expectedSorted);
+      expect(readback.find((entry) => entry.path === "scripts/executable.sh")?.mode).toBe("100755");
+      const ps1Blob = rawTree.get("scripts/ut-tdd.ps1");
+      const ps1TarEntry = readback.find((entry) => entry.path === "scripts/ut-tdd.ps1");
+      expect(ps1Blob?.bytes).toEqual(Buffer.from("Write-Output 'packrt-013 LF blob'\n", "utf8"));
+      expect(ps1TarEntry?.bytes).toEqual(ps1Blob?.bytes);
+      const packageJsonBlob = rawTree.get("package.json");
+      const packageTarEntry = readback.find((entry) => entry.path === "package.json");
+      expect(packageTarEntry?.bytes).toEqual(
+        Buffer.from(
+          transformCleanDistributionArtifact(
+            "package.json",
+            packageJsonBlob?.bytes.toString("utf8") ?? "",
+          ),
+          "utf8",
+        ),
+      );
+      expect(readdirSync(outDir).sort()).toEqual(Object.values(names).sort());
+    } finally {
+      rmSync(packrt013.root, { recursive: true, force: true });
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+
   it("U-PACKRT-001: repeats the same revision with identical consumer runtime and checksum bytes", async () => {
     const first = mkdtempSync(join(tmpdir(), "ut-tdd-packrt-001-first-"));
     const second = mkdtempSync(join(tmpdir(), "ut-tdd-packrt-001-second-"));
@@ -1183,7 +1484,14 @@ describe("Pack consumer runtime release producer byte and fail-close oracles", (
   it("U-PACKRT-003: scans every asset and the sealed receipt bytes for producer identity leakage", async () => {
     const outDir = mkdtempSync(join(tmpdir(), "ut-tdd-packrt-003-"));
     const envSentinel = `packrt-env-sentinel-${fixture.tag}`;
+    const producerUsername = `packrt-producer-user-${fixture.tag}`;
+    const priorUser = process.env.USER;
+    const priorUsername = process.env.USERNAME;
     process.env.UT_TDD_PACKRT_ENV_SENTINEL = envSentinel;
+    // Exercise the actual producer environment with a unique identity, not a
+    // generic host username that also occurs in committed source prose.
+    process.env.USER = producerUsername;
+    process.env.USERNAME = producerUsername;
     try {
       await packageFixture(outDir);
       const names = releaseArtifactFileNames(fixture.tag);
@@ -1231,10 +1539,23 @@ describe("Pack consumer runtime release producer byte and fail-close oracles", (
         envSentinel,
         ...envValues,
       ];
-      expectBytesNotToContain([...assetBuffers(outDir, fixture.tag), receiptBytes], forbidden);
+      const producedBuffers = [...assetBuffers(outDir, fixture.tag), receiptBytes];
+      expectBytesNotToContain(producedBuffers, forbidden);
+      for (const bytes of producedBuffers) {
+        expect(() =>
+          expectBytesNotToContain(
+            [Buffer.concat([bytes, Buffer.from(producerUsername, "utf8")])],
+            forbidden,
+          ),
+        ).toThrow(`forbidden producer identity bytes: ${JSON.stringify(producerUsername)}`);
+      }
       expect(existsSync(join(outDir, names.consumerRuntime))).toBe(true);
     } finally {
       delete process.env.UT_TDD_PACKRT_ENV_SENTINEL;
+      if (priorUser === undefined) delete process.env.USER;
+      else process.env.USER = priorUser;
+      if (priorUsername === undefined) delete process.env.USERNAME;
+      else process.env.USERNAME = priorUsername;
       rmSync(outDir, { recursive: true, force: true });
     }
   });

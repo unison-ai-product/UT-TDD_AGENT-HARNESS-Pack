@@ -586,7 +586,8 @@ describe("db-currency lint", () => {
             let stdout = "";
             child.stdout.on("data", (chunk) => (stdout += String(chunk)));
             child.on("error", reject);
-            child.on("exit", (code) =>
+            // stdout の drain 完了後に判定するため close を待つ。
+            child.on("close", (code) =>
               code === 0 ? resolvePromise(stdout.trim()) : reject(new Error(`worker exit ${code}`)),
             );
           }),

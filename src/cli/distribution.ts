@@ -49,6 +49,7 @@ import {
   transformCleanDistributionArtifact,
   validateConsumerRuntimeRelease,
 } from "../setup/index.ts";
+import { derivePackPublicationAssets } from "../setup/pack-publication-assets.ts";
 import type { ReleaseAggregateFinalTree } from "../setup/release-aggregate-admission.ts";
 import { admitReleaseAggregate } from "../setup/release-aggregate-admission.ts";
 import {
@@ -587,6 +588,41 @@ async function buildConsumerRuntimeAdmissionInput(input: {
   };
 }
 
+function resolveDistributionTarReleaseIdentity(input: {
+  readonly repoRoot: string;
+  readonly releaseRevision: string;
+  readonly channel: "canary" | "stable";
+  readonly sourceRevision: string;
+}) {
+  let rawManifest: unknown;
+  try {
+    rawManifest = parseYaml(
+      readGitBlob(input.repoRoot, input.releaseRevision, "release/manifest.yaml").toString("utf8"),
+    );
+  } catch {
+    throw new ConsumerRuntimeReleaseProducerError("consumer_runtime_release_manifest_unavailable");
+  }
+  const parsedManifest = parsePublicationManifest(rawManifest);
+  if (!parsedManifest.ok)
+    throw new ConsumerRuntimeReleaseProducerError(
+      "consumer_runtime_release_manifest_invalid",
+      parsedManifest.error,
+    );
+  const releaseId = parsedManifest.value.channels[input.channel];
+  const selected = parsedManifest.value.releases[releaseId];
+  if (!selected)
+    throw new ConsumerRuntimeReleaseProducerError(
+      "consumer_runtime_release_manifest_invalid",
+      "distribution tar release unavailable",
+    );
+  if (selected.artifactSourceCommit !== input.sourceRevision)
+    throw new ConsumerRuntimeReleaseProducerError(
+      "consumer_runtime_release_manifest_invalid",
+      "distribution tar source revision mismatch",
+    );
+  return selected;
+}
+
 export async function packageConsumerRuntimeRelease(input: {
   readonly repoRoot: string;
   readonly tag: string;
@@ -614,10 +650,8 @@ export async function packageConsumerRuntimeRelease(input: {
     join(dirname(resolve(input.repoRoot)), ".ut-tdd-consumer-runtime-package-"),
   );
   const assetsStage = join(scratch, "assets");
-  const cleanStage = join(scratch, "clean");
   const generationRoot = join(scratch, "generation");
   ensureDir(assetsStage, { recursive: true });
-  ensureDir(cleanStage, { recursive: true });
   try {
     const sourceRoot = createTaggedSourceSnapshot(input.repoRoot, sourceRevision, scratch);
     const sourcePaths = collectDistributionCandidatePaths(sourceRoot);
@@ -631,24 +665,41 @@ export async function packageConsumerRuntimeRelease(input: {
       throw new Error(
         `distribution package source preflight failed: ${secretScanMessages(secretScan)[0] ?? "plan"}`,
       );
-    for (const rel of exportPlan.artifactPaths) {
-      const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
-      copyCleanDistributionArtifact({
-        sourceRoot,
-        sourcePath: sourceRel,
-        targetRoot: cleanStage,
-        artifactPath: rel,
-      });
-    }
+    const tarRelease = resolveDistributionTarReleaseIdentity({
+      repoRoot: input.repoRoot,
+      releaseRevision: sourceBinding.releaseRevision,
+      channel: sourceBinding.channel,
+      sourceRevision,
+    });
+    const tarResolution = await resolveReleaseArtifacts(
+      { repository: input.repoRoot, release: tarRelease },
+      {
+        git: createLocalGitObjectReader(),
+        materialize: materializeReleaseArtifacts,
+      },
+    );
+    if (!tarResolution.ok)
+      throw new Error(`distribution package tar materialization failed: ${tarResolution.error}`);
+    const resolvedEntries = new Map(tarResolution.entries.map((entry) => [entry.path, entry]));
+    const tarAsset = derivePackPublicationAssets({
+      release: tarRelease,
+      entries: tarRelease.artifacts.map((artifact) => {
+        const entry = resolvedEntries.get(artifact.destinationPath);
+        if (!entry)
+          throw new Error(
+            `distribution package tar materialization entry missing: ${artifact.destinationPath}`,
+          );
+        if (entry.mode !== "100644" && entry.mode !== "100755")
+          throw new Error(`distribution package tar mode is unsupported: ${entry.path}`);
+        return { ...artifact, mode: entry.mode, content: entry.content };
+      }),
+    });
+    if (!tarAsset.ok)
+      throw new Error(`distribution package tar materialization failed: ${tarAsset.error}`);
     const names = releaseArtifactFileNames(input.tag);
     const tarballPath = join(assetsStage, names.tarball);
-    const tar = spawnSync("tar", ["-czf", names.tarball, "-C", cleanStage, "."], {
-      cwd: assetsStage,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    if (tar.status !== 0) throw new Error(`distribution package tar failed: ${tar.stderr ?? ""}`);
-    const tarballBytes = readFileSync(tarballPath);
+    const tarballBytes = tarAsset.value.tarball.bytes;
+    writeFileSync(tarballPath, tarballBytes);
     writeFileSync(
       join(assetsStage, names.checksum),
       `${hexDigest(tarballBytes)}  ${names.tarball}\n`,

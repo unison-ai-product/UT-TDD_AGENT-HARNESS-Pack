@@ -513,9 +513,9 @@ export async function createCanaryFixture(): Promise<CanaryFixture> {
     const wrapper = join(releaseDir, names.compiledEsm);
     const planTemplate = execFileSync(
       "tar",
-      // The production package command archives `-C cleanStage .`, so GNU tar
-      // stores this member with the leading `./` (BSD tar also accepts it).
-      ["-xOf", names.tarball, "./docs/templates/plan/design/template.md"],
+      // The deterministic Pack serializer stores the canonical destinationPath
+      // without a leading `./`.
+      ["-xOf", names.tarball, "docs/templates/plan/design/template.md"],
       { cwd: releaseDir, encoding: "utf8", windowsHide: true },
     );
     if (!planTemplate.includes("kind: design")) throw new Error("shipped PLAN template is missing");

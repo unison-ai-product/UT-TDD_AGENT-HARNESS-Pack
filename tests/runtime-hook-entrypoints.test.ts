@@ -10,8 +10,28 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { Worker } from "node:worker_threads";
+import { describe, expect, it, vi } from "vitest";
+import { BUILTIN_GITHUB_TEMPLATES } from "../src/setup/templates.ts";
 import { ensureTrackedProjectIdentity } from "./support/project-identity-fixture.ts";
+
+const sessionStartProbe = vi.hoisted(() => ({
+  materializeCallback: null as null | ((repoRoot: string) => void),
+}));
+
+vi.mock("../src/shared/embedded-skills.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/shared/embedded-skills.ts")>();
+  return {
+    ...actual,
+    materializeSkillAssets: (...args: Parameters<typeof actual.materializeSkillAssets>) => {
+      if (sessionStartProbe.materializeCallback) {
+        sessionStartProbe.materializeCallback(args[0]);
+        return [];
+      }
+      return actual.materializeSkillAssets(...args);
+    },
+  };
+});
 
 const repoRoot = process.cwd();
 const cliPath = join(repoRoot, "src", "cli.ts");
@@ -29,6 +49,99 @@ function runCli(cwd: string, args: string[], input?: unknown, env?: NodeJS.Proce
     input: stdin,
     windowsHide: true,
   });
+}
+
+function readSessionStartEvents(root: string, sessionId: string): Array<Record<string, unknown>> {
+  const path = join(root, ".ut-tdd", "logs", "session", `${sessionId}.jsonl`);
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+async function runCapturedSessionStart(
+  root: string,
+  sessionId: string,
+  onMaterialize: (repoRoot: string) => void,
+): Promise<unknown> {
+  const envKeys = [
+    "UT_TDD_PROJECT_DIR",
+    "CLAUDE_PROJECT_DIR",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "GH_CONFIG_DIR",
+    "UT_TDD_CLAUDE_SESSIONS_DIR",
+    "UT_TDD_CODEX_SESSIONS_DIR",
+  ];
+  const savedEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
+  // UT_TDD_PROJECT_DIR provides the isolated fixture root; do not mutate cwd.
+  const savedArgv = process.argv;
+  const savedExitCode = process.exitCode;
+  const savedStdinIsTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+  const savedStdoutWrite = process.stdout.write;
+  const savedStderrWrite = process.stderr.write;
+  let capturedProgram: import("commander").Command | undefined;
+  let capturedCommandPrototype: typeof import("commander").Command.prototype | undefined;
+  let originalParseAsync: typeof import("commander").Command.prototype.parseAsync | undefined;
+  let result: unknown;
+
+  try {
+    process.env.UT_TDD_PROJECT_DIR = root;
+    process.env.CLAUDE_PROJECT_DIR = "";
+    process.env.HOME = root;
+    process.env.USERPROFILE = root;
+    process.env.APPDATA = root;
+    process.env.GH_CONFIG_DIR = join(root, ".gh-config");
+    process.env.UT_TDD_CLAUDE_SESSIONS_DIR = join(root, ".claude", "projects");
+    process.env.UT_TDD_CODEX_SESSIONS_DIR = join(root, ".codex", "sessions");
+    Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
+    process.stdout.write = (() => true) as typeof process.stdout.write;
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    process.exitCode = undefined;
+    process.argv = ["node", "src/cli.ts", "session", "start", "--session", sessionId];
+    sessionStartProbe.materializeCallback = onMaterialize;
+
+    vi.resetModules();
+    const { Command } = await import("commander");
+    capturedCommandPrototype = Command.prototype;
+    originalParseAsync = Command.prototype.parseAsync;
+    Command.prototype.parseAsync = function (this: import("commander").Command) {
+      capturedProgram = this;
+      return Promise.resolve(this);
+    };
+    try {
+      await import("../src/cli.ts");
+    } finally {
+      Command.prototype.parseAsync = originalParseAsync;
+    }
+    if (!capturedProgram || !originalParseAsync)
+      throw new Error("issue835: actual CLI Commander program was not captured");
+
+    try {
+      await originalParseAsync.call(capturedProgram, process.argv);
+    } catch (error) {
+      result = error;
+    }
+    return result;
+  } finally {
+    sessionStartProbe.materializeCallback = null;
+    if (capturedCommandPrototype && originalParseAsync) {
+      // The module import is deliberately not allowed to leave a patched global Commander method.
+      capturedCommandPrototype.parseAsync = originalParseAsync;
+    }
+    process.argv = savedArgv;
+    for (const [key, value] of savedEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    if (savedStdinIsTTY) Object.defineProperty(process.stdin, "isTTY", savedStdinIsTTY);
+    else Reflect.deleteProperty(process.stdin, "isTTY");
+    process.stdout.write = savedStdoutWrite;
+    process.stderr.write = savedStderrWrite;
+    process.exitCode = savedExitCode;
+  }
 }
 
 function writeFakeCodex(binDir: string): string {
@@ -74,6 +187,28 @@ function writeFakeClaude(binDir: string): string {
 }
 
 describe("runtime hook entrypoints", () => {
+  it("SessionStart timeout is 30s in source and consumer settings without changing other hook timeouts", () => {
+    const settingsPaths = [
+      join(repoRoot, ".claude", "settings.json"),
+      join(repoRoot, "docs", "templates", "adapter", ".claude", "settings.json"),
+    ];
+
+    const settingsSources = [
+      JSON.parse(BUILTIN_GITHUB_TEMPLATES["adapter/.claude/settings.json"]),
+      ...settingsPaths.map((path) => JSON.parse(readFileSync(path, "utf8"))),
+    ];
+    for (const settings of settingsSources) {
+      expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
+      expect(settings.hooks).toMatchObject({
+        PreToolUse: [{ hooks: [{ timeout: 5 }] }, { hooks: [{ timeout: 5 }] }],
+        PostToolUse: [{ hooks: [{ timeout: 5 }] }],
+        Stop: [{ hooks: [{ timeout: 5 }] }, { hooks: [{ timeout: 930 }] }],
+        SubagentStop: [{ hooks: [{ timeout: 5 }] }],
+      });
+    }
+    expect(settingsSources[0]).toEqual(settingsSources[2]);
+  });
+
   it("Claude settings route session-log hooks through the shared UT-TDD CLI", () => {
     const settings = JSON.parse(readFileSync(join(repoRoot, ".claude", "settings.json"), "utf8"));
     const hooks = settings.hooks;
@@ -98,7 +233,7 @@ describe("runtime hook entrypoints", () => {
     });
   });
 
-  it("shared CLI session/hook commands record a PLAN digest in a temp repo", () => {
+  it("U-835-007: shared CLI session/hook commands record a PLAN digest in a temp repo", () => {
     const cwd = mkdtempSync(join(tmpdir(), "ut-tdd-hook-"));
     try {
       ensureTrackedProjectIdentity(cwd, "fixture/runtime-hook-entrypoints");
@@ -232,7 +367,7 @@ describe("runtime hook entrypoints", () => {
     }
   });
 
-  it("blocks hook state writes when no repository root can be resolved", () => {
+  it("U-835-002: blocks hook state writes when no repository root can be resolved", () => {
     const isolated = mkdtempSync(join(tmpdir(), "ut-tdd-hook-unresolved-"));
     try {
       const run = runCli(
@@ -245,6 +380,120 @@ describe("runtime hook entrypoints", () => {
       expect(existsSync(join(isolated, ".ut-tdd"))).toBe(false);
     } finally {
       rmSync(isolated, { recursive: true, force: true });
+    }
+  });
+
+  it("U-835-003: the real session-start action appends before its materialize side-effect boundary", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-session-start-order-"));
+    const sessionId = "issue835-order-entry";
+    let eventsAtSideEffectEntry: Array<Record<string, unknown>> = [];
+    try {
+      ensureTrackedProjectIdentity(root, "fixture/issue835-order-entry");
+      const error = await runCapturedSessionStart(root, sessionId, (repoRoot) => {
+        eventsAtSideEffectEntry = readSessionStartEvents(repoRoot, sessionId);
+      });
+
+      expect(error).toBeUndefined();
+      expect(eventsAtSideEffectEntry).toContainEqual(
+        expect.objectContaining({ session_id: sessionId, event_type: "session_start" }),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-835-004: the exact session event remains readable during a bounded side-effect barrier", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-session-start-barrier-"));
+    const sessionId = "issue835-order-barrier";
+    const eventPath = join(root, ".ut-tdd", "logs", "session", `${sessionId}.jsonl`);
+    const barrier = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2);
+    const barrierState = new Int32Array(barrier);
+    let worker: Worker | undefined;
+    let eventsAtEntry: Array<Record<string, unknown>> = [];
+    let waitResult: string | undefined;
+    try {
+      ensureTrackedProjectIdentity(root, "fixture/issue835-order-barrier");
+      const error = await runCapturedSessionStart(root, sessionId, (repoRoot) => {
+        eventsAtEntry = readSessionStartEvents(repoRoot, sessionId);
+        worker = new Worker(
+          [
+            'const fs = require("node:fs");',
+            'const { workerData } = require("node:worker_threads");',
+            "const state = new Int32Array(workerData.barrier);",
+            "try {",
+            '  const text = fs.readFileSync(workerData.eventPath, "utf8");',
+            '  const exact = text.split(/\\r?\\n/).filter(Boolean).map((line) => JSON.parse(line)).some((event) => event.session_id === workerData.sessionId && event.event_type === "session_start");',
+            "  Atomics.store(state, 1, exact ? 1 : 0);",
+            "} catch { Atomics.store(state, 1, 0); }",
+            "Atomics.store(state, 0, 1);",
+            "Atomics.notify(state, 0);",
+          ].join("\n"),
+          { eval: true, workerData: { barrier, eventPath, sessionId } },
+        );
+        waitResult = Atomics.wait(barrierState, 0, 0, 2_000);
+      });
+
+      expect(error).toBeUndefined();
+      expect(["ok", "not-equal"]).toContain(waitResult);
+      expect(eventsAtEntry).toContainEqual(
+        expect.objectContaining({ session_id: sessionId, event_type: "session_start" }),
+      );
+      expect(Atomics.load(barrierState, 1)).toBe(1);
+      expect(readSessionStartEvents(root, sessionId)).toContainEqual(
+        expect.objectContaining({ session_id: sessionId, event_type: "session_start" }),
+      );
+    } finally {
+      await worker?.terminate();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-835-005: a side-effect error does not roll back the already-appended session event", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-session-start-throw-"));
+    const sessionId = "issue835-order-throw";
+    let eventsAtSideEffectEntry: Array<Record<string, unknown>> = [];
+    try {
+      ensureTrackedProjectIdentity(root, "fixture/issue835-order-throw");
+      const error = await runCapturedSessionStart(root, sessionId, (repoRoot) => {
+        eventsAtSideEffectEntry = readSessionStartEvents(repoRoot, sessionId);
+        throw new Error("issue835-side-effect-sentinel");
+      });
+
+      expect(String(error)).toContain("issue835-side-effect-sentinel");
+      expect(eventsAtSideEffectEntry).toContainEqual(
+        expect.objectContaining({ session_id: sessionId, event_type: "session_start" }),
+      );
+      expect(readSessionStartEvents(root, sessionId)).toContainEqual(
+        expect.objectContaining({ session_id: sessionId, event_type: "session_start" }),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-835-006: the real session-start action preserves its explicit session ID and current plan", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-session-start-identity-"));
+    const sessionId = "issue835-exact-session-006";
+    const planId = "PLAN-L7-835-windows-sessionstart-contract";
+    let eventsAtSideEffectEntry: Array<Record<string, unknown>> = [];
+    try {
+      ensureTrackedProjectIdentity(root, "fixture/issue835-exact-session");
+      mkdirSync(join(root, ".ut-tdd", "state"), { recursive: true });
+      writeFileSync(join(root, ".ut-tdd", "state", "current-plan"), `${planId}\n`);
+      const error = await runCapturedSessionStart(root, sessionId, (repoRoot) => {
+        eventsAtSideEffectEntry = readSessionStartEvents(repoRoot, sessionId);
+      });
+
+      expect(error).toBeUndefined();
+      expect(eventsAtSideEffectEntry).toContainEqual(
+        expect.objectContaining({
+          session_id: sessionId,
+          plan_id: planId,
+          event_type: "session_start",
+        }),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

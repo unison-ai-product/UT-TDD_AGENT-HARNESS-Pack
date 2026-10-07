@@ -68,6 +68,15 @@ schedule steps within the parent PLAN.
 
 ## PLAN frontmatter checklist
 
+Body of a design-kind PLAN (`kind: design` / `add-design`): where the
+repository adopts the thin-body rule (in the UT-TDD harness development
+repo: root `CLAUDE.md` §PLAN Filing Rules, issue #648), a newly filed
+design-kind PLAN keeps the contract body in `docs/design/` (or
+`docs/test-design/`) and carries only four body items — upstream design
+revision digest (per document), deliverables, verification pair, and
+completion conditions. Do not copy design contract text into the PLAN. The
+frontmatter checklist below still applies unchanged.
+
 Before running `ut-tdd plan lint`, confirm every field:
 
 - [ ] `plan_id` is unique and matches the filename (`PLAN-<kind>-<NN>`).
@@ -114,7 +123,7 @@ around pair-freeze and trace-freeze is a decomposition error.
 ```
 ut-tdd plan lint            # schema + schedule + dependency existence
 ut-tdd doctor               # all harness governance gates
-ut-tdd graph                # visualise PLAN dependency graph
+ut-tdd graph export         # visualise the relation graph (mermaid|dot)
 ut-tdd status               # surface active/stalled PLANs
 ```
 

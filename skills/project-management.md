@@ -69,10 +69,10 @@ how they depend on each other, and whether the program as a whole is healthy.
 ```
 ut-tdd status               # active/stalled/draft PLANs across all layers
 ut-tdd doctor               # governance violations across the full program
-ut-tdd graph                # dependency graph — spot cycles and orphans
+ut-tdd graph export         # relation graph diagram — spot cycles and orphans
 ut-tdd plan lint            # per-PLAN schema and dependency existence
 ut-tdd handover             # generate .ut-tdd/handover/CURRENT.json
-ut-tdd metrics              # aggregate progress signals (layer coverage, etc.)
+ut-tdd metrics skill       # skill firing / acceptance metrics (the only metrics subcommand)
 ```
 
 Run `ut-tdd status` and `ut-tdd graph export --format mermaid` together at the start of a program
@@ -133,7 +133,7 @@ Before creating a new PLAN, run:
 ```
 ut-tdd status               # check for existing PLANs at the same layer/FR
 ut-tdd plan lint            # will flag duplicate plan_id
-ut-tdd graph                # shows if the proposed dependency already exists
+ut-tdd graph impact --changed <path...>   # shows what the proposed dependency would touch
 ```
 
 If a candidate PLAN would duplicate more than 50% of an existing PLAN's

@@ -72,7 +72,7 @@ and a PLAN is open, apply the error-fix skill for the fix itself.
 | Signal | Tool | First action |
 |--------|------|--------------|
 | `ut-tdd doctor` non-zero | `ut-tdd doctor` | Read full output — never `| tail` |
-| CI harness-check red | CI log | Identify sub-gate (typecheck / lint / test / doctor) |
+| CI harness-check red | CI log | Identify the failing step (step / job list: `.github/workflows/harness-check.yml` 全体、linux / windows / node-generation / 集約 `harness-check`) |
 | `.ut-tdd/` state inconsistency | `ut-tdd status` | Compare expected vs actual state |
 | Hook entrypoint status null | `ut-tdd doctor` | Verify `PATH` includes System32 (Windows) |
 | Subagent output mismatch | `git status` + file read | Check actual files, not agent narrative |

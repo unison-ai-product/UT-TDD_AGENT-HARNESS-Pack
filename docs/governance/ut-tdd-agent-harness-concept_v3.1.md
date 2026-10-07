@@ -205,7 +205,7 @@ UT-TDD は PLAN 起票前後に、タスクの難易度・エフォート・適�
 
 - `ut-tdd task classify`: 入力文または PLAN から kind / drive / size / complexity / split_required を判定する。
 - `ut-tdd task estimate`: 三点見積もりとリスク係数で effort_hours / story_points / buffer を出す。
-- `ut-tdd skill suggest`: PLAN の kind / layer / drive / touched files から `docs/skills/*.md` の候補を推挙する。
+- `ut-tdd skill suggest`: PLAN の kind / layer / drive / touched files から `skills/*.md` の候補を推挙する。
 
 基本は rule-based で動作し、AI runtime が無い `standalone` でも利用できる。複数 AI がある場合は軽量分類を `fast-checker`、曖昧な L/XL 判定や本番影響を含む見積もりレビューを `frontier-reviewer` に回す。
 
@@ -541,7 +541,7 @@ V2 source snapshot reference の process doc / L1 requirements 実体 doc は **
 | **業務要求** (business) | §1 目的・背景 (WHY/WHAT/WHO) / §2 対象業務一覧 / §3 業務フロー (Forward V-model 主線 + 9 mode 分岐 + cross-cutting 横断機構) / §4 ステークホルダー / §5 現状課題 → あるべき姿 / §6 業務スコープ外 (本 BR で扱わない: FR / 画面 / 技術 / NFR / 実装) / §7 L14 運用テスト pair 対応表 (BR-* ⇔ OT-* 1:1) / §8 関連 doc / §9 carry / 既知の不足 + §9.1 上流 baton carry 一覧 / **§10 業務 entity 列挙 (DDD 適用、要件レベル / 詳細は L4)** + §10.1 主要業務 entity 一覧 (L0 用語と 1:1 対応 / 業務的意味 / 対応 schema・CLI・file の 4 列 table) + §10.2 L4 carry (集約境界 / 値オブジェクト / entity ID 規約 / ライフサイクル / 不変条件 / 集約間整合性 / `ut-tdd doctor check_business_entity_coverage` 新設) + §10.3 SSoT 参照 (ユビキタス言語 / Bounded Context / 業界標準整合) | `PLAN-L1-01-business-requirements` |
 | **機能要求** (functional) | §1 機能一覧 (**FR-L1 現行 47 件、P0: 19 / P1: 23 / P2: 5 で確定**、`docs/migration/v2-import-ledger.md §6` + FR-L1-50 DDD/TDD strictness 参照) / §2 利用シナリオ (ユースケース) / §3 操作とデータの流れ / §4 入出力 / §5 上流 baton 反映 (L0 企画書バトン項目と本 doc FR-L1-* の対応表 + carry 先) / §6 関連 doc | `PLAN-L1-02-functional-requirements` |
 | **画面要求** (screen) | §1 画面一覧 / §2 画面遷移の要望 / §3 表示・操作への要望 / §4 関連 doc (具体的画面設計は L2、本 sub-doc は要求レベル) | `PLAN-L1-03-screen-requirements` |
-| **技術要求** (technical) | §1 採用技術・技術制約 / §2 外部連携 + IF 要望 / §3 既存システム制約 / **§4 state schema 二層構造** (UT-TDD では `.ut-tdd/` 配下、core tables + audit/event tables + derived views + 補助 state、closure event 契約 = `idempotency_key = mode + plan_id + closure_event_id` + rollback + conflict resolution) / **§5 工程別 skill 注入機構** (`docs/skills/<L>-injection.yaml` 相当、`owner_role` / `mandatory_agents` / `recommended_agents` / `recommended_skills` / `recommended_commands` / `orchestration_mode` の 6 フィールド) / **§6 9 mode 共通基盤** (R0-R4 + RGC を Reverse 専用ではなく共通 closure language として再利用、Forward 接続 event の state 登録 + 補助 state への中間 state 保存 + discrepancy_log からの機械起動) / **§7 drift 解消方針** (detector の週次以上起動 + inventory schema による工程双方向 mapping + 新規 asset 工程未割当不許容 + Reverse normalization 接続 + 運用目標「新規 drift 0 件 / week」) / §8 関連 doc | `PLAN-L1-04-technical-requirements` |
+| **技術要求** (technical) | §1 採用技術・技術制約 / §2 外部連携 + IF 要望 / §3 既存システム制約 / **§4 state schema 二層構造** (UT-TDD では `.ut-tdd/` 配下、core tables + audit/event tables + derived views + 補助 state、closure event 契約 = `idempotency_key = mode + plan_id + closure_event_id` + rollback + conflict resolution) / **§5 工程別 skill 注入機構** (専用の `<L>-injection.yaml` は存在しない。実体は (a) `ut-tdd skill suggest` の推挙 (`src/skill-engine/recommend.ts`) と root `skills/` の skill 本文、(b) drive × layer の注入 5 key を返す `ut-tdd vmodel show <drive> <layer> --injection` (`src/vmodel/injection.ts` の `resolveVmodelInjection`) の 2 経路。以下は設計上の 6 フィールド、`owner_role` / `mandatory_agents` / `recommended_agents` / `recommended_skills` / `recommended_commands` / `orchestration_mode` の 6 フィールド) / **§6 9 mode 共通基盤** (R0-R4 + RGC を Reverse 専用ではなく共通 closure language として再利用、Forward 接続 event の state 登録 + 補助 state への中間 state 保存 + discrepancy_log からの機械起動) / **§7 drift 解消方針** (detector の週次以上起動 + inventory schema による工程双方向 mapping + 新規 asset 工程未割当不許容 + Reverse normalization 接続 + 運用目標「新規 drift 0 件 / week」) / §8 関連 doc | `PLAN-L1-04-technical-requirements` |
 | **非機能要求** (nfr) | §1 可用性 / §2 性能・拡張性 / §3 運用・保守性 (冒頭で carry 宣言 = 排泄系契約・上流 baton の段階 carry) / §4 移行性 / §5 セキュリティ / §6 システム環境 (**IPA 非機能要求グレード 2018 6 大項目に準拠**) / **§7 IPA × ISO 25010 二軸タグ表** (全 NFR-ID × IPA 大項目 × ISO 25010 特性 の 3 列 + 対象外特性の除外理由) / §8 関連 doc (carry 接続記述 = `pairs_test_design: []` の L1 許容 + L4 起票時追加 + L4↔L9+L13+L14 多層検証接続) | `PLAN-L1-05-nfr` |
 
 > **L1 機能要求 ≠ L3 機能要件**: L1 機能要求 (FR-L1-*) は「ユーザー視点で何の機能を望むか」= **要求**、L3 機能要件 (FR-*) は「システムが満たすべき仕様 + AC」= **要件**。L1 の 5 sub-doc は L3 で確定される FR-*/AC-* の **入力**であり別物。
@@ -955,7 +955,7 @@ v2.1 では「branch type 別 workflow を OR 条件で扱う」「該当 workfl
 ## 8.2 3 層の役割
 
 ```
-[層 1] スキル層 (docs/skills/*.md)
+[層 1] スキル層 (skills/*.md)
   ← 「何をすべきか」の知識 (個別技術 / 観点リスト)
          ↓ 組み合わせ定義 (設計参照のみ)
 [層 2] ワークフロー層 (workflows/*.yaml)
@@ -967,7 +967,7 @@ v2.1 では「branch type 別 workflow を OR 条件で扱う」「該当 workfl
 
 AI (Claude Code / Codex) は PLAN 起票時に層 2/3 YAML を **自然言語指示として** 読み、step 順序と on_failure 規約を適用する。専用 interpreter は無い。
 
-source-derived のスキル群は、個人プロジェクト用の原文をそのまま使わず、UT-TDD 向けの **skill pack** として `docs/skills/*.md` に正本化する。curate 対象は「追加機能設計」「ドキュメント」「実装」「テスト」「Reverse」「運用」の単位に分け、各 skill pack は必ず workflow / harness / gate のどれに接続するかを明記する。
+source-derived のスキル群は、個人プロジェクト用の原文をそのまま使わず、UT-TDD 向けの **skill pack** として `skills/*.md` に正本化する。curate 対象は「追加機能設計」「ドキュメント」「実装」「テスト」「Reverse」「運用」の単位に分け、各 skill pack は必ず workflow / harness / gate のどれに接続するかを明記する。
 
 特に、追加機能設計では既存設計を破壊しない `add-design` / `add-impl` 原則、ドキュメント・実装・テストの成果物一致では 4 artifact trace / L6 QA doc-first / review 後の追加 regression を skill pack 側から参照できるようにする。skill は知識と観点の層に閉じ、実行条件や fail-close は harness-check 側で機械強制する。
 

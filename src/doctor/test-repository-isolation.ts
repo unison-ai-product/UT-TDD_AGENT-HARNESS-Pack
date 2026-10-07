@@ -148,6 +148,12 @@ repositoryReadContracts["tests/release-consumer-vmodel-template.test.ts"] = {
   reason:
     "consumer template bundle oracle compares emitted bytes to the source template assets while the CLI writes only into a temporary consumer root",
 };
+repositoryReadContracts["tests/plan-revision-digest-query.test.ts"] = {
+  mode: "isolated_fixture",
+  calls: 1,
+  reason:
+    "CLI subprocess loads the source under test from the writable execution snapshot and reads ledger data only from a temporary fixture root",
+};
 
 export const REPOSITORY_READ_CONTRACTS: Readonly<Record<string, RepositoryReadContract>> =
   repositoryReadContracts;
