@@ -432,7 +432,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
   "adapter/.codex/config.toml": ["[features]", "hooks = true", ""].join("\n"),
   "adapter/.codex/hooks.json": [
     "{",
-    '  "$comment": "UT-TDD Codex adapter hooks (PLAN-L7-668 command schema). Hosted/API tool surfaces still require explicit `ut-tdd guard preflight` before edits because repo-local Codex hooks do not execute there.",',
+    '  "description": "UT-TDD Codex adapter hooks (PLAN-L7-668 command schema). Hosted/API tool surfaces still require explicit `ut-tdd guard preflight` before edits because repo-local Codex hooks do not execute there.",',
     '  "hooks": {',
     '    "PreToolUse": [',
     "      {",

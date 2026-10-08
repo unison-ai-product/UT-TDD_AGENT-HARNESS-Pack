@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -604,4 +604,102 @@ process.stdin.on("end", () => {
       else process.env.UT_TDD_CLAUDE_BIN = previous;
     }
   }, 30_000);
+
+  it.each([
+    ["parent", ["review", "--json", "live-consume"]],
+    ["child", ["review", "live-consume", "--json"]],
+  ] as const)("U-RVATT-036 returns consumer deny JSON through the real CLI when --json is on the %s command", (_position, commandArgs) => {
+    const { root, envelopePath } = fixture();
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    const binRoot = mkdtempSync(join(tmpdir(), "ut-review-deny-provider-"));
+    roots.push(binRoot);
+    const stub = join(binRoot, process.platform === "win32" ? "claude.cmd" : "claude");
+    writeFileSync(
+      stub,
+      process.platform === "win32"
+        ? '@echo off\r\nif "%~1"=="--version" (echo claude 0.0.0-stub& exit /b 0)\r\nexit /b 1\r\n'
+        : '#!/bin/sh\nif [ "$1" = "--version" ]; then echo claude 0.0.0-stub; exit 0; fi\nexit 1\n',
+      "utf8",
+    );
+    if (process.platform !== "win32") chmodSync(stub, 0o755);
+
+    const cliPath = join(process.cwd(), "src", "cli.ts");
+    const result = spawnSync(
+      process.execPath,
+      [cliPath, ...commandArgs, "--envelope", envelopePath],
+      {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 15_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          UT_TDD_CLAUDE_BIN: stub,
+          UT_TDD_CODEX_BIN: stub,
+        },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(1);
+    expect(JSON.parse(result.stdout) as unknown).toEqual({
+      ok: false,
+      reason: "consumer_runtime_absent",
+    });
+  });
+
+  it.each([
+    ["parent", ["review", "--json", "live-dispatch"]],
+    ["child", ["review", "live-dispatch", "--json"]],
+  ] as const)("U-RVATT-042 emits parseable deny JSON through the real live-dispatch CLI with --json on the %s command", (_position, commandArgs) => {
+    const { root, memoryPath } = fixture();
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    const binRoot = mkdtempSync(join(tmpdir(), "ut-review-dispatch-provider-"));
+    roots.push(binRoot);
+    const stub = join(binRoot, process.platform === "win32" ? "provider.cmd" : "provider");
+    writeFileSync(
+      stub,
+      process.platform === "win32"
+        ? "@echo off\r\necho provider 0.0.0-stub\r\nexit /b 0\r\n"
+        : "#!/bin/sh\necho provider 0.0.0-stub\nexit 0\n",
+      "utf8",
+    );
+    if (process.platform !== "win32") chmodSync(stub, 0o755);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "src", "cli.ts"),
+        ...commandArgs,
+        "--memory-id",
+        "memory:d3a",
+        "--memory-path",
+        relative(root, memoryPath).replaceAll("\\", "/"),
+        "--pr",
+        "319",
+        "--head",
+        head,
+        "--revision",
+        "review-d3a-json-deny",
+        "--author-family",
+        "codex",
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 15_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          UT_TDD_CLAUDE_BIN: stub,
+          UT_TDD_CODEX_BIN: stub,
+        },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(1);
+    expect(JSON.parse(result.stdout) as unknown).toMatchObject({
+      ok: false,
+      reason: "exact_head_not_found",
+    });
+  });
 });
