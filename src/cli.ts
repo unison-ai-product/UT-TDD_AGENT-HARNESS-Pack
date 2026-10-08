@@ -169,14 +169,12 @@ import {
 import {
   buildClaudeProviderInboxEntry,
   type ClaudeInboxPullRequestObservation,
-  claudeWorkspaceId,
   isClaudeMemoryWakeTarget,
   parseClaudeInboxPullRequestObservation,
   publishClaudeInboxEntry,
-  recoverClaudeInboxBacklog,
+  recoverAndSummarizeClaudeInboxForSessionStart,
   resolveClaudeWakeDelay,
   resolveLiveClaudeTarget,
-  summarizeUnclaimedInbox,
   waitForClaudeMemory,
 } from "./runtime/claude-memory-wake.ts";
 import { detectMode, nextActionForMode, type RuntimeDetection } from "./runtime/detect.ts";
@@ -631,18 +629,6 @@ function observeClaudeInboxPullRequest(
   }
 }
 
-function recoverClaudeInboxForSessionStart(repoRoot: string): void {
-  try {
-    recoverClaudeInboxBacklog({
-      repoRoot,
-      dryRun: false,
-      pullRequestState: (pr) => observeClaudeInboxPullRequest(repoRoot, pr),
-    });
-  } catch {
-    // SessionStart remains fail-open; unknown PR state keeps entries live.
-  }
-}
-
 function surfaceSessionStartDigestToStdout(
   repoRoot: string,
   escalationBlock = "",
@@ -657,11 +643,12 @@ function surfaceSessionStartDigestToStdout(
   };
   // memory は DB 障害と独立に正本ファイルから読む (PLAN-L7-468 欠陥 3)。
   const memory = readMemoryThroughService(repoRoot, { limit: 5 });
-  let unclaimedInbox: ReturnType<typeof summarizeUnclaimedInbox> | undefined;
+  let unclaimedInbox: ReturnType<typeof recoverAndSummarizeClaudeInboxForSessionStart> | undefined;
   try {
-    recoverClaudeInboxForSessionStart(repoRoot);
-    const workspaceId = claudeWorkspaceId(repoRoot);
-    unclaimedInbox = summarizeUnclaimedInbox(repoRoot, workspaceId);
+    unclaimedInbox = recoverAndSummarizeClaudeInboxForSessionStart({
+      repoRoot,
+      pullRequestState: (pr) => observeClaudeInboxPullRequest(repoRoot, pr),
+    });
   } catch {
     unclaimedInbox = undefined;
   }

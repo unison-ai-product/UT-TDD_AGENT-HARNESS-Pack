@@ -1,6 +1,8 @@
 import { recommendModelEffort } from "../workflow/contracts.ts";
 import type { TeamProvider } from "./run.ts";
 
+const CODEX_WORKER_MODEL_ID = "gpt-6-luna";
+
 /**
  * 正本モデル ID カタログ (SSoT)。tier-router の `TIER_TABLE` と本ファイルの `modelForProvider`
  * は同じ ID を二重に literal で持っていた (PLAN-L7-58 carry: typo/drift の温床)。両者がこの 1 箇所を
@@ -12,25 +14,21 @@ import type { TeamProvider } from "./run.ts";
  */
 export const MODEL_IDS = {
   claude: {
-    /** Claude 5 世代フロンティア (advisor 一次相談先、2026-07 更新)。 */
-    fable: "claude-fable-5",
-    opus: "claude-opus-5",
-    /** Sonnet 5 世代 (2026-06 更新)。coding/agentic で旧 Opus 級、価格帯は 4-6 と同一。 */
-    sonnet: "claude-sonnet-5",
-    haiku: "claude-haiku-4-5",
+    /** Claude 5.1 世代フロンティア (advisor 一次相談先、PO 2026-10 更新)。 */
+    fable: "claude-fable-5-1",
+    opus: "claude-opus-5-5",
+    sonnet: "claude-sonnet-5-5",
+    haiku: "claude-haiku-5-5",
   },
   codex: {
     /** T0 フロンティア (検証/設計/相談の最上位帯)。 */
     frontier: "gpt-6.1-sol",
-    /** テスト実装専門 (PO 割当 2026-07-14)。 */
-    worker: "gpt-5.6-terra",
-    /** 実装 / ドキュメント修正の主力 (PO 採用 2026-07-14、effort=high 基準)。 */
-    luna: "gpt-5.6-luna",
-    /** T2 ワーカー軽量 (軽量実装/内部探索/web検索/doc パッチ、原則安く)。 */
-    spark: "gpt-5.3-codex-spark",
-    mini: "gpt-5.4-mini",
-    /** codex-family エンジン指定時の専用モデル (model-policy 専用、roster 外)。 */
-    codex: "gpt-5.3-codex",
+    /** T1 フロンティア以外の Codex worker role 共通実 ID (PO 指定 #911)。 */
+    worker: CODEX_WORKER_MODEL_ID,
+    luna: CODEX_WORKER_MODEL_ID,
+    spark: CODEX_WORKER_MODEL_ID,
+    mini: CODEX_WORKER_MODEL_ID,
+    codex: CODEX_WORKER_MODEL_ID,
   },
 } as const;
 
@@ -38,10 +36,10 @@ export const TASK_DIFFICULTIES = ["trivial", "simple", "standard", "complex", "c
 export type TaskDifficulty = (typeof TASK_DIFFICULTIES)[number];
 
 /**
- * オーケストラパターン分岐 — 標準パターンの想定 orchestrator モデル (PO 2026-07-14):
+ * オーケストラパターン分岐 — 標準パターンの想定 orchestrator モデル (PO 2026-07-14 / #911):
  * Claude Code は設計タスク時 Opus / 設計タスク完了時 Sonnet、Codex は設計タスク時 Sol /
- * 実装タスク時 Terra を想定する。想定を下回るモデル選定で走る場合は advisor 機能を多用する
- * (`advisorHeavyUseRecommended`)。worker lane の割当 (テスト実装=terra / 実装=luna) とは別軸で、
+ * worker role 実作業時 gpt-6-luna を想定する。想定を下回るモデル選定で走る場合は advisor 機能を多用する
+ * (`advisorHeavyUseRecommended`)。worker lane のタスク種別差は同じ実モデルIDを使うため effort も共有し、
  * こちらは「orchestrator セッション自身が何で走っているか」の期待値。
  */
 export const STANDARD_ORCHESTRATION_EXPECTATION = {
@@ -62,11 +60,8 @@ const MODEL_CAPABILITY_RANK: Record<string, number> = {
   [MODEL_IDS.claude.sonnet]: 2,
   [MODEL_IDS.claude.haiku]: 1,
   [MODEL_IDS.codex.frontier]: 4,
-  [MODEL_IDS.codex.worker]: 2,
+  // All non-frontier Codex aliases resolve to the same real model ID (#911).
   [MODEL_IDS.codex.luna]: 2,
-  [MODEL_IDS.codex.codex]: 1,
-  [MODEL_IDS.codex.spark]: 1,
-  [MODEL_IDS.codex.mini]: 1,
 };
 
 /**
@@ -118,10 +113,9 @@ export const PLAN_AGENT_MODELS = {
 /**
  * モデル別 effort 基準ラダー (PO 2026-07-28 改定)。base が既定 effort、shallow は「回答が浅い」
  * と orchestrator が判断した時の引き上げ先。escalate は shallow でもなお浅い時の
- * モデル乗り換え先。上位モデルほど低 effort で足り、下位帯 (spark/mini) は effort で
- * 能力を補う逆傾斜。
+ * モデル乗り換え先。基準は実モデル ID ごとに一件だけ定義する。
  *
- * base: Sol / Fable = low、Opus / Terra / Sonnet = middle、Luna / spark / mini = high。
+ * base: Sol / Fable = low、Opus / Sonnet = middle、gpt-6-luna = high。
  * haiku は未指定のため Claude 既定 (high)。
  *
  * **`xhigh` はラダーの基準値・shallow 値として使わない** (PO 2026-07-28:
@@ -139,22 +133,10 @@ export const MODEL_EFFORT_LADDER: Record<
   }
 > = {
   [MODEL_IDS.codex.frontier]: { base: "low", shallow: "middle" },
-  [MODEL_IDS.codex.worker]: {
-    base: "middle",
-    shallow: "high",
-    escalate: { model: MODEL_IDS.codex.frontier, effort: "low" },
-  },
+  // worker / luna / spark / mini / codex aliases share this one real model key.
   [MODEL_IDS.codex.luna]: {
     base: "high",
     escalate: { model: MODEL_IDS.codex.frontier, effort: "low" },
-  },
-  [MODEL_IDS.codex.spark]: {
-    base: "high",
-    escalate: { model: MODEL_IDS.codex.worker, effort: "middle" },
-  },
-  [MODEL_IDS.codex.mini]: {
-    base: "high",
-    escalate: { model: MODEL_IDS.codex.worker, effort: "middle" },
   },
   [MODEL_IDS.claude.fable]: {
     base: "low",
@@ -177,7 +159,7 @@ export const MODEL_EFFORT_LADDER: Record<
  * 「回答が浅い」時の次段。まず同モデルで shallow effort へ、それでも浅ければ escalate
  * (モデル乗り換え) へ。次段が無ければ null (それ以上は advisor / 人間判断)。
  *
- * base=high 帯 (luna / spark / mini) は shallow を持たない — そこから深さを買うなら
+ * base=high 帯 (gpt-6-luna) は shallow を持たない — そこから深さを買うなら
  * `xhigh` ではなくモデル上げが PO 方針 (2026-07-28) なので、base から直接 escalate する。
  */
 export function escalateShallowResponse(input: {
@@ -255,7 +237,7 @@ export const PROPOSAL_SUBAGENT_LANES: Record<ProposalSubagentLaneName, ProposalS
   },
   "T1-worker": {
     tier: "T1-worker",
-    // 実装帯の主力は luna (PO 2026-07-14)。terra はテスト実装専門席として roster に残る。
+    // Codex task-kind role aliases share the gpt-6-luna real model ID (#911).
     model: MODEL_IDS.codex.luna,
     max_parallel: 2,
     closing_authority: false,
@@ -429,8 +411,7 @@ function modelForProvider(input: {
   const cheap = input.difficulty === "trivial" || input.difficulty === "simple";
   if (input.provider === "local") return { model: "local", source: "policy" };
   if (input.provider === "codex") {
-    // task-kind 割当 (PO 2026-07-14): 検証/設計=sol、テスト実装=terra、実装/doc修正=luna、
-    // 軽量実装/内部探索/web検索/doc パッチ=spark or mini。
+    // task-kind role aliases resolve to gpt-6-luna (#911); design/review remains gpt-6.1-sol.
     // intent 割当はdifficulty由来modelFamilyより優先する — task-kind が正本。
     if (input.intent === "review" || input.intent === "design")
       return { model: MODEL_IDS.codex.frontier, source: "policy" };

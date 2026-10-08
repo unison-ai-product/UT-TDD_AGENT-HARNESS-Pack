@@ -184,7 +184,9 @@ describe("Claude inbox terminal GC", () => {
 
   it("U-MEMTERM-004: poll observations are cached and terminal markers retain receipt evidence", async () => {
     const cliSource = readFileSync(join(process.cwd(), "src", "cli.ts"), "utf8");
-    expect(cliSource).toMatch(/recoverClaudeInboxForSessionStart\(repoRoot\)/);
+    expect(cliSource).toMatch(
+      /recoverAndSummarizeClaudeInboxForSessionStart\(\{\s*repoRoot,\s*pullRequestState:/,
+    );
     expect(cliSource).toMatch(
       /pullRequestState: \(pr\) => observeClaudeInboxPullRequest\(repoRoot, pr\)/,
     );

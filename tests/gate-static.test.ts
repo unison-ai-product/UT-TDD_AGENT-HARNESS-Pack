@@ -69,7 +69,7 @@ const HARNESS_GATE_BASELINE = [
     gate: "G4",
     passed: true,
     applicable: true,
-    messages: ["g4-pair - OK (L4 total=6, confirmed=6, placeholder=0, draft=0, orphans=0)"],
+    messages: ["g4-pair - OK (L4 total=7, confirmed=7, placeholder=0, draft=0, orphans=0)"],
   },
   {
     gate: "G5",
@@ -81,7 +81,7 @@ const HARNESS_GATE_BASELINE = [
     gate: "G6",
     passed: true,
     applicable: true,
-    messages: ["g6-pair - OK (L6 total=29, confirmed=29, placeholder=0, draft=0, orphans=0)"],
+    messages: ["g6-pair - OK (L6 total=30, confirmed=30, placeholder=0, draft=0, orphans=0)"],
   },
   {
     gate: "G7",
@@ -92,8 +92,8 @@ const HARNESS_GATE_BASELINE = [
       "g7-static - failed (G7 requires trace evidence and coverage >=80%)",
       "impl-plan-trace — OK (src 全件 PLAN generates / baseline に被覆、NEW orphan 0)",
       "oracle-test-trace — OK (宣言 oracle 全件 tests citation / baseline 被覆、test-label 逆向き citation 断線 0、宣言 provenance 重複 0)",
-      "pair-freeze — OK (design⇔test-design 双方向 57 pair、孤児 0)",
-      "verification — 実装検証サイクルゲート [L0-L7] (左腕+谷): ✅ base freeze 完了 (56/56 confirmed, L7 plans 9/9 confirmed, evidence 9/9, 孤児0) / active revisions 1/1 confirmed → 検証サイクル発火可",
+      "pair-freeze — OK (design⇔test-design 双方向 59 pair、孤児 0)",
+      "verification — 実装検証サイクルゲート [L0-L7] (左腕+谷): ✅ base freeze 完了 (58/58 confirmed, L7 plans 9/9 confirmed, evidence 9/9, 孤児0) / active revisions 1/1 confirmed → 検証サイクル発火可",
     ],
   },
   {

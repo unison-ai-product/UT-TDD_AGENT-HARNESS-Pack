@@ -253,16 +253,20 @@ export function registerLiveReviewCommands(
     .option("--operation-id <id>", "stable wake operation identity")
     .option("--json", "JSON output")
     .action(
-      (opts: {
-        memoryId: string;
-        memoryPath: string;
-        pr: string;
-        head: string;
-        revision: string;
-        authorFamily: string;
-        operationId?: string;
-        json?: boolean;
-      }) => {
+      (
+        opts: {
+          memoryId: string;
+          memoryPath: string;
+          pr: string;
+          head: string;
+          revision: string;
+          authorFamily: string;
+          operationId?: string;
+          json?: boolean;
+        },
+        command: Command,
+      ) => {
+        const json = command.optsWithGlobals<{ json?: boolean }>().json;
         try {
           const repoRoot = resolveRepositoryRoot(deps.repoRoot());
           const project = requireProjectMemoryRoot(repoRoot);
@@ -323,7 +327,7 @@ export function registerLiveReviewCommands(
             },
           });
           const output = { ...result, requestedAt };
-          if (opts.json) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+          if (json) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
           else
             process.stdout.write(
               `review live-dispatch: ${result.ok ? "published" : result.reason}\n`,
@@ -343,7 +347,8 @@ export function registerLiveReviewCommands(
     .description("consume one strict v3 review envelope through the canonical delegation CLI")
     .requiredOption("--envelope <path>", "v3 Claude review inbox envelope")
     .option("--json", "JSON output")
-    .action((opts: { envelope: string; json?: boolean }) => {
+    .action((opts: { envelope: string; json?: boolean }, command: Command) => {
+      const json = command.optsWithGlobals<{ json?: boolean }>().json;
       try {
         const repoRoot = resolveRepositoryRoot(deps.repoRoot());
         const envelope = decodeClaudeInboxEntry(readFileSync(opts.envelope, "utf8"));
@@ -360,7 +365,7 @@ export function registerLiveReviewCommands(
             publishReceipt: (projection) => deps.publishReceipt(repoRoot, projection),
           },
         });
-        if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        if (json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
         else
           process.stdout.write(`review live-consume: ${result.ok ? "completed" : result.reason}\n`);
         process.exitCode = result.ok ? 0 : 1;

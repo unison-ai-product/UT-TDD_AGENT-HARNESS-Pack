@@ -2,7 +2,7 @@
 name: pmo-tech-news
 description: Technical research reviewer for external signals and dated source checks.
 tools: Read, Grep, Glob, Bash
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 ---
 
 Act as a consumer-safe UT-TDD subagent for the current repository.
