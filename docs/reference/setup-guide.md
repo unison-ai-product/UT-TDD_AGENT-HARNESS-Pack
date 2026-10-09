@@ -1,8 +1,8 @@
 # UT-TDD Agent Harness Pack セットアップガイド
 
-このガイドだけで「導入 → 動作確認 → バージョン更新」まで完走できることを目的にしています。
-コマンドの網羅は [README](../../README.md) のコマンド早見表、更新履歴は
-[CHANGELOG.md](../../CHANGELOG.md) を参照してください。
+このガイドでは、「導入 → 動作確認 → 新しい版への対応 → 困ったとき」を順に説明します。
+コマンドの一覧は [README](../../README.md) のコマンド早見表にあります。各版の変更点は
+[Releases](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/releases) の release notes に書いています。
 
 ---
 
@@ -10,136 +10,115 @@
 
 | 要件 | 確認コマンド | 備考 |
 |---|---|---|
-| **Node.js 24.13.0 / npm 11.6.2** | `node --version` / `npm --version` | 実行ランタイム兼パッケージ管理。必須 |
+| **Node.js 24** | `node -v` | 必須。release asset はこの Node だけで動きます (`npm ci` は不要) |
 | **git** | `git --version` | 必須 |
-| Claude Code CLI | `claude --version` | 任意。Claude 委譲 / hook を使う場合 |
-| Codex CLI | `codex --version` | 任意。Codex 委譲 / hybrid クロスレビューを使う場合 |
+| 入れる先の git repository と **origin remote** | `git remote -v` | 必須。origin が無いと、setup は runtime を入れたうえで exit 2 (`identity_repository_unbound`) で終わります (§5) |
+| Claude Code CLI / VS Code の Claude 拡張 | `claude --version` | 任意。Claude の hook と委譲を使う場合 |
+| Codex CLI | `codex --version` | 任意。Codex の委譲と、Claude との相互 review を使う場合 |
 
-- OS は Windows / macOS / Linux いずれも可 (native Windows は第一級サポート、WSL 不要)。
-- provider の API キーをリポジトリや設定ファイルに書く必要は**ありません** (認証は各公式 CLI のログインが保持)。
+- **動作保証環境は Windows です** (native で動き、WSL は要りません)。公開した release asset を使った受入を、版ごとに行っています。
+- **Linux / WSL2 はベストエフォートです。** CI は Linux でも毎回走らせ、公開前のリハーサルでも動作を確かめています。ただし、版ごとの正式な受入は、利用の実績や必要が出てきた時点で行います ([#928](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/928))。Linux で動かない場合は、バグ報告で知らせてください。再現できたものは修理し、回帰テストを足します。
+- macOS は検証していません。
+- provider の API キーを、repository や設定ファイルに書く必要は**ありません**。認証は、各公式 CLI のログインがそのまま使われます。
 
-> **Windows**: Node.js と npm が PATH から解決できることを確認してください。
-> `node --version` と `npm --version` が失敗する場合は、Node.js の公式インストーラーで
-> PATH を有効にしてからシェルを再起動してください。
+> **Windows**: `node -v` が失敗する場合は、Node.js の公式インストーラーで PATH を有効にし、シェルを開き直してください。
 
-## 1. 新規導入 (Pack をそのまま開発基盤として使う)
+## 1. 導入 (release asset から入れる)
 
-```sh
-git clone https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack.git
-cd UT-TDD_AGENT-HARNESS-Pack
-npm ci
-node src/cli.ts setup --solo
-node src/cli.ts doctor --setup-smoke
-```
+1. [Releases](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/releases) から、使いたい版の asset を 5 つともダウンロードし、**新しく作った空のフォルダ**に置きます。そのフォルダには、この 5 つ以外のファイルを置かないでください (ほかのファイルがあると、setup が `consumer_runtime_asset_set_mismatch` で止まります)。
 
-> **v0.2.0-canary 系の既知制約**: 生成 launcher `.ut-tdd/bin/ut-tdd.mjs` は sealed consumer runtime の
-> activation pointer (`.ut-tdd/runtime/activation/active.json`) だけを解決源とし、それが無い間は
-> `consumer_runtime_absent` (exit 78) で fail-close します。runtime を封印・有効化する release materializer は
-> 未提供 (#418 / #420) のため、canary では launcher 経由のコマンドと生成 hook による guard は動作しません。
-> canary の評価は Pack checkout 上の `node src/cli.ts <command>` で行ってください。
+   | asset | 中身 |
+   |---|---|
+   | `<版>.ut-tdd.mjs` | setup を実行する入口 |
+   | `<版>.consumer-runtime.json` | 封印した runtime |
+   | `<版>.consumer.sha256` | runtime の SHA-256 |
+   | `<版>.tar.gz` | Pack の配布物一式 |
+   | `<版>.tar.gz.sha256` | 配布物一式の SHA-256 |
 
-`setup --solo` が生成するもの:
-
-- `.ut-tdd/bin/ut-tdd.mjs` — 以後の入口になる launcher (runtime 有効化後に動作。上記の既知制約を参照)
-- `.claude/settings.json` / `.codex/hooks.json` — Claude / Codex のガード hook 配線
-- `.claude/agents/` / `.claude/commands/` — サブエージェント / スキルコマンド定義
-- `.github/workflows/` ほか CI・テンプレート (既存ファイルは上書きしません)
-
-release tarball から導入する場合は、Releases ページの `vX.Y.Z.tar.gz` を取得し、
-`vX.Y.Z.tar.gz.sha256` と照合してから展開して同じ手順を実行します:
+2. 入れたい repository で、次を実行します (Windows の PowerShell でもそのまま使えるように、1 行で書いています)。`<consumer anchor>` には、その版の release notes にある consumer anchor (`sha256:...`) を入れてください。
 
 ```sh
-sha256sum -c v0.1.4.tar.gz.sha256
-tar -xzf v0.1.4.tar.gz -C <導入先ディレクトリ>
+echo ".ut-tdd/" >> .git/info/exclude   # runtime の状態を git の差分に出さない
+node <フォルダ>/<版>.ut-tdd.mjs setup --solo --consumer-runtime-release <フォルダ> --expected-consumer-digest <consumer anchor>
 ```
 
-## 2. 既存プロジェクトへの投影
+Windows PowerShell では、1 行目の代わりに `Add-Content -Encoding ascii .git/info/exclude ".ut-tdd/"` を使ってください (`>>` だと UTF-16 で書き込まれ、git が読めません)。
 
-自分のプロジェクトにハーネス状態だけを投影する場合は、Pack checkout を残したまま
-**対象プロジェクトのディレクトリで** setup を実行します:
+setup は、asset の SHA-256 が consumer anchor と一致することを最初に確かめます。一致しない場合は
+`consumer_runtime_anchor_mismatch` を出して exit 1 で止まり、ファイルを 1 つも書きません。
+
+setup が作るもの:
+
+- `.ut-tdd/` — runtime と、ハーネスの状態 (`.git/info/exclude` に入れておけば、git の差分には出ません)
+- `.ut-tdd/bin/ut-tdd.mjs` — 以後の入口になる launcher
+- `.claude/settings.json` / `.codex/hooks.json` — Claude / Codex の hook の配線
+- `AGENTS.md` / `CLAUDE.md` — Codex / Claude 向けの規約 (managed block の中だけをハーネスが管理します)
+- `.github/`、`.gitignore`、`.editorconfig`、`.gitattributes`、`commitlint.config.cjs`、`ut-tdd.project.json` — CI とテンプレート、設定 (既にあるファイルは上書きしません)
+
+作られたファイルは、確認してから commit してください。
+
+release asset からの導入 (`--consumer-runtime-release`) は `--solo` だけに対応しています (`--team` や `--dry-run` と一緒に指定すると exit 1 で止まります)。
+チーム開発で使う場合は、上の手順で導入したあとに、launcher で次を実行します。まず `--dry-run` を付けて書き込む内容を確かめ、問題なければ `--dry-run` を外して実行してください。
 
 ```sh
-cd <your-project>
-<pack-checkout>/scripts/ut-tdd setup --dry-run   # まず書き込み内容を確認
-<pack-checkout>/scripts/ut-tdd setup --solo
-<pack-checkout>/scripts/ut-tdd doctor --setup-smoke
+node .ut-tdd/bin/ut-tdd.mjs setup --dry-run --team --tl-team @org/tl --qa-team @org/qa --po-team @org/po
 ```
 
-Windows PowerShell では `<pack-checkout>\scripts\ut-tdd.ps1 setup --solo`。
+3 つのチームは必ずセットで指定してください。ブランチ保護は既定では出力するだけで、適用は人の手で行います。
 
-チーム開発では `--team --tl-team @org/tl --qa-team @org/qa --po-team @org/po` を
-3 つセットで指定します (ブランチ保護は既定 emit-only、適用は人間の明示手順)。
+## 2. 動作確認チェックリスト
 
-## 3. 動作確認チェックリスト
-
-導入直後に上から順に実行し、期待値と一致することを確認してください。
-#2 / #3 は対象プロジェクトのディレクトリから Pack checkout の wrapper を呼びます
-(Windows は `<pack-checkout>\scripts\ut-tdd.ps1`)。
+導入した repository の中で、上から順に実行してください。期待値と一致すれば導入は完了です。
 
 | # | コマンド | 期待値 |
 |---|---|---|
-| 1 | `node .ut-tdd/bin/ut-tdd.mjs --help` | canary では stderr に `consumer_runtime_absent`、exit 78 (launcher の fail-close。runtime 有効化後は usage が表示される) |
-| 2 | `<pack-checkout>/scripts/ut-tdd doctor --setup-smoke` | `setup-smoke - OK (failed=0)` |
-| 3 | `<pack-checkout>/scripts/ut-tdd status` | mode (`standalone` / `claude-only` / `codex-only` / `hybrid`) が表示される |
-| 4 | `npm run typecheck` | exit 0 |
-| 5 | `npm run test` | 全 green (配布安全 smoke suite) |
+| 1 | `node .ut-tdd/bin/ut-tdd.mjs --help` | usage が表示され、exit 0 |
+| 2 | `node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke` | `doctor: setup-smoke - OK (checked=23, failed=0)` |
+| 3 | `node .ut-tdd/bin/ut-tdd.mjs status` | 1 行目に `mode:` (`standalone` / `claude-only` / `codex-only` / `hybrid`) が表示される |
+| 4 | VS Code で repository を開き、Claude 拡張で新しい chat を始める | 最初の応答の前に、`session-start digest` が読み込まれる |
 
-> **full `doctor` (フラグなし) はこの段階では赤になりますが正常です。**
-> full doctor は設計 doc / PLAN / test-design が降下した後のガバナンス一括検証で、
-> 初期導入の判定には `--setup-smoke` を使います。
+> **`doctor` をフラグなしで実行すると赤になりますが、異常ではありません。**
+> フラグなしの doctor は、設計文書・PLAN・テスト設計がそろってから使うガバナンスの一括検証です。
+> 導入の判定には `--setup-smoke` を使ってください。
 
-## 4. バージョン更新 (tag-pin update)
+## 3. 新しい版への対応
 
-Pack はタグ付き release (`v0.1.x`) で更新されます。変更点は先に
-[CHANGELOG.md](../../CHANGELOG.md) で確認してください。
+新しい版は Pack の [Releases](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/releases) で公開します。
+GitHub で Pack リポジトリを **Watch → Custom → Releases** に設定しておくと、公開したときに通知が届きます。
 
-新 release を知る経路は 2 つあります:
+> **いまの canary 版の制約** (どちらも修正予定です)
+> - release asset から入れた環境では、`ut-tdd status` の更新通知が動きません。`update: check skipped (harness package.json unreadable)` と表示されます ([#867](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/867))。新しい版は、上の Watch で知ってください。
+> - 一度入れた runtime を、新しい版の asset で上書きすることはできません。setup が `consumer_runtime_update_unsupported` で止まり、元の版のまま残ります ([#930](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/930))。新しい版を試すときは、まだ入れていない repository (または新しい clone) に入れてください。
 
-- **push 通知 (推奨)**: GitHub で Pack リポジトリを **Watch → Custom → Releases** に
-  設定すると、release 公開時に GitHub から通知が届きます。
-- **ハーネス内蔵の advisory**: `ut-tdd status` が Pack remote の release tag と手元の version を
-  比較し、新しい tag があれば `update: v0.1.4 -> v0.1.5 available ...` の 1 行を表示します
-  (結果は 24 時間キャッシュ。オフライン等で確認できないときは `update: check skipped (...)`
-  になるだけで、status / doctor が赤になることはありません)。
+## 4. setup を流し直したとき
 
-```sh
-# Pack checkout で実行してください (consumer repo ではありません)
-git fetch --tags
-git checkout v0.1.4          # 追従運用なら: git pull origin main
-npm ci
-node src/cli.ts setup --solo  # 冪等再実行
-node src/cli.ts doctor --setup-smoke
-```
+同じ版で setup を流し直しても、壊れることはありません。
 
-更新時の setup 再実行は**非破壊**です:
+- あなたが所有するファイルは上書きしません。対話シェルでは、既存のファイルごとに `上書きしますか？ [y/N]` と確認します (既定は N)。**非対話シェルでは確認を出さず、常に既存のファイルを残します**。
+- `AGENTS.md` / `CLAUDE.md` / `.claude/CLAUDE.md` は、`<!-- UT-TDD:managed:start/end -->` の中だけを更新します。マーカーの外に書いた内容は残ります。
+- `.ut-tdd/` の runtime 状態 (harness.db など) は消しません。
 
-- あなたが所有するファイルは上書きされません。対話シェルでは既存ファイルごとに
-  `上書きしますか？ [y/N]` を確認し (既定 N)、**非対話シェルでは確認を出さず常に既存を保護**します。
-- `AGENTS.md` / `CLAUDE.md` / `.claude/CLAUDE.md` は `<!-- UT-TDD:managed:start/end -->`
-  マーカー内だけが更新され、マーカー外のあなたの記述は保持されます。
-- `.ut-tdd/` の runtime 状態 (harness.db 等) は wipe されません。
-
-生成テンプレート自体の更新を取り込みたい場合のみ、対話シェルで setup を実行して
-該当ファイルに `y` を答えてください (エンジンの挙動更新は checkout の更新だけで反映されます)。
-
-## 5. トラブルシューティング
+## 5. 困ったとき
 
 | 症状 | 原因と対処 |
 |---|---|
-| full `doctor` が exit 1 | 正常 (§3 参照)。consumer 判定は `doctor --setup-smoke` |
-| setup が既存ファイルで止まっているように見える | 対話シェルの上書き確認 (`[y/N]`) 待ちです。Enter (=N) で既存保護のまま進みます |
-| `node .ut-tdd/bin/ut-tdd.mjs ...` が exit 78 で `consumer_runtime_absent` | canary では想定どおり (sealed consumer runtime が未有効化)。Pack checkout 上の `node src/cli.ts <command>` を使ってください (#418 / #420) |
-| Windows で hook が Node を見つけられない | §0 の PATH 注記を参照 |
-| doctor が「harness.db が古い」系で失敗 | `node src/cli.ts db rebuild --json` で再投影してから再実行 |
+| setup が `consumer_runtime_anchor_mismatch` で止まる | `--expected-consumer-digest` の値が、その版の release notes の consumer anchor と違います。asset が途中で壊れていないかも確認してください。ファイルは 1 つも書かれていません |
+| setup が exit 2 で `identity_repository_unbound` と出る | origin remote がありません。runtime はすでに入っているので、最初の導入コマンドを流し直しても `already installed` で終わるだけです。`git remote add origin <url>` のあと、`node .ut-tdd/bin/ut-tdd.mjs setup --solo` を実行してください。案内が出たら、`ut-tdd.project.json` を commit します |
+| setup が `consumer_runtime_asset_set_mismatch` で止まる | asset を置いたフォルダに、5 つの asset 以外のファイルがあります。5 つだけを入れた空のフォルダを使ってください |
+| setup が `consumer_runtime_update_unsupported` で止まる | すでに別の版の runtime が入っています。§3 の制約を見てください |
+| setup が止まっているように見える | 対話シェルで、上書きの確認 (`[y/N]`) を待っています。Enter (=N) を押せば、既存のファイルを残したまま進みます |
+| フラグなしの `doctor` が exit 1 | 異常ではありません (§2)。導入の判定は `doctor --setup-smoke` で行ってください |
+| Windows で hook が Node を見つけられない | §0 の PATH の注記を見てください |
 
-launcher (`.ut-tdd/bin/ut-tdd.mjs`) の解決源は consumer-local の activation pointer
-(`.ut-tdd/runtime/activation/active.json`) ただ 1 つです。`node_modules`、source、global `ut-tdd` への fallback は
-持ちません。pointer が無い、または bundle の digest が一致しない場合は fail-close します。
+launcher (`.ut-tdd/bin/ut-tdd.mjs`) が参照するのは、`.ut-tdd/runtime/activation/active.json` (activation pointer) の 1 つだけです。
+`node_modules`、source、global の `ut-tdd` には切り替えません。pointer が無い場合や、bundle の digest が一致しない場合は、
+`consumer_runtime_absent` などで fail-close します。
+
+上の表で解決しないときは、[README のバグ報告](../../README.md#-バグ報告) の手順で知らせてください。
 
 ## 6. 次の一歩
 
-- `ut-tdd status` — 現在の実行モードと outstanding の確認
-- `ut-tdd task classify --text "..."` — 着手前の難易度分類
-- `ut-tdd team suggest --task "..."` — クロス provider チーム編成の要否判定
-- `ut-tdd handover` — セッション間の引き継ぎ生成
-- ワークフロー全体像: `docs/process/` (Forward / 駆動モデル / gate 定義)
+- `node .ut-tdd/bin/ut-tdd.mjs status` — いまの実行モードと、未完了の作業を確認する
+- `node .ut-tdd/bin/ut-tdd.mjs task classify --text "..."` — 着手する前に、作業の難しさを分類する
+- `node .ut-tdd/bin/ut-tdd.mjs handover` — セッション間の引き継ぎを作る
+- ハーネス自体を開発・検証する場合は、Pack を clone して `npm ci` のあと、`node src/cli.ts <command>` を使います

@@ -5,6 +5,11 @@ Notable changes to the UT-TDD Agent Harness Pack. Release artifacts
 releases page. Signature artifacts remain an external signing boundary and
 are marked `signatureCreated=false` in each manifest.
 
+> **v0.2.0-canary.* releases**: the changes, consumer anchor, and asset SHA-256 of each canary
+> release are recorded in its release notes on the Pack repository Releases page
+> (https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/releases). This file
+> keeps the v0.1.x history and the Unreleased notes below.
+
 ## Unreleased
 
 ### Changed

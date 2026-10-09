@@ -170,6 +170,7 @@ function writeStrictReceiptWithCompletion(input: {
   provider: "codex" | "claude";
   model: string;
   verdictPath: string;
+  verdictDigest: string;
   receipt: ReviewReceipt;
   completedAt: string;
 }): StrictReceiptWriteResult {
@@ -178,9 +179,17 @@ function writeStrictReceiptWithCompletion(input: {
   const target = join(directory, `${digest}.json`);
   const bytes = Buffer.from(`${JSON.stringify(input.receipt, null, 2)}\n`, "utf8");
   const receiptFileDigest = createHash("sha256").update(bytes).digest("hex");
-  const verdictDigest = existsSync(input.verdictPath)
-    ? createHash("sha256").update(readFileSync(input.verdictPath)).digest("hex")
-    : undefined;
+  let retainedVerdictDigest: string;
+  try {
+    retainedVerdictDigest = createHash("sha256")
+      .update(readFileSync(input.verdictPath))
+      .digest("hex");
+  } catch {
+    return { ok: false, reason: "receipt_write_failed" };
+  }
+  if (retainedVerdictDigest !== input.verdictDigest) {
+    return { ok: false, reason: "receipt_write_failed" };
+  }
   const auditEvent = {
     kind: "attempt_completed" as const,
     requestDigest: digest,
@@ -193,7 +202,7 @@ function writeStrictReceiptWithCompletion(input: {
     model: input.model,
     exitCode: 0,
     receiptFileDigest,
-    ...(verdictDigest ? { verdictDigest } : {}),
+    verdictDigest: input.verdictDigest,
   };
   mkdirSync(directory, { recursive: true });
   {
@@ -508,9 +517,11 @@ export function projectReviewVerdict(input: {
     }
   }
 
+  let verdictBytes: Buffer;
   let verdictText: string;
   try {
-    verdictText = readFileSync(input.verdictFile, "utf8");
+    verdictBytes = readFileSync(input.verdictFile);
+    verdictText = verdictBytes.toString("utf8");
   } catch {
     return rejectedVerdict(input, "verdict_file_unreadable");
   }
@@ -558,6 +569,7 @@ export function projectReviewVerdict(input: {
       provider: input.attestation.provider,
       model: input.attestation.model,
       verdictPath: input.verdictFile,
+      verdictDigest: createHash("sha256").update(verdictBytes).digest("hex"),
       receipt,
       completedAt: input.attestation.completedAt,
     });
