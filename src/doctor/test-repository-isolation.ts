@@ -21,7 +21,7 @@ erasable-syntax:1 gate-static:10 impl-plan-trace:1 import-specifier:2 l14-close-
 plan-id-naming:1 plan-lint:10 projection-writer:13 proposal-document-coverage:2 readability:5 relation-graph-loader:1 review-green-command-projection:1
 release-artifact-resolver:1 release-consumer-skills:4
 right-arm-gate-planning:1 right-lung-doc-governance:1 roadmap:1 rule-automation-closure:1 rule-drift:4 runtime-hook-entrypoints:1
-review-live-cli:2
+review-live-cli:4
 review-delegation-root:1
 runtime-portability:2 screen-impl-pair-freeze:1 setup-bun-removal:2 ban-lint-detection-power:3 bun-permanent-ban:14 self-pair-normative-guard:1 setup-agent-floor:2 setup:8 skill-assignment:1 state-db:1
 sub-doc-catalog-drift:5 sub-doc-section-structure:1 telemetry-closure:1 test-design-naming:1 toolchain-pin:1 tracked-canonical:1

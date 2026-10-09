@@ -676,7 +676,6 @@ export function cleanupReviewAttempt(input: {
 }): void {
   try {
     assertReviewVerdictPath(input);
-    rmSync(dirname(input.verdictPath), { recursive: true, force: true });
   } catch (error) {
     appendReviewCustodyAudit(input.repoRoot, {
       kind: "cleanup_pending",

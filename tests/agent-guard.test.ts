@@ -7,7 +7,11 @@ import {
   type ResolvedFamily,
   SUBAGENT_ALLOWLIST,
 } from "../src/runtime/agent-guard.ts";
-import { AGENT_GUARD_BYPASS_HINT, AGENT_TOOL_NAME } from "../src/runtime/agent-guard-policy.ts";
+import {
+  AGENT_GUARD_BYPASS_HINT,
+  AGENT_TOOL_NAME,
+  CLAUDE_MODEL_FAMILY_CATALOG,
+} from "../src/runtime/agent-guard-policy.ts";
 
 const FAMILIES: Record<string, ResolvedFamily> = {
   "be-api": "sonnet",
@@ -36,13 +40,27 @@ function agent(tool_input: AgentGuardInput["tool_input"]): AgentGuardInput {
 }
 
 describe("normalizeModelFamily", () => {
+  it("uses the approved Claude model IDs in the guard catalog", () => {
+    expect(CLAUDE_MODEL_FAMILY_CATALOG).toEqual({
+      haiku: "claude-haiku-5-5",
+      sonnet: "claude-sonnet-5-5",
+      opus: "claude-opus-5-5",
+      fable: "claude-fable-5-1",
+    });
+  });
+
   it("normalizes family names and Anthropic model ids", () => {
     expect(normalizeModelFamily("sonnet")).toBe("sonnet");
     expect(normalizeModelFamily("claude-sonnet-4-6")).toBe("sonnet");
     expect(normalizeModelFamily("claude-haiku-4-5-20251001")).toBe("haiku");
     expect(normalizeModelFamily("claude-opus-4-7")).toBe("opus");
     expect(normalizeModelFamily("fable")).toBe("fable");
+    // Legacy model IDs remain normalizable; this is not the active guard catalog.
     expect(normalizeModelFamily("claude-fable-5")).toBe("fable");
+    expect(normalizeModelFamily("claude-fable-5-1")).toBe("fable");
+    expect(normalizeModelFamily("claude-opus-5-5")).toBe("opus");
+    expect(normalizeModelFamily("claude-sonnet-5-5")).toBe("sonnet");
+    expect(normalizeModelFamily("claude-haiku-5-5")).toBe("haiku");
   });
   it("returns null for empty / non-Claude models", () => {
     expect(normalizeModelFamily("")).toBeNull();

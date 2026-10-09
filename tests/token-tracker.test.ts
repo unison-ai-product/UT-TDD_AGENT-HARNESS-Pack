@@ -104,10 +104,11 @@ describe("computeCodexCostUsd (OPENAI_PRICING, 公式単価)", () => {
     ).toBeCloseTo(0.0175, 6);
   });
 
-  it("computes pricing fallbacks for the GPT-5.6 worker and GPT-6.1 frontier tiers", () => {
+  it("preserves historical GPT-5.6 Terra pricing and computes GPT-6.1 frontier cost", () => {
     expect(
       computeCodexCostUsd({
-        model: MODEL_IDS.codex.worker,
+        // Historical routing ID fixture; current model routing is intentionally not a pricing source.
+        model: "gpt-5.6-terra",
         inputTokens: 1_000,
         cachedInputTokens: 0,
         outputTokens: 1_000,

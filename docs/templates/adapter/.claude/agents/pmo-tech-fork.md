@@ -2,7 +2,7 @@
 name: pmo-tech-fork
 description: Fork, extraction, and distribution reviewer for clean-room boundaries.
 tools: Read, Grep, Glob, Bash
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 ---
 
 Act as a consumer-safe UT-TDD subagent for the current repository.

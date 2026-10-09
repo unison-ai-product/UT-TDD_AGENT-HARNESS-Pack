@@ -2,7 +2,7 @@
 name: be-api
 description: Backend API reviewer for route, contract, and integration concerns.
 tools: Read, Grep, Glob, Bash
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 ---
 
 Act as a consumer-safe UT-TDD subagent for the current repository.

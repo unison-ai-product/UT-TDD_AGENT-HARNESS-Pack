@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -102,6 +102,8 @@ afterEach(() => {
 });
 
 describe("review live CLI composition", () => {
+  const executionCliPath = join(process.cwd(), "src", "cli.ts");
+
   it("U-RVATT-042 validates a real commit and exact PR HEAD before dispatch", () => {
     const calls: Array<{ command: string; args: readonly string[] }> = [];
     const run = (command: string, args: readonly string[]) => {
@@ -604,4 +606,237 @@ process.stdin.on("end", () => {
       else process.env.UT_TDD_CLAUDE_BIN = previous;
     }
   }, 30_000);
+
+  it.each([
+    ["parent", ["review", "--json", "live-consume"]],
+    ["child", ["review", "live-consume", "--json"]],
+  ] as const)("U-RVATT-036 returns consumer deny JSON through the real CLI when --json is on the %s command", (_position, commandArgs) => {
+    const { root, envelopePath } = fixture();
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    const binRoot = mkdtempSync(join(tmpdir(), "ut-review-deny-provider-"));
+    roots.push(binRoot);
+    const stub = join(binRoot, process.platform === "win32" ? "claude.cmd" : "claude");
+    writeFileSync(
+      stub,
+      process.platform === "win32"
+        ? '@echo off\r\nif "%~1"=="--version" (echo claude 0.0.0-stub& exit /b 0)\r\nexit /b 1\r\n'
+        : '#!/bin/sh\nif [ "$1" = "--version" ]; then echo claude 0.0.0-stub; exit 0; fi\nexit 1\n',
+      "utf8",
+    );
+    if (process.platform !== "win32") chmodSync(stub, 0o755);
+
+    const cliPath = executionCliPath;
+    const result = spawnSync(
+      process.execPath,
+      [cliPath, ...commandArgs, "--envelope", envelopePath],
+      {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 15_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          UT_TDD_CLAUDE_BIN: stub,
+          UT_TDD_CODEX_BIN: stub,
+        },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(1);
+    expect(JSON.parse(result.stdout) as unknown).toEqual({
+      ok: false,
+      reason: "consumer_runtime_absent",
+    });
+  });
+
+  it("U-RVATT-036 surfaces a nonzero delegation's typed verdict rejection reason on stderr", async () => {
+    const { root, envelopePath } = fixture();
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    const binRoot = mkdtempSync(join(tmpdir(), "ut-review-rejected-provider-"));
+    roots.push(binRoot);
+    const helper = join(binRoot, "write-rejected-verdict.cjs");
+    writeFileSync(
+      helper,
+      String.raw`const fs = require("node:fs");
+let prompt = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { prompt += chunk; });
+process.stdin.on("end", () => {
+  const fields = [
+    "schema_version", "request_digest", "attempt", "pr", "exact_head",
+    "review_revision", "reviewer_provider", "reviewer_model", "invocation_nonce",
+  ].map((key) => {
+    const match = prompt.match(new RegExp("^" + key + ":\\s*(.*)$", "m"));
+    return key + ": " + (match ? match[1].trim() : "");
+  }).join("\n");
+  const rejectedFields = fields.replace(
+    /^(request_digest: ).*$/m,
+    "$1" + "b".repeat(64),
+  );
+  fs.writeFileSync(
+    process.env.UT_TDD_REVIEW_VERDICT_FILE,
+    rejectedFields + "\nVERDICT: PASS\nnegative: reviewer body detail\n",
+    "utf8",
+  );
+  process.stdout.write("VERDICT: PASS\n");
+});
+`,
+      "utf8",
+    );
+    const stub = join(binRoot, process.platform === "win32" ? "claude.cmd" : "claude");
+    writeFileSync(
+      stub,
+      process.platform === "win32"
+        ? `@echo off\r\nif "%~1"=="--version" (echo claude 0.0.0-stub& exit /b 0)\r\nnode "${helper}"\r\nexit /b 0\r\n`
+        : `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "claude 0.0.0-stub"; exit 0; fi\nexec node "${helper}"\n`,
+      "utf8",
+    );
+    if (process.platform !== "win32") chmodSync(stub, 0o755);
+    const program = new Command().exitOverride();
+    registerLiveReviewCommands(program.command("review"), {
+      repoRoot: () => root,
+      providerAvailable: () => true,
+      runReview: ({ repoRoot, provider, args }) =>
+        executeLiveReviewDelegation({
+          repoRoot,
+          provider,
+          args,
+          cliPath: executionCliPath,
+        }),
+    });
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const originalStdoutWrite = process.stdout.write;
+    const originalStderrWrite = process.stderr.write;
+    const originalExitCode = process.exitCode;
+    const previousClaudeBin = process.env.UT_TDD_CLAUDE_BIN;
+    let observedExitCode: typeof process.exitCode;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      stdout.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderr.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    process.env.UT_TDD_CLAUDE_BIN = stub;
+    try {
+      await program.parseAsync([
+        "node",
+        "ut-tdd",
+        "review",
+        "live-consume",
+        "--envelope",
+        envelopePath,
+      ]);
+    } finally {
+      observedExitCode = process.exitCode;
+      process.stdout.write = originalStdoutWrite;
+      process.stderr.write = originalStderrWrite;
+      process.exitCode = originalExitCode;
+      if (previousClaudeBin === undefined) delete process.env.UT_TDD_CLAUDE_BIN;
+      else process.env.UT_TDD_CLAUDE_BIN = previousClaudeBin;
+    }
+    expect(observedExitCode).toBe(1);
+    expect(stdout).toEqual([]);
+    expect(stderr.join("")).toContain("verdict_identity_mismatch");
+  }, 30_000);
+
+  it.each([
+    [
+      "success payload",
+      JSON.stringify({ review: { ok: true, receipt: {} } }),
+      "reviewer_execution_failed",
+    ],
+    ["empty stdout", "", "reviewer_execution_failed"],
+    ["malformed stdout", "not-json", "reviewer_execution_failed"],
+    [
+      "unknown rejection",
+      JSON.stringify({ review: { ok: false, reason: "unrecognized_reason" } }),
+      "reviewer_execution_failed",
+    ],
+    [
+      "reviewer exit nonzero",
+      JSON.stringify({ review: { ok: false, reason: "reviewer_exit_nonzero" } }),
+      "reviewer_exit_nonzero",
+    ],
+    [
+      "verdict absent after provider failure",
+      JSON.stringify({ review: { ok: false, reason: "verdict_absent_after_provider_failure" } }),
+      "verdict_absent_after_provider_failure",
+    ],
+  ] as const)("U-RVATT-036 handles nonzero child %s fail-closed", (_name, childStdout, reason) => {
+    const root = mkdtempSync(join(tmpdir(), "ut-review-nonzero-child-"));
+    roots.push(root);
+    const childPath = join(root, "child.cjs");
+    writeFileSync(
+      childPath,
+      `process.stdout.write(${JSON.stringify(childStdout)});\nprocess.exitCode = 1;\n`,
+      "utf8",
+    );
+    expect(
+      executeLiveReviewDelegation({
+        repoRoot: root,
+        provider: "claude",
+        args: [],
+        cliPath: childPath,
+      }),
+    ).toEqual({ ok: false, reason });
+  });
+
+  it.each([
+    ["parent", ["review", "--json", "live-dispatch"]],
+    ["child", ["review", "live-dispatch", "--json"]],
+  ] as const)("U-RVATT-042 emits parseable deny JSON through the real live-dispatch CLI with --json on the %s command", (_position, commandArgs) => {
+    const { root, memoryPath } = fixture();
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    const binRoot = mkdtempSync(join(tmpdir(), "ut-review-dispatch-provider-"));
+    roots.push(binRoot);
+    const stub = join(binRoot, process.platform === "win32" ? "provider.cmd" : "provider");
+    writeFileSync(
+      stub,
+      process.platform === "win32"
+        ? "@echo off\r\necho provider 0.0.0-stub\r\nexit /b 0\r\n"
+        : "#!/bin/sh\necho provider 0.0.0-stub\nexit 0\n",
+      "utf8",
+    );
+    if (process.platform !== "win32") chmodSync(stub, 0o755);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "src", "cli.ts"),
+        ...commandArgs,
+        "--memory-id",
+        "memory:d3a",
+        "--memory-path",
+        relative(root, memoryPath).replaceAll("\\", "/"),
+        "--pr",
+        "319",
+        "--head",
+        head,
+        "--revision",
+        "review-d3a-json-deny",
+        "--author-family",
+        "codex",
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 15_000,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          UT_TDD_CLAUDE_BIN: stub,
+          UT_TDD_CODEX_BIN: stub,
+        },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(1);
+    expect(JSON.parse(result.stdout) as unknown).toMatchObject({
+      ok: false,
+      reason: "exact_head_not_found",
+    });
+  });
 });

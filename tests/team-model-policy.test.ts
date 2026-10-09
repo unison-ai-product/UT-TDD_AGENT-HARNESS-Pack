@@ -16,6 +16,23 @@ import {
 } from "../src/team/model-policy.ts";
 
 describe("team model policy", () => {
+  it("pins the approved provider model IDs rather than only routing aliases", () => {
+    expect(MODEL_IDS.claude).toEqual({
+      fable: "claude-fable-5-1",
+      opus: "claude-opus-5-5",
+      sonnet: "claude-sonnet-5-5",
+      haiku: "claude-haiku-5-5",
+    });
+    expect(MODEL_IDS.codex).toEqual({
+      frontier: "gpt-6.1-sol",
+      worker: "gpt-6-luna",
+      luna: "gpt-6-luna",
+      spark: "gpt-6-luna",
+      mini: "gpt-6-luna",
+      codex: "gpt-6-luna",
+    });
+  });
+
   it("infers critical difficulty from high-risk task terms", () => {
     expect(inferTaskDifficulty({ task: "DB schema migration for production auth" })).toEqual({
       difficulty: "critical",
@@ -35,7 +52,7 @@ describe("team model policy", () => {
       difficulty: "trivial",
       model_family: "fast",
       model: MODEL_IDS.codex.mini,
-      // mini は base=high (改定前は xhigh)。深さが要るなら effort ではなく Terra へ上げる。
+      // mini は base=high (改定前は xhigh)。共有IDの浅さはeffort追加でなくSolへ上げる。
       reasoning_effort: "high",
       task_intent: "docs",
     });
@@ -278,7 +295,7 @@ describe("team model policy", () => {
 });
 
 describe("task-kind routing v2 (PLAN-L7-430, PO rule 2026-07-14)", () => {
-  it("U-ROUTE2-001: codex テスト実装は terra + ladder base middle effort", () => {
+  it("U-ROUTE2-001: codex テスト実装は共有Luna ID + ladder base high effort", () => {
     const selection = selectTeamModel({
       provider: "codex",
       role: "se",
@@ -287,13 +304,13 @@ describe("task-kind routing v2 (PLAN-L7-430, PO rule 2026-07-14)", () => {
     });
     expect(selection).toMatchObject({
       model: MODEL_IDS.codex.worker,
-      // Terra は基準 middle (effort ladder)。浅い時 high、なお浅ければ Sol low へ乗り換え。
-      reasoning_effort: "middle",
+      // worker roleも実IDはLuna。全てのcodex worker laneで基準highを使う。
+      reasoning_effort: "high",
       task_intent: "test",
     });
   });
 
-  it("U-ROUTE2-002: codex 実装 (非軽量) は luna + high effort (worker middle 既定の上書き)", () => {
+  it("U-ROUTE2-002: codex 実装 (非軽量) は共有Luna ID + high effort", () => {
     const selection = selectTeamModel({
       provider: "codex",
       role: "se",
@@ -468,8 +485,9 @@ describe("task-kind routing v2 (PLAN-L7-430, PO rule 2026-07-14)", () => {
     expect(TIER_TABLE.T0.claude).toBe(MODEL_IDS.claude.opus);
   });
 
-  it("U-ROUTE2-007: luna の公式 pricing が登録されている (cost null 回避)", () => {
-    expect(OPENAI_PRICING[MODEL_IDS.codex.luna]).toEqual({ input: 1, cached: 0.1, output: 6 });
+  it("U-ROUTE2-007: 旧luna IDの履歴pricingは保持される (cost null 回避)", () => {
+    // #911 changes routing IDs, not token-tracker's historical pricing catalog.
+    expect(OPENAI_PRICING["gpt-5.6-luna"]).toEqual({ input: 1, cached: 0.1, output: 6 });
   });
 
   it("U-ROUTE2-008: advisor uiux 判断は fable 一次 + sol fallback (PO: Fable、次点 Sol)", () => {
@@ -684,7 +702,7 @@ describe("task-kind routing v2 (PLAN-L7-430, PO rule 2026-07-14)", () => {
         phase: "implementation",
         currentModel: MODEL_IDS.codex.spark,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       advisorHeavyUseRecommended({
         provider: "codex",
@@ -694,16 +712,29 @@ describe("task-kind routing v2 (PLAN-L7-430, PO rule 2026-07-14)", () => {
     ).toBe(true);
   });
 
-  it("U-ROUTE2-012: effort ladder 基準 — sol/fable=low, opus/terra/sonnet=middle, luna/spark/mini=high", () => {
+  it("U-ROUTE2-012: effort ladder 基準 — sol/fable=low, opus/sonnet=middle, gpt-6-luna=high", () => {
     const base = (model: string) => MODEL_EFFORT_LADDER[model]?.base;
     expect(base(MODEL_IDS.codex.frontier)).toBe("low");
-    expect(base(MODEL_IDS.codex.worker)).toBe("middle");
+    // gpt-6-luna は worker / luna / lightweight 共通の実 ID なので、最大のLuna基準へ畳む。
+    expect(base(MODEL_IDS.codex.worker)).toBe("high");
     expect(base(MODEL_IDS.claude.fable)).toBe("low");
     expect(base(MODEL_IDS.claude.sonnet)).toBe("middle");
     expect(base(MODEL_IDS.claude.opus)).toBe("middle");
     expect(base(MODEL_IDS.codex.luna)).toBe("high");
     expect(base(MODEL_IDS.codex.spark)).toBe("high");
     expect(base(MODEL_IDS.codex.mini)).toBe("high");
+  });
+
+  it("ranks the shared Luna model above a lower-tier model", () => {
+    // advisorHeavyUseRecommended compares the shared capability-rank catalog across model IDs;
+    // this checks the rank-table collision, not a provider invocation or provider compatibility.
+    expect(
+      advisorHeavyUseRecommended({
+        provider: "codex",
+        phase: "implementation",
+        currentModel: MODEL_IDS.claude.haiku,
+      }),
+    ).toBe(true);
   });
 
   // PO 2026-07-28:「xhigh 以上はモデル上げたほうがいい」。ラダーが既定として xhigh を配ると
@@ -721,10 +752,7 @@ describe("task-kind routing v2 (PLAN-L7-430, PO rule 2026-07-14)", () => {
   });
 
   it("U-ROUTE2-013: 浅い回答のエスカレーション — effort 1 段、その先はモデル上げ (PO 2026-07-28)", () => {
-    // terra: middle → high (effort) → sol low (モデル上げ)
-    expect(
-      escalateShallowResponse({ model: MODEL_IDS.codex.worker, currentEffort: "middle" }),
-    ).toEqual({ model: MODEL_IDS.codex.worker, effort: "high" });
+    // Luna の共有実 ID は high → Sol low。旧worker専用 middle/shallow は同じモデルIDへ畳まれる。
     expect(
       escalateShallowResponse({ model: MODEL_IDS.codex.worker, currentEffort: "high" }),
     ).toEqual({ model: MODEL_IDS.codex.frontier, effort: "low" });
@@ -746,19 +774,15 @@ describe("task-kind routing v2 (PLAN-L7-430, PO rule 2026-07-14)", () => {
     expect(
       escalateShallowResponse({ model: MODEL_IDS.claude.sonnet, currentEffort: "high" }),
     ).toEqual({ model: MODEL_IDS.claude.opus, effort: "middle" });
-    // base=high 帯 (luna / spark / mini) は shallow を持たず、base から直接モデル上げ。
-    // 改定前は luna / spark が行き止まり、mini が base=xhigh だった。
+    // base=high 帯 (luna / spark / mini) は gpt-6-luna へ解決されるため、Sol へモデル上げ。
     expect(escalateShallowResponse({ model: MODEL_IDS.codex.luna, currentEffort: "high" })).toEqual(
       { model: MODEL_IDS.codex.frontier, effort: "low" },
     );
     expect(
       escalateShallowResponse({ model: MODEL_IDS.codex.spark, currentEffort: "high" }),
-    ).toEqual({ model: MODEL_IDS.codex.worker, effort: "middle" });
+    ).toEqual({ model: MODEL_IDS.codex.frontier, effort: "low" });
     expect(escalateShallowResponse({ model: MODEL_IDS.codex.mini, currentEffort: "high" })).toEqual(
-      {
-        model: MODEL_IDS.codex.worker,
-        effort: "middle",
-      },
+      { model: MODEL_IDS.codex.frontier, effort: "low" },
     );
     // ラダー外モデルは対象外 (従来どおり null)
     expect(escalateShallowResponse({ model: "unknown-model", currentEffort: "low" })).toBeNull();

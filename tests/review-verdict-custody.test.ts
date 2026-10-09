@@ -411,6 +411,27 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         },
         { name: "attempt", text: envelope({ request: issued.request, attempt: 2 }) },
         {
+          name: "missing header field",
+          text: envelope({ request: issued.request, attempt: 1 }).replace(
+            `reviewer_model: ${attestation().model}\n`,
+            "",
+          ),
+        },
+        {
+          name: "duplicate header field",
+          text: envelope({ request: issued.request, attempt: 1 }).replace(
+            "VERDICT: PASS",
+            "attempt: 1\nVERDICT: PASS",
+          ),
+        },
+        {
+          name: "unknown header field",
+          text: envelope({ request: issued.request, attempt: 1 }).replace(
+            "VERDICT: PASS",
+            "unknown_field: value\nVERDICT: PASS",
+          ),
+        },
+        {
           name: "provider",
           text: envelope({ request: issued.request, attempt: 1, provider: "codex" }),
         },
@@ -436,6 +457,39 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
       expect(stale).toEqual({ ok: false, reason: "review_identity_mismatch" });
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-RVATT-032: first header block excludes body key lines after its boundary", () => {
+    for (const suffix of [
+      '\n\nnegative: "attempt-1 rejects nested approvals"\nVERDICT: PASS',
+      '\nnegative: "attempt-1 rejects nested approvals"',
+    ]) {
+      const root = gitRoot();
+      try {
+        const issued = issue(root);
+        const attempt = beginReviewAttempt({
+          repoRoot: root,
+          request: issued.request,
+          provider: "claude",
+          model: "claude-opus-5",
+        });
+        if (!attempt.ok) throw new Error(attempt.reason);
+        const validEnvelope = envelope({ request: issued.request, attempt: 1 });
+        const verdictText = suffix.startsWith("\n\n")
+          ? `${validEnvelope.replace("VERDICT: PASS", "")}\n\n${suffix.slice(2)}`
+          : `${validEnvelope}\n${suffix.slice(1)}`;
+        writeFileSync(attempt.path, verdictText, "utf8");
+        const result = projectReviewVerdict({
+          repoRoot: root,
+          request: issued.request,
+          attestation: attestation({ attempt: 1 }),
+          verdictFile: attempt.path,
+        });
+        expect(result.ok, JSON.stringify(result)).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     }
   });
 
@@ -532,7 +586,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
     }
   });
 
-  it("U-RVATT-035: receipt後cleanupはscratchを消し、失敗はcleanup_pendingへ記録する", () => {
+  it("U-RVATT-035: receipt後cleanupはverdictを保持し、実際の失敗だけcleanup_pendingへ記録する", () => {
     const root = gitRoot();
     try {
       const issued = issue(root);
@@ -551,6 +605,11 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         verdictFile: attempt.path,
       });
       if (!projected.ok) throw new Error(projected.reason);
+      const verdictBytes = readFileSync(attempt.path);
+      const receiptPath = join(root, ".ut-tdd", "review", "receipts", `${issued.digest}.json`);
+      const receiptBytes = readFileSync(receiptPath);
+      const auditPath = reviewCustodyAuditPath(root);
+      const auditBytes = readFileSync(auditPath);
       cleanupReviewAttempt({
         repoRoot: root,
         requestDigest: issued.digest,
@@ -559,18 +618,38 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         receiptDigest: projected.digest,
         exactHead: issued.request.exactHead,
       });
-      expect(existsSync(attempt.path)).toBe(false);
-      appendReviewCustodyAudit(root, {
-        kind: "cleanup_pending",
+      expect(existsSync(attempt.path)).toBe(true);
+      expect(readFileSync(attempt.path)).toEqual(verdictBytes);
+      expect(readFileSync(receiptPath)).toEqual(receiptBytes);
+      expect(readFileSync(auditPath)).toEqual(auditBytes);
+      expect(readReviewCustodyAudit(root)).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ kind: "cleanup_pending" })]),
+      );
+
+      cleanupReviewAttempt({
+        repoRoot: root,
         requestDigest: issued.digest,
         attempt: 1,
-        exactHead: issued.request.exactHead,
-        verdictPath: attempt.path,
-        recordedAt: "2026-08-19T00:02:00.000Z",
-        reason: "test-cleanup-failure",
+        verdictPath: `${attempt.path}.invalid`,
         receiptDigest: projected.digest,
+        exactHead: issued.request.exactHead,
+        now: "2026-08-19T00:02:00.000Z",
       });
-      expect(readFileSync(reviewCustodyAuditPath(root), "utf8")).toContain("cleanup_pending");
+      expect(readFileSync(attempt.path)).toEqual(verdictBytes);
+      expect(readReviewCustodyAudit(root)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "cleanup_pending",
+            requestDigest: issued.digest,
+            attempt: 1,
+            exactHead: issued.request.exactHead,
+            verdictPath: `${attempt.path}.invalid`,
+            recordedAt: "2026-08-19T00:02:00.000Z",
+            reason: "verdict_path_identity_mismatch",
+            receiptDigest: projected.digest,
+          }),
+        ]),
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
