@@ -832,9 +832,23 @@ export function recoverClaudeInboxBacklog(input: {
   now?: string;
 }): ClaudeInboxRecoveryResult {
   const root = runtimeRoot(input.repoRoot);
+  return recoverClaudeInboxBacklogAtRuntimeRoot(input, root, () => readInbox(input.repoRoot));
+}
+
+function recoverClaudeInboxBacklogAtRuntimeRoot(
+  input: {
+    repoRoot: string;
+    pullRequests?: readonly ClaudeInboxPullRequestObservation[];
+    pullRequestState?: (pr: number) => ClaudeInboxPullRequestObservation | undefined;
+    dryRun?: boolean;
+    now?: string;
+  },
+  root: string,
+  readEntries: () => ClaudeInboxEntry[],
+): ClaudeInboxRecoveryResult {
   const dryRun = input.dryRun ?? true;
   const now = input.now ?? new Date().toISOString();
-  const entries = readInbox(input.repoRoot);
+  const entries = readEntries();
   const existingTerminals = terminalIds(root);
   const claimed = claimedIds(root);
   const observations = new Map((input.pullRequests ?? []).map((value) => [value.pr, value]));
@@ -976,7 +990,11 @@ function pruneRuntimeFiles(root: string, nowMs: number): void {
 }
 
 function readInbox(repoRoot: string): ClaudeInboxEntry[] {
-  const directory = join(runtimeRoot(repoRoot), "inbox");
+  return readInboxAtRuntimeRoot(runtimeRoot(repoRoot));
+}
+
+function readInboxAtRuntimeRoot(root: string): ClaudeInboxEntry[] {
+  const directory = join(root, "inbox");
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
     .filter((name) => name.endsWith(".json"))
@@ -1155,9 +1173,24 @@ export function summarizeUnclaimedInbox(
   workspaceId: string,
 ): ClaudeInboxBacklogSummary {
   const root = runtimeRoot(repoRoot);
+  return summarizeUnclaimedInboxAtRuntimeRoot({
+    repoRoot,
+    root,
+    workspaceId,
+    readEntries: () => readInbox(repoRoot),
+  });
+}
+
+function summarizeUnclaimedInboxAtRuntimeRoot(input: {
+  repoRoot: string;
+  root: string;
+  workspaceId: string;
+  readEntries: () => ClaudeInboxEntry[];
+}): ClaudeInboxBacklogSummary {
+  const { repoRoot, root, workspaceId, readEntries } = input;
   const claimed = new Set(claimedIds(root));
   const terminal = terminalIds(root);
-  const allEntries = readInbox(repoRoot);
+  const allEntries = readEntries();
   const all = allEntries.filter((entry) => !claimed.has(entry.id) && !terminal.has(entry.id));
   const entries = all.filter((entry) => entry.targetWorkspaceId === workspaceId);
   const foreign = all.filter((entry) => entry.targetWorkspaceId !== workspaceId);
@@ -1188,6 +1221,34 @@ export function summarizeUnclaimedInbox(
     warningCodes: [...warnings],
     terminalized: allEntries.filter((entry) => terminal.has(entry.id)).length,
   };
+}
+
+/**
+ * SessionStart-only composition. Each phase keeps its existing identity check:
+ * recovery resolves its runtime root once, then summary revalidates identity
+ * after recovery and reuses that second resolved root/workspace ID locally.
+ */
+export function recoverAndSummarizeClaudeInboxForSessionStart(input: {
+  repoRoot: string;
+  pullRequestState?: (pr: number) => ClaudeInboxPullRequestObservation | undefined;
+}): ClaudeInboxBacklogSummary {
+  try {
+    const recoveryRoot = runtimeRoot(input.repoRoot);
+    recoverClaudeInboxBacklogAtRuntimeRoot({ ...input, dryRun: false }, recoveryRoot, () =>
+      readInboxAtRuntimeRoot(recoveryRoot),
+    );
+  } catch {
+    // SessionStart recovery remains fail-open; unknown PR state keeps entries live.
+  }
+
+  const resolved = requireProjectMemoryRoot(input.repoRoot);
+  const summaryRoot = join(resolved.runtimeBusRoot, "claude-memory-wake");
+  return summarizeUnclaimedInboxAtRuntimeRoot({
+    repoRoot: input.repoRoot,
+    root: summaryRoot,
+    workspaceId: resolved.projectNamespace,
+    readEntries: () => readInboxAtRuntimeRoot(summaryRoot),
+  });
 }
 
 function claim(input: {

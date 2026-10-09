@@ -240,8 +240,12 @@ describe("team run validation", () => {
     expect(recommendation.definition?.name).toBe("proposal-coverage-team");
     expect(recommendation.definition?.max_parallel).toBe(7);
     const members = recommendation.definition?.members ?? [];
-    expect(members.filter((member) => member.model === MODEL_IDS.codex.mini)).toHaveLength(4);
-    expect(members.filter((member) => member.model === MODEL_IDS.codex.spark)).toHaveLength(3);
+    const miniLaneMembers = members.filter((member) => member.engine.includes("-t2-mini-"));
+    const sparkLaneMembers = members.filter((member) => member.engine.includes("-t2-spark-"));
+    expect(miniLaneMembers).toHaveLength(4);
+    expect(miniLaneMembers.every((member) => member.model === MODEL_IDS.codex.mini)).toBe(true);
+    expect(sparkLaneMembers).toHaveLength(3);
+    expect(sparkLaneMembers.every((member) => member.model === MODEL_IDS.codex.spark)).toBe(true);
     expect(members.some((member) => member.model === MODEL_IDS.codex.frontier)).toBe(false);
     expect(members.every((member) => member.ownership)).toBe(true);
     expect(members.some((member) => member.engine === "pmo-sonnet")).toBe(true);
@@ -249,12 +253,18 @@ describe("team run validation", () => {
     const plan = buildTeamRunPlan(recommendation.definition as TeamDefinition, "hybrid");
     expect(plan.ok).toBe(true);
     expect(plan.strategy).toBe("sequential");
+    const plannedMiniMembers = plan.members.filter((member) => member.engine.includes("-t2-mini-"));
+    const plannedSparkMembers = plan.members.filter((member) =>
+      member.engine.includes("-t2-spark-"),
+    );
+    expect(plannedMiniMembers).toHaveLength(4);
     expect(
-      plan.members.filter((member) => member.model_selection.model === MODEL_IDS.codex.mini),
-    ).toHaveLength(4);
+      plannedMiniMembers.every((member) => member.model_selection.model === MODEL_IDS.codex.mini),
+    ).toBe(true);
+    expect(plannedSparkMembers).toHaveLength(3);
     expect(
-      plan.members.filter((member) => member.model_selection.model === MODEL_IDS.codex.spark),
-    ).toHaveLength(3);
+      plannedSparkMembers.every((member) => member.model_selection.model === MODEL_IDS.codex.spark),
+    ).toBe(true);
     expect(plan.members.some((member) => member.prompt.includes("ownership:"))).toBe(true);
   });
 
@@ -509,9 +519,9 @@ describe("team run validation", () => {
     // 実装レーン (PO 指示 2026-07-08): 実装(se)=相手(codex) がクロス実行、
     // 検証(qa)=実行側と別 provider (=主 claude、フロンティア) がクロスレビュー。
     expect(se?.provider).toBe("codex");
-    expect(se?.model_selection.model).toBe("gpt-5.3-codex-spark");
+    expect(se?.model_selection.model).toBe(MODEL_IDS.codex.spark);
     expect(qa?.provider).toBe("claude");
-    expect(qa?.model_selection.model).toBe("claude-opus-5");
+    expect(qa?.model_selection.model).toBe(MODEL_IDS.claude.opus);
     expect(se?.provider).not.toBe(qa?.provider);
     expect(se?.adapter?.command).toBe("codex");
     expect(qa?.adapter?.command).toBe("claude");

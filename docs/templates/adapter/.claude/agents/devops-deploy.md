@@ -2,7 +2,7 @@
 name: devops-deploy
 description: CI, deployment, rollback, and release-readiness reviewer.
 tools: Read, Grep, Glob, Bash
-model: claude-sonnet-5
+model: claude-sonnet-5-5
 ---
 
 Act as a consumer-safe UT-TDD subagent for the current repository.

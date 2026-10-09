@@ -621,18 +621,18 @@ describe("L7 CLI surface closure", () => {
           "--task",
           "mechanical ledger check",
           "--model",
-          "gpt-5.3-codex-spark",
+          MODEL_IDS.codex.spark,
         ],
         fake.env,
       );
       const payload = parseCliJson(run);
       expect(payload.dry_run).toBe(true);
-      expect(payload.model).toBe("gpt-5.3-codex-spark");
-      // PLAN-L7-255: effort 未指定でも routing が ladder 既定 (spark=high) を解決して注入する
+      expect(payload.model).toBe(MODEL_IDS.codex.spark);
+      // PLAN-L7-255: the shared Luna model's high ladder default is injected when effort is omitted.
       expect(payload.args).toEqual([
         "exec",
         "-m",
-        "gpt-5.3-codex-spark",
+        MODEL_IDS.codex.spark,
         "-c",
         "model_reasoning_effort=high",
         "-",
@@ -740,14 +740,14 @@ describe("L7 CLI surface closure", () => {
       expect.arrayContaining([
         expect.objectContaining({
           tier: "T2-mini",
-          model: "gpt-5.4-mini",
+          model: MODEL_IDS.codex.mini,
           parallel_slots: 4,
           closing_authority: false,
           ownership: expect.stringContaining("disjoint"),
         }),
         expect.objectContaining({
           tier: "T2-spark",
-          model: "gpt-5.3-codex-spark",
+          model: MODEL_IDS.codex.spark,
           parallel_slots: 3,
           closing_authority: false,
           ownership: expect.stringContaining("disjoint"),
@@ -757,10 +757,10 @@ describe("L7 CLI surface closure", () => {
     expect(routePayload.decision).toMatchObject({
       role: "se",
       tier: "T2",
-      model: "gpt-5.3-codex-spark",
+      model: MODEL_IDS.codex.spark,
       status: "ready",
     });
-    expect(routePayload.decision.model).not.toBe("gpt-5.4-mini");
+    // Mini/spark share one real model now; tier and engine retain lane identity.
   }, 20_000);
 
   it("exposes upper-model advisor dry-runs for lower orchestrator models", () => {
@@ -1650,8 +1650,16 @@ describe("L7 CLI surface closure", () => {
     });
     expect(payload.document_coverage.recommended_subagents).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ tier: "T2-mini", parallel_slots: 4 }),
-        expect.objectContaining({ tier: "T2-spark", parallel_slots: 3 }),
+        expect.objectContaining({
+          tier: "T2-mini",
+          model: MODEL_IDS.codex.mini,
+          parallel_slots: 4,
+        }),
+        expect.objectContaining({
+          tier: "T2-spark",
+          model: MODEL_IDS.codex.spark,
+          parallel_slots: 3,
+        }),
       ]),
     );
     expect(payload.definition).toMatchObject({
@@ -1660,15 +1668,25 @@ describe("L7 CLI surface closure", () => {
       max_parallel: 7,
     });
     expect(
-      payload.definition.members.filter(
-        (member: { model?: string }) => member.model === "gpt-5.4-mini",
+      payload.definition.members.filter((member: { engine?: string }) =>
+        member.engine?.includes("-t2-mini-"),
       ),
     ).toHaveLength(4);
     expect(
-      payload.definition.members.filter(
-        (member: { model?: string }) => member.model === "gpt-5.3-codex-spark",
+      payload.definition.members.filter((member: { engine?: string }) =>
+        member.engine?.includes("-t2-spark-"),
       ),
     ).toHaveLength(3);
+    expect(
+      payload.definition.members
+        .filter((member: { engine?: string }) => member.engine?.includes("-t2-mini-"))
+        .every((member: { model?: string }) => member.model === MODEL_IDS.codex.mini),
+    ).toBe(true);
+    expect(
+      payload.definition.members
+        .filter((member: { engine?: string }) => member.engine?.includes("-t2-spark-"))
+        .every((member: { model?: string }) => member.model === MODEL_IDS.codex.spark),
+    ).toBe(true);
     expect(
       payload.definition.members.some((member: { model?: string }) => member.model === "gpt-5.5"),
     ).toBe(false);

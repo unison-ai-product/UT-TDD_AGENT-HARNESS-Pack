@@ -73,7 +73,7 @@ describe("U-MODELID: model-id SSoT", () => {
     }
   });
 
-  it("U-MODELID-005: proposal subagent lanes use MODEL_IDS and keep mini out of execution TIER_TABLE", () => {
+  it("U-MODELID-005: proposal subagent lanes use MODEL_IDS and remain non-frontier", () => {
     expect(PROPOSAL_SUBAGENT_LANES["T2-mini"]).toMatchObject({
       model: MODEL_IDS.codex.mini,
       max_parallel: 4,
@@ -92,8 +92,7 @@ describe("U-MODELID: model-id SSoT", () => {
       closing_authority: true,
       ownership: expect.stringContaining("single"),
     });
-    expect(Object.values(TIER_TABLE).some((tier) => tier.codex === MODEL_IDS.codex.mini)).toBe(
-      false,
-    );
+    expect(PROPOSAL_SUBAGENT_LANES["T2-mini"].model).not.toBe(MODEL_IDS.codex.frontier);
+    expect(PROPOSAL_SUBAGENT_LANES["T2-spark"].model).not.toBe(MODEL_IDS.codex.frontier);
   });
 });

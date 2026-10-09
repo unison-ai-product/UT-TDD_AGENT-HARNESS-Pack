@@ -214,14 +214,14 @@ function releaseDir(assetBytes: Record<string, string>) {
   return root;
 }
 
-function agentRecord() {
-  const names = canaryAssetsForTag(AGENT_E2E_TAG);
+function agentRecord(tag = AGENT_E2E_TAG) {
+  const names = canaryAssetsForTag(tag);
   const assetBytes = Object.fromEntries(names.map((name: string) => [name, `bytes:${name}`]));
   const pair = (value: string) => ({ producer_sha256: sha(value), independent_sha256: sha(value) });
   return {
     value: {
-      tag: AGENT_E2E_TAG,
-      release_url: `https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/releases/tag/${AGENT_E2E_TAG}`,
+      tag,
+      release_url: `https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/releases/tag/${tag}`,
       c1_commit: "c".repeat(40),
       c2_commit: "d".repeat(40),
       recorded_by: "offline runner contract fixture",
@@ -370,11 +370,10 @@ function agentReviewEvidence() {
   };
 }
 
-function agentReleaseDir(assetBytes: Record<string, string>) {
+function agentReleaseDir(assetBytes: Record<string, string>, tag = AGENT_E2E_TAG) {
   const root = mkdtempSync(join(tmpdir(), "ut-canary-agent-release-"));
   tempRoots.push(root);
-  for (const name of canaryAssetsForTag(AGENT_E2E_TAG))
-    writeFileSync(join(root, name), assetBytes[name]);
+  for (const name of canaryAssetsForTag(tag)) writeFileSync(join(root, name), assetBytes[name]);
   return root;
 }
 
@@ -532,15 +531,15 @@ describe("manual canary acceptance publish-record boundary", () => {
     ).toThrow("install-evidence-not-verifiable");
   });
 
-  it("U-ST-PACKCANARY-015: accepts exact canary.5 for the agent lane and canary.2 for the standard lane", () => {
-    const anchor = sha("canary.5 anchor");
+  it("U-ST-PACKCANARY-015: accepts exact canary.6 for the agent lane and canary.2 for the standard lane", () => {
+    const anchor = sha("canary.6 anchor");
     expect(CANARY_TAG).toBe("v0.2.0-canary.2");
-    expect(buildInstallerInvocation("C:/c5-release", anchor, "v0.2.0-canary.5")).toEqual([
-      join("C:/c5-release", "v0.2.0-canary.5.ut-tdd.mjs"),
+    expect(buildInstallerInvocation("C:/c6-release", anchor, "v0.2.0-canary.6")).toEqual([
+      join("C:/c6-release", "v0.2.0-canary.6.ut-tdd.mjs"),
       "setup",
       "--solo",
       "--consumer-runtime-release",
-      "C:/c5-release",
+      "C:/c6-release",
       "--expected-consumer-digest",
       anchor,
     ]);
@@ -554,13 +553,16 @@ describe("manual canary acceptance publish-record boundary", () => {
       anchor,
     ]);
     for (const tag of [
+      "v0.2.0-canary.5",
       "v0.2.0-canary.4",
       "v0.2.0-canary.3",
       "v0.1.4",
       "latest",
+      "v0.2.0-canary.6-preview",
       "v0.2.0-canary.5-preview",
       "v0.2.0-canary.4-preview",
       "prefix-v0.2.0-canary.4",
+      "prefix-v0.2.0-canary.6",
     ]) {
       expect(() => buildInstallerInvocation("C:/other-release", anchor, tag)).toThrow(
         "acceptance-tag-not-canary-2-or-offline-fixture",
@@ -911,27 +913,28 @@ describe("manual canary acceptance publish-record boundary", () => {
     ).toThrow("acceptance-tag-not-canary-2");
   });
 
-  it("U-ST-PACKCANARY-015: the AT-DIST-003 lane accepts only exact canary.5 bytes and its record anchor", () => {
-    const input = agentRecord();
-    expect(input.value.tag).toBe("v0.2.0-canary.5");
+  it("U-ST-PACKCANARY-015: the AT-DIST-003 lane accepts only exact canary.6 bytes and its record anchor", () => {
+    const agentTag = "v0.2.0-canary.6";
+    const input = agentRecord(agentTag);
+    expect(input.value.tag).toBe(agentTag);
     const parsed = parseAgentE2ERecord(input.value, commentUrl);
-    const dir = agentReleaseDir(input.assetBytes);
-    expect(parsed.value.tag).toBe("v0.2.0-canary.5");
+    const dir = agentReleaseDir(input.assetBytes, agentTag);
+    expect(parsed.value.tag).toBe(agentTag);
     expect(Object.keys(verifyReleaseDirectory(dir, parsed).actualDigests).sort()).toEqual(
-      [...canaryAssetsForTag("v0.2.0-canary.5")].sort(),
+      [...canaryAssetsForTag(agentTag)].sort(),
     );
-    expect(buildAgentE2EInstallerInvocation("C:/c5-release", parsed.consumerAnchorDigest)).toEqual([
-      join("C:/c5-release", "v0.2.0-canary.5.ut-tdd.mjs"),
+    expect(buildAgentE2EInstallerInvocation("C:/c6-release", parsed.consumerAnchorDigest)).toEqual([
+      join("C:/c6-release", `${agentTag}.ut-tdd.mjs`),
       "setup",
       "--solo",
       "--consumer-runtime-release",
-      "C:/c5-release",
+      "C:/c6-release",
       "--expected-consumer-digest",
       parsed.consumerAnchorDigest,
     ]);
     expect(
-      buildInstallerInvocation("C:/c5-release", parsed.consumerAnchorDigest, AGENT_E2E_TAG),
-    ).toEqual(buildAgentE2EInstallerInvocation("C:/c5-release", parsed.consumerAnchorDigest));
+      buildInstallerInvocation("C:/c6-release", parsed.consumerAnchorDigest, agentTag),
+    ).toEqual(buildAgentE2EInstallerInvocation("C:/c6-release", parsed.consumerAnchorDigest));
     expect(() => parseAgentE2ERecord(record().value, commentUrl)).toThrow(
       "publish-record-tag-not-exact",
     );
@@ -940,12 +943,15 @@ describe("manual canary acceptance publish-record boundary", () => {
     c2Bytes.tag = CANARY_TAG;
     expect(() => parseAgentE2ERecord(c2Bytes, commentUrl)).toThrow("publish-record-tag-not-exact");
     for (const tag of [
+      "v0.2.0-canary.5",
       "v0.2.0-canary.4",
       "v0.2.0-canary.3",
       "latest",
+      "v0.2.0-canary.6-preview",
       "v0.2.0-canary.5-preview",
       "v0.2.0-canary.4-preview",
       "prefix-v0.2.0-canary.4",
+      "prefix-v0.2.0-canary.6",
     ]) {
       const wrongTag = structuredClone(input.value);
       wrongTag.tag = tag;
@@ -953,15 +959,15 @@ describe("manual canary acceptance publish-record boundary", () => {
         "publish-record-tag-not-exact",
       );
     }
-    const tampered = agentReleaseDir(input.assetBytes);
-    writeFileSync(join(tampered, canaryAssetsForTag(AGENT_E2E_TAG)[2]), "tampered");
+    const tampered = agentReleaseDir(input.assetBytes, agentTag);
+    writeFileSync(join(tampered, canaryAssetsForTag(agentTag)[2]), "tampered");
     expect(() => verifyReleaseDirectory(tampered, parsed)).toThrow("release-asset-digest-mismatch");
 
-    const missing = agentReleaseDir(input.assetBytes);
-    rmSync(join(missing, canaryAssetsForTag(AGENT_E2E_TAG)[0]));
+    const missing = agentReleaseDir(input.assetBytes, agentTag);
+    rmSync(join(missing, canaryAssetsForTag(agentTag)[0]));
     expect(() => verifyReleaseDirectory(missing, parsed)).toThrow("release-asset-set-not-exact");
 
-    const extra = agentReleaseDir(input.assetBytes);
+    const extra = agentReleaseDir(input.assetBytes, agentTag);
     writeFileSync(join(extra, "unexpected.bin"), "extra");
     expect(() => verifyReleaseDirectory(extra, parsed)).toThrow("release-asset-set-not-exact");
 
@@ -972,11 +978,11 @@ describe("manual canary acceptance publish-record boundary", () => {
     );
 
     const wrongAnchorBytes = { ...input.assetBytes };
-    const anchorName = canaryAssetsForTag(AGENT_E2E_TAG)[4];
+    const anchorName = canaryAssetsForTag(agentTag)[4];
     wrongAnchorBytes[anchorName] = "wrong anchor bytes";
-    expect(() => verifyReleaseDirectory(agentReleaseDir(wrongAnchorBytes), parsed)).toThrow(
-      `release-asset-digest-mismatch:${anchorName}`,
-    );
+    expect(() =>
+      verifyReleaseDirectory(agentReleaseDir(wrongAnchorBytes, agentTag), parsed),
+    ).toThrow(`release-asset-digest-mismatch:${anchorName}`);
   });
 
   it("U-ST-PACKCANARY-016: rejects missing or non-agent authoring provenance", () => {

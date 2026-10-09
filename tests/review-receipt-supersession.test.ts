@@ -139,7 +139,9 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         ]),
       );
       expect(existsSync(first.path)).toBe(true);
-      expect(existsSync(join(root, ".ut-tdd", "review", "receipts", `${digest}.json`))).toBe(true);
+      const secondBytes = readFileSync(second.path);
+      const receiptPath = join(root, ".ut-tdd", "review", "receipts", `${digest}.json`);
+      const receiptBytes = readFileSync(receiptPath);
       cleanupReviewAttempt({
         repoRoot: root,
         requestDigest: digest,
@@ -149,7 +151,9 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         exactHead: request.exactHead,
       });
       expect(existsSync(first.path)).toBe(true);
-      expect(existsSync(second.path)).toBe(false);
+      expect(existsSync(second.path)).toBe(true);
+      expect(readFileSync(second.path)).toEqual(secondBytes);
+      expect(readFileSync(receiptPath)).toEqual(receiptBytes);
       expect(readReviewCustodyAudit(root)).toEqual(
         expect.arrayContaining([
           expect.objectContaining({

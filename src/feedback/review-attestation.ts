@@ -584,6 +584,7 @@ function parseReviewVerdictEnvelope(
     "invocation_nonce",
   ];
   for (const line of text.split(/\r?\n/)) {
+    if (line.trim() === "" || /^VERDICT:/.test(line)) break;
     const match = /^([a-z_]+):[ \t]*(.*)$/.exec(line);
     if (!match) continue;
     if (!fields.includes(match[1])) return { ok: false, reason: "verdict_identity_mismatch" };
