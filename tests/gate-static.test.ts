@@ -19,6 +19,8 @@ const cliPath = join(process.cwd(), "src", "cli.ts");
 
 /**
  * RCDEV-037 実測 baseline: 066b842f1a3161f1cb67c3d383a28d76d9c36041 (G0 merge-base Git archive).
+ * Issue #935 confirmed design-pair increment (exact HEAD 2e88e53ae35ca01ba1b633c3916a882e4f277219):
+ * direct evaluateStaticGate measured G6 L6 total=32/confirmed=32, G7 pair-freeze=61, verification=60/60 confirmed.
  * 明示採取: node rcdev037-capture.mjs <baseline-root>
  * 採取 script (再生成は明示操作のみ、テスト内で期待値を再生成しない):
  * import { pathToFileURL } from 'node:url';
@@ -81,7 +83,7 @@ const HARNESS_GATE_BASELINE = [
     gate: "G6",
     passed: true,
     applicable: true,
-    messages: ["g6-pair - OK (L6 total=30, confirmed=30, placeholder=0, draft=0, orphans=0)"],
+    messages: ["g6-pair - OK (L6 total=32, confirmed=32, placeholder=0, draft=0, orphans=0)"],
   },
   {
     gate: "G7",
@@ -92,8 +94,8 @@ const HARNESS_GATE_BASELINE = [
       "g7-static - failed (G7 requires trace evidence and coverage >=80%)",
       "impl-plan-trace — OK (src 全件 PLAN generates / baseline に被覆、NEW orphan 0)",
       "oracle-test-trace — OK (宣言 oracle 全件 tests citation / baseline 被覆、test-label 逆向き citation 断線 0、宣言 provenance 重複 0)",
-      "pair-freeze — OK (design⇔test-design 双方向 59 pair、孤児 0)",
-      "verification — 実装検証サイクルゲート [L0-L7] (左腕+谷): ✅ base freeze 完了 (58/58 confirmed, L7 plans 9/9 confirmed, evidence 9/9, 孤児0) / active revisions 1/1 confirmed → 検証サイクル発火可",
+      "pair-freeze — OK (design⇔test-design 双方向 61 pair、孤児 0)",
+      "verification — 実装検証サイクルゲート [L0-L7] (左腕+谷): ✅ base freeze 完了 (60/60 confirmed, L7 plans 9/9 confirmed, evidence 9/9, 孤児0) / active revisions 1/1 confirmed → 検証サイクル発火可",
     ],
   },
   {

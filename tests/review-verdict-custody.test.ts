@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   canonicalizeReviewRequest,
   issueReviewRequest,
@@ -20,6 +20,7 @@ import {
   type ReviewAttestation,
   type ReviewAttestationRequest,
 } from "../src/feedback/review-attestation.ts";
+import { runPrMerge } from "../src/feedback/review-merge-gate.ts";
 import {
   appendReviewCustodyAudit,
   assertReviewVerdictPath,
@@ -653,5 +654,207 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+const fault = vi.hoisted(() => ({ path: "", mode: "none", parsed: false }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const read: typeof actual.readFileSync = ((path, options) => {
+    if (String(path) === fault.path && !fault.parsed && fault.mode === "initial-unreadable") {
+      fault.parsed = true;
+      throw Object.assign(new Error("injected first-read failure"), { code: "EACCES" });
+    }
+    if (String(path) === fault.path && fault.parsed && fault.mode === "unreadable") {
+      throw Object.assign(new Error("injected second-read failure"), { code: "EACCES" });
+    }
+    const result = actual.readFileSync(path, options);
+    if (String(path) === fault.path && !fault.parsed) {
+      fault.parsed = true;
+      if (fault.mode === "delete") actual.unlinkSync(fault.path);
+      if (fault.mode === "replace") {
+        actual.writeFileSync(
+          fault.path,
+          result.toString("utf8").replace("VERDICT: PASS", "VERDICT: FLAG"),
+        );
+      }
+    }
+    return result;
+  }) as typeof actual.readFileSync;
+  return { ...actual, readFileSync: read };
+});
+
+const roots: string[] = [];
+afterEach(() => {
+  fault.path = "";
+  fault.mode = "none";
+  fault.parsed = false;
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), "ut-verdict-reread-"));
+  roots.push(root);
+  execFileSync("git", ["init", "--quiet"], { cwd: root, stdio: "ignore" });
+  const request = canonicalizeReviewRequest({
+    memoryId: "memory:issue914",
+    pr: 914,
+    exactHead: "a".repeat(40),
+    reviewRevision: "initial",
+    authorFamily: "codex",
+    requestedAt: "2026-10-09T01:00:00.000Z",
+  });
+  expect(issueReviewRequest({ repoRoot: root, request, strict: true }).ok).toBe(true);
+  const attempt = beginReviewAttempt({
+    repoRoot: root,
+    request,
+    provider: "claude",
+    model: "claude-opus-5",
+  });
+  if (!attempt.ok) throw new Error(attempt.reason);
+  writeFileSync(
+    attempt.path,
+    [
+      "schema_version: ut-tdd.review-verdict/v1",
+      `request_digest: ${reviewIdentityDigest(request)}`,
+      `attempt: ${attempt.attempt}`,
+      `pr: ${request.pr}`,
+      `exact_head: ${request.exactHead}`,
+      `review_revision: ${request.reviewRevision}`,
+      "reviewer_provider: claude",
+      "reviewer_model: claude-opus-5",
+      `invocation_nonce: ${request.invocationNonce}`,
+      "VERDICT: PASS",
+    ].join("\n"),
+    "utf8",
+  );
+  const attestation: ReviewAttestation = {
+    provider: "claude",
+    role: "blind-reviewer",
+    model: "claude-opus-5",
+    pr: request.pr,
+    head: request.exactHead,
+    reviewRevision: request.reviewRevision,
+    startedAt: request.requestedAt,
+    completedAt: "2026-10-09T01:01:00.000Z",
+    exitCode: 0,
+    attempt: attempt.attempt,
+    invocationNonce: request.invocationNonce,
+  };
+  return { root, request, attestation, path: attempt.path };
+}
+
+function measureMerge(root: string, head: string) {
+  let mutations = 0;
+  const result = runPrMerge({
+    repoRoot: root,
+    pr: 914,
+    now: () => "2026-10-09T01:02:00.000Z",
+    ports: {
+      getPullRequest: () => ({
+        pr: 914,
+        headSha: head,
+        evaluatedHeadSha: head,
+        state: "OPEN",
+        checksGreen: true,
+      }),
+      mergePullRequest: () => {
+        mutations += 1;
+      },
+    },
+  });
+  return { result, mutations };
+}
+
+describe("Issue #914: strict verdict second-read custody regression", () => {
+  it("keeps the complete verdict path authoritative through the real merge wrapper", () => {
+    const { root, request, attestation, path } = fixture();
+    expect(
+      projectReviewVerdict({ repoRoot: root, request, attestation, verdictFile: path }).ok,
+    ).toBe(true);
+    expect(hasTerminalReviewReceipt(root, request)).toBe(true);
+    expect(measureMerge(root, request.exactHead)).toMatchObject({
+      result: { ok: true },
+      mutations: 1,
+    });
+  });
+
+  it("rejects a PASS-to-FLAG replacement before receipt/audit/link", () => {
+    const { root, request, attestation, path } = fixture();
+    const originalBytes = readFileSync(path);
+    const expectedDigest = createHash("sha256").update(originalBytes).digest("hex");
+    const before = readReviewCustodyAudit(root);
+    fault.path = path;
+    fault.mode = "replace";
+
+    const projected = projectReviewVerdict({
+      repoRoot: root,
+      request,
+      attestation,
+      verdictFile: path,
+    });
+    fault.path = "";
+    const merge = measureMerge(root, request.exactHead);
+
+    expect(fault.parsed).toBe(true);
+    expect(readFileSync(path, "utf8")).toContain("VERDICT: FLAG");
+    expect(createHash("sha256").update(readFileSync(path)).digest("hex")).not.toBe(expectedDigest);
+    expect(projected).toEqual({ ok: false, reason: "receipt_write_failed" });
+    expect(merge).toMatchObject({ result: { ok: false }, mutations: 0 });
+    expect(readReviewCustodyAudit(root)).toEqual(before);
+    const receipts = join(root, ".ut-tdd", "review", "receipts");
+    expect(existsSync(receipts) ? readdirSync(receipts) : []).toEqual([]);
+  });
+
+  it.each([
+    "delete",
+    "unreadable",
+  ])("fails closed before receipt/audit/link when the second read is %s", (mode) => {
+    const { root, request, attestation, path } = fixture();
+    const before = readReviewCustodyAudit(root);
+    fault.path = path;
+    fault.mode = mode;
+    const projected = projectReviewVerdict({
+      repoRoot: root,
+      request,
+      attestation,
+      verdictFile: path,
+    });
+    fault.path = "";
+    expect(fault.parsed).toBe(true);
+    if (mode === "delete") expect(existsSync(path)).toBe(false);
+    const merge = measureMerge(root, request.exactHead);
+    console.info("issue914 observed", {
+      mode,
+      projected,
+      merge,
+      terminal: hasTerminalReviewReceipt(root, request),
+    });
+    expect(merge).toMatchObject({ result: { ok: false }, mutations: 0 });
+    expect(projected).toEqual({ ok: false, reason: "receipt_write_failed" });
+    expect(readReviewCustodyAudit(root)).toEqual(before);
+    const receipts = join(root, ".ut-tdd", "review", "receipts");
+    expect(existsSync(receipts) ? readdirSync(receipts) : []).toEqual([]);
+  });
+
+  it("returns verdict_file_unreadable when the initial verdict read fails", () => {
+    const { root, request, attestation, path } = fixture();
+    fault.path = path;
+    fault.mode = "initial-unreadable";
+
+    const projected = projectReviewVerdict({
+      repoRoot: root,
+      request,
+      attestation,
+      verdictFile: path,
+    });
+    fault.path = "";
+    const merge = measureMerge(root, request.exactHead);
+
+    expect(fault.parsed).toBe(true);
+    expect(projected).toEqual({ ok: false, reason: "verdict_file_unreadable" });
+    expect(merge).toMatchObject({ result: { ok: false }, mutations: 0 });
+    const receipts = join(root, ".ut-tdd", "review", "receipts");
+    expect(existsSync(receipts) ? readdirSync(receipts) : []).toEqual([]);
   });
 });

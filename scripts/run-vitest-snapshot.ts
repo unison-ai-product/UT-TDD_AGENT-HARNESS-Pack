@@ -189,6 +189,8 @@ export function createSnapshot(
       [
         "clone",
         "--no-hardlinks",
+        // Avoid filesystem-copying transient object metadata that Git maintenance may remove.
+        "--no-local",
         "--no-checkout",
         repoRoot,
         snapshotRoot,

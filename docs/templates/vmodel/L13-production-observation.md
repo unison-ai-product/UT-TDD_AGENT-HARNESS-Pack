@@ -15,7 +15,7 @@ plan: docs/plans/PLAN-<id>.md
 
 # DOC-L13-PRODUCTION-OBSERVATION: 運用設計書 (監視・後検証節) / ログ・トレース設計書
 
-本テンプレートは `Vモデル設計ドキュメント_checked.zip` (PO 承認、issue #676) の該当 source document を PLAN-L7-676 §3.5.2 の変換規則で Markdown 化したものである。項目名・説明文は zip の日本語をそのまま使い、意味は書き換えていない。zip で空欄・空表の箇所には、記入欄の placeholder (`<記入>`、`<本文を記入>`、`<項目を記入>`) だけを置き、記入例の内容は機械生成しない。「### harness 追補:」で始まる節は ZIP 由来ではなく、harness の gate 判定のために足した節である。
+本テンプレートは `Vモデル設計ドキュメント_checked.zip` (PO 承認、issue #676) の該当 source document を PLAN-L7-676 §3.5.2 の変換規則で Markdown 化したものである。項目名・説明文は zip の日本語をそのまま使い、意味は書き換えていない。zip で空欄・空表の箇所には、記入欄の placeholder のみを置き、記入例の内容は機械生成しない。「### harness 追補:」で始まる節は ZIP 由来ではなく、harness の gate 判定のために足した節である。 <!-- 説明用の表記例: <記入>、<本文を記入>、<項目を記入> -->
 
 ### 移植元: ZIP-DOC-011 運用設計
 
@@ -154,4 +154,4 @@ plan: docs/plans/PLAN-<id>.md
 
 | ケースID | 観測内容 | 合否基準 | トレース元 |
 | --- | --- | --- | --- |
-| <SMOKE-ID> | <観測内容> | <合否基準> | <AT-ID> |
+| <記入> | <記入> | <記入> | <記入> |

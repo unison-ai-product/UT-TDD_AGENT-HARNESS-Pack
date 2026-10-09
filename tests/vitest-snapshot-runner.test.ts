@@ -568,4 +568,31 @@ describe("snapshot default branch ref injection (PLAN-L7-461)", () => {
       removeTestTree(snapshot);
     }
   });
+
+  it("一時commit-graphファイルを複製せず、detached revisionとcheckout bytesを保つ", () => {
+    const { origin, checkout, sha } = makeDetachedCheckout();
+    const snapshot = `${checkout}-snapshot`;
+    const transientGraphDirectory = join(checkout, ".git", "objects", "info", "commit-graphs");
+    const transientGraph = join(transientGraphDirectory, "tmp_graph_test");
+    try {
+      const sourceSeedBytes = readFileSync(join(checkout, "seed.txt"));
+      mkdirSync(transientGraphDirectory, { recursive: true });
+      writeFileSync(transientGraph, "transient commit-graph writer output\n");
+
+      createSnapshot(checkout, snapshot);
+
+      expect(existsSync(transientGraph)).toBe(true);
+      expect(
+        existsSync(join(snapshot, ".git", "objects", "info", "commit-graphs", "tmp_graph_test")),
+      ).toBe(false);
+      expect(existsSync(join(snapshot, ".git", "objects", "info", "alternates"))).toBe(false);
+      expect(git(snapshot, "rev-parse", "HEAD")).toBe(sha);
+      expect(readFileSync(join(snapshot, "seed.txt"))).toEqual(sourceSeedBytes);
+      expect(git(snapshot, "status", "--porcelain")).toBe("");
+    } finally {
+      removeTestTree(origin);
+      removeTestTree(checkout);
+      removeTestTree(snapshot);
+    }
+  });
 });

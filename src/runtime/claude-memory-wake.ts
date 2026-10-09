@@ -291,8 +291,8 @@ function runtimeRoot(repoRoot: string): string {
   return join(requireProjectMemoryRoot(repoRoot).runtimeBusRoot, "claude-memory-wake");
 }
 
-function providerBindingPath(repoRoot: string, entryId: string): string {
-  return join(runtimeRoot(repoRoot), "envelope-bindings", `${inboxFileStem(entryId)}.json`);
+function providerBindingPathAtRuntimeRoot(root: string, entryId: string): string {
+  return join(root, "envelope-bindings", `${inboxFileStem(entryId)}.json`);
 }
 
 function providerBindingFor(entry: ClaudeProviderInboxEntry): ClaudeProviderEnvelopeBinding {
@@ -311,7 +311,7 @@ function providerBindingFor(entry: ClaudeProviderInboxEntry): ClaudeProviderEnve
 function writeProviderBinding(repoRoot: string, entry: ClaudeInboxEntry): void {
   if (entry.schemaVersion !== CLAUDE_PROVIDER_INBOX_SCHEMA) return;
   const binding = providerBindingFor(entry);
-  const path = providerBindingPath(repoRoot, entry.id);
+  const path = providerBindingPathAtRuntimeRoot(runtimeRoot(repoRoot), entry.id);
   ensureDir(dirname(path), { recursive: true });
   const serialized = JSON.stringify(binding);
   if (existsSync(path)) {
@@ -327,26 +327,31 @@ function writeProviderBinding(repoRoot: string, entry: ClaudeInboxEntry): void {
 }
 
 function removeProviderBinding(repoRoot: string, entry: ClaudeInboxEntry): void {
+  removeProviderBindingAtRuntimeRoot(runtimeRoot(repoRoot), entry);
+}
+
+function removeProviderBindingAtRuntimeRoot(root: string, entry: ClaudeInboxEntry): void {
   if (entry.schemaVersion !== CLAUDE_PROVIDER_INBOX_SCHEMA) return;
   try {
-    unlinkSync(providerBindingPath(repoRoot, entry.id));
+    unlinkSync(providerBindingPathAtRuntimeRoot(root, entry.id));
   } catch {
     // 既にterminal cleanupされた場合は冪等に扱う。
   }
 }
 
 function validateProviderBinding(input: {
-  repoRoot: string;
+  root: string;
+  projectId: string;
   entry: ClaudeProviderInboxEntry;
   provider: ClaudeProvider;
   sessionId: string;
 }): ClaudeProviderEnvelopeValidation {
-  const { repoRoot, entry, provider, sessionId } = input;
-  const bindingResult = readProviderBinding(repoRoot, entry);
+  const { root, projectId, entry, provider, sessionId } = input;
+  const bindingResult = readProviderBindingAtRuntimeRoot(root, entry);
   if (!bindingResult.ok) return bindingResult;
   return validateClaudeProviderConsumerEnvelope({
     entry,
-    projectId: requireProjectMemoryRoot(repoRoot).projectId,
+    projectId,
     provider,
     sessionId,
     expectedMemoryId: bindingResult.binding.memoryId,
@@ -355,11 +360,31 @@ function validateProviderBinding(input: {
   });
 }
 
-function readProviderBinding(
-  repoRoot: string,
+function validateProviderBindingForDeclaredTarget(input: {
+  root: string;
+  projectId: string;
+  entry: ClaudeProviderInboxEntry;
+  provider: ClaudeProvider;
+}): ClaudeProviderEnvelopeValidation {
+  const { root, projectId, entry, provider } = input;
+  const bindingResult = readProviderBindingAtRuntimeRoot(root, entry);
+  if (!bindingResult.ok) return bindingResult;
+  return validateClaudeProviderConsumerEnvelope({
+    entry,
+    projectId,
+    provider,
+    sessionId: bindingResult.binding.target.sessionId,
+    expectedMemoryId: bindingResult.binding.memoryId,
+    expectedOperationId: bindingResult.binding.operationId,
+    expectedProducer: bindingResult.binding.producer,
+  });
+}
+
+function readProviderBindingAtRuntimeRoot(
+  root: string,
   entry: ClaudeProviderInboxEntry,
 ): ClaudeProviderBindingReadResult {
-  const path = providerBindingPath(repoRoot, entry.id);
+  const path = providerBindingPathAtRuntimeRoot(root, entry.id);
   if (!existsSync(path)) return { ok: false, reason: "envelope_binding_missing" };
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
@@ -1252,7 +1277,7 @@ export function recoverAndSummarizeClaudeInboxForSessionStart(input: {
 }
 
 function claim(input: {
-  repoRoot: string;
+  root: string;
   entry: ClaudeInboxEntry;
   sessionId: string;
   at: string;
@@ -1261,7 +1286,7 @@ function claim(input: {
   envelopeGuard?: () => ClaudeProviderEnvelopeValidation;
   beforeCommit?: () => void;
 }): boolean {
-  const root = runtimeRoot(input.repoRoot);
+  const { root } = input;
   ensureDir(root, { recursive: true });
   if (!validateClaudeWakeClaimAuthority(root, input.authority, input.leaseToken).ok) return false;
   if (!inboxSourceMatchesEntry(input.entry)) return false;
@@ -1368,8 +1393,10 @@ export async function waitForClaudeMemory(input: {
   const provider = input.provider ?? "claude";
   const sleep =
     input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const root = runtimeRoot(input.repoRoot);
-  const workspaceId = claudeWorkspaceId(input.repoRoot);
+  const resolvedProject = requireProjectMemoryRoot(input.repoRoot);
+  const root = join(resolvedProject.runtimeBusRoot, "claude-memory-wake");
+  const workspaceId = resolvedProject.projectNamespace;
+  const projectId = resolvedProject.projectId;
   ensureDir(root, { recursive: true });
   pruneRuntimeFiles(root, Date.now());
   const generationPath = join(root, `${safeFilePart(input.sessionId)}.generation`);
@@ -1436,7 +1463,7 @@ export async function waitForClaudeMemory(input: {
     const unavailable = claimedIds(root);
     for (const id of terminalIds(root)) unavailable.add(id);
     for (const id of unclaimable) unavailable.add(id);
-    const inbox = readInbox(input.repoRoot);
+    const inbox = readInboxAtRuntimeRoot(root);
     for (const candidate of inbox) {
       if (
         unavailable.has(candidate.id) ||
@@ -1472,11 +1499,14 @@ export async function waitForClaudeMemory(input: {
         unavailable.add(candidate.id);
       }
     }
-    const entry = selectClaudeInboxEntry(
-      inbox.filter((candidate) => candidate.targetWorkspaceId === workspaceId),
-      unavailable,
-    );
-    if (entry) {
+    const candidates = inbox
+      .filter((candidate) => candidate.targetWorkspaceId === workspaceId)
+      .sort(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+      );
+    for (const entry of candidates) {
+      if (unavailable.has(entry.id)) continue;
       if (entry.schemaVersion !== CLAUDE_PROVIDER_INBOX_SCHEMA && !input.allowLegacy) {
         writeAuditLog(input.repoRoot, {
           event: "claim",
@@ -1501,13 +1531,34 @@ export async function waitForClaudeMemory(input: {
       if (entry.schemaVersion === CLAUDE_PROVIDER_INBOX_SCHEMA) {
         envelopeGuard = () =>
           validateProviderBinding({
-            repoRoot: input.repoRoot,
+            root,
+            projectId,
             entry,
             provider,
             sessionId: input.sessionId,
           });
         const envelopeResult = envelopeGuard();
         if (!envelopeResult.ok) {
+          if (
+            envelopeResult.reason === "target_session_mismatch" &&
+            validateProviderBindingForDeclaredTarget({
+              root,
+              projectId,
+              entry,
+              provider,
+            }).ok
+          ) {
+            writeAuditLog(input.repoRoot, {
+              event: "claim",
+              status: "deny",
+              entryId: entry.id,
+              operationId: entry.operationId,
+              reason: envelopeResult.reason,
+            });
+            unclaimable.add(entry.id);
+            unavailable.add(entry.id);
+            continue;
+          }
           writeAuditLog(input.repoRoot, {
             event: "claim",
             status: "deny",
@@ -1521,7 +1572,7 @@ export async function waitForClaudeMemory(input: {
       }
       if (
         claim({
-          repoRoot: input.repoRoot,
+          root,
           entry,
           sessionId: input.sessionId,
           at: now(),
@@ -1548,7 +1599,7 @@ export async function waitForClaudeMemory(input: {
         }
         // The terminal marker is the durable claim evidence. Only after it is
         // present may the independent expectation sidecar be retired.
-        removeProviderBinding(input.repoRoot, entry);
+        removeProviderBindingAtRuntimeRoot(root, entry);
         try {
           const source = (entry as InboxEntryWithSource)[INBOX_SOURCE_FILE];
           unlinkSync(join(root, "inbox", source ?? `${inboxFileStem(entry.id)}.json`));
@@ -1566,7 +1617,7 @@ export async function waitForClaudeMemory(input: {
         reason: "already_claimed",
       });
       unclaimable.add(entry.id);
-      continue;
+      unavailable.add(entry.id);
     }
     await sleep(pollIntervalMs);
   }
