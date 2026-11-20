@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,6 +17,7 @@ import {
   type DeferEntry,
   type TraceKeyedArtifact,
 } from "../src/lint/descent-obligation-types.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const a = (
   over: Partial<TraceKeyedArtifact> & Pick<TraceKeyedArtifact, "traceKey" | "layer" | "role">,
@@ -35,6 +36,17 @@ const defer = (
   owner: "tl",
   ...over,
 });
+
+function makeDualRootDeferRepo(): { root: string; planPath: string; designPath: string } {
+  const root = mkdtempSync(join(tmpdir(), "ut-tdd-planret-012-defer-"));
+  const planPath = join(root, "docs", "plans", "x.md");
+  const designPath = join(root, "docs", "design", "y.md");
+  mkdirSync(join(root, "docs", "plans"), { recursive: true });
+  mkdirSync(join(root, "docs", "design"), { recursive: true });
+  writeFileSync(planPath, "- FR-L1-46 explicit_l7_defer waiting_layer:L6 owner:tl\n", "utf8");
+  writeFileSync(designPath, "- FR-L1-47 explicit_l7_defer waiting_layer:L6 owner:tl\n", "utf8");
+  return { root, planPath, designPath };
+}
 
 describe("descent-obligation ledger (PLAN-L6-35 / FR-L1-03)", () => {
   it("U-DESC-001: generates obligations from upstream adjacency, not downstream self-declarations", () => {
@@ -360,16 +372,18 @@ describe("descent-obligation ledger (PLAN-L6-35 / FR-L1-03)", () => {
       expect(artifacts.some((artifact) => artifact.traceKey === "FR-L1-02")).toBe(false);
       expect(artifacts.some((artifact) => artifact.traceKey.startsWith("U-"))).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
   it("U-DESC-010: only creates defer rows for trace keys on the defer line", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-descent-"));
     try {
-      mkdirSync(join(root, "docs", "plans"), { recursive: true });
+      mkdirSync(join(root, "docs", "design", "harness", "L6-function-design"), {
+        recursive: true,
+      });
       writeFileSync(
-        join(root, "docs", "plans", "PLAN-L6-test.md"),
+        join(root, "docs", "design", "harness", "L6-function-design", "defer-fixture.md"),
         [
           "---",
           "layer: L6",
@@ -389,7 +403,29 @@ describe("descent-obligation ledger (PLAN-L6-35 / FR-L1-03)", () => {
         expect.objectContaining({ traceKey: "FR-L1-46", waitingLayer: "L6" }),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
+    }
+  });
+
+  it("U-PLANRET-012 fixture: PLAN and design defer rows are both present", () => {
+    const fixture = makeDualRootDeferRepo();
+    try {
+      expect(readFileSync(fixture.planPath, "utf8")).toContain("FR-L1-46 explicit_l7_defer");
+      expect(readFileSync(fixture.designPath, "utf8")).toContain("FR-L1-47 explicit_l7_defer");
+      expect(loadDeferLedger(fixture.root).map((row) => row.traceKey)).toContain("FR-L1-47");
+    } finally {
+      removeTestTree(fixture.root);
+    }
+  });
+
+  it("U-PLANRET-012(a): loadDeferLedger excludes PLAN-only defer rows", () => {
+    const fixture = makeDualRootDeferRepo();
+    try {
+      const rows = loadDeferLedger(fixture.root);
+
+      expect(rows.map((row) => row.traceKey)).toEqual(["FR-L1-47"]);
+    } finally {
+      removeTestTree(fixture.root);
     }
   });
 
@@ -409,7 +445,7 @@ describe("descent-obligation ledger (PLAN-L6-35 / FR-L1-03)", () => {
 
       expect(artifacts).toHaveLength(0);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -439,7 +475,7 @@ describe("descent-obligation ledger (PLAN-L6-35 / FR-L1-03)", () => {
         "docs/design/harness/L1-requirements/functional-requirements.md",
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { extractCodeFunctions } from "../lint/code-size.ts";
 import { normalizePath } from "../shared/source-text.ts";
 import {
   REFACTOR_CANDIDATE_THRESHOLDS,
@@ -91,52 +92,6 @@ function normalizedBody(body: string): string {
     .replace(/["'`][^"'`]*["'`]/g, '""')
     .replace(/\b\d+(?:\.\d+)?\b/g, "0")
     .trim();
-}
-
-function findMatchingBrace(text: string, openIndex: number): number {
-  let depth = 0;
-  let quote: string | null = null;
-  for (let i = openIndex; i < text.length; i++) {
-    const ch = text[i];
-    const prev = text[i - 1];
-    if (quote) {
-      if (ch === quote && prev !== "\\") quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === "`") {
-      quote = ch;
-      continue;
-    }
-    if (ch === "{") depth++;
-    if (ch === "}") {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
-function collectFunctionBodies(text: string): Array<{ name: string; body: string; lines: number }> {
-  const functions: Array<{ name: string; body: string; lines: number }> = [];
-  const stripped = stripTsComments(text);
-  const patterns = [
-    /\bfunction\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/g,
-    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*\{/g,
-  ];
-  for (const pattern of patterns) {
-    for (const match of stripped.matchAll(pattern)) {
-      const open = (match.index ?? 0) + match[0].length - 1;
-      const close = findMatchingBrace(stripped, open);
-      if (close < 0) continue;
-      const body = stripped.slice(open + 1, close);
-      functions.push({
-        name: match[1] ?? "anonymous",
-        body,
-        lines: body.split(/\r?\n/).filter((line) => line.trim()).length,
-      });
-    }
-  }
-  return functions;
 }
 
 function collectStringLiterals(text: string): string[] {
@@ -296,7 +251,11 @@ export function analyzeRefactorCandidates(
     const nonBlankLineCount = lines.filter((line) => line.trim()).length;
     const stripped = stripTsComments(file.content);
     const exportCount = (stripped.match(/\bexport\s+/g) ?? []).length;
-    const functions = collectFunctionBodies(file.content);
+    const functions = extractCodeFunctions(file.path, file.content).map((fn) => ({
+      name: fn.name,
+      body: fn.body,
+      lines: fn.lines,
+    }));
     const declarativeCatalog = isDeclarativeCatalogModule(file, functions.length);
     if (
       nonBlankLineCount >= SPLIT_MODULE_LINE_THRESHOLD ||

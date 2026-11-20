@@ -169,8 +169,8 @@ feature. It does not define:
 - **How** to implement the agent's internal reasoning loop, tool-calling
   mechanics, or the harness's own subagent guard configuration — that is
   [[agent-design]] (note: [[agent-design]]'s decision points are about the
-  UT-TDD harness's own `.claude/agents/*` subagent definitions and guard
-  allowlist, a different concern from a product feature's AI agent design).
+  UT-TDD harness's own Agent-tool guard (generic subagent types and
+  explicit model), a different concern from a product feature's AI agent design).
 - **Which** model/effort tier to route a call to, or how to wire a PLAN's
   `agent_slots` through `ut-tdd claude`/`ut-tdd codex` wrappers — that is
   [[llm-agent-routing]].

@@ -9,7 +9,7 @@ const base = {
   disposition: "retain" as const,
   reason: "現行設計と一致",
   targets: [] as const,
-  planIds: [] as const,
+  issues: [] as const,
   applicationStatus: "verified" as const,
   applicability: { kind: "applicable" as const },
 };
@@ -31,7 +31,7 @@ describe("document disposition U-DOCLEDGER-004", () => {
         kind: "defer",
         reason: "後続対応",
         reevaluationTrigger: "PLAN完了",
-        planId: "PLAN-L7-999",
+        issue: "https://github.com/example/repo/issues/999",
       }),
     ).toEqual({
       ok: true,
@@ -39,7 +39,7 @@ describe("document disposition U-DOCLEDGER-004", () => {
         kind: "deferred",
         reason: "後続対応",
         reevaluationTrigger: "PLAN完了",
-        planId: "PLAN-L7-999",
+        issue: "https://github.com/example/repo/issues/999",
       },
     });
   });
@@ -57,9 +57,25 @@ describe("document disposition U-DOCLEDGER-004", () => {
       "conditional",
       { kind: "conditional", reason: "r", observedCondition: "on", reevaluationTrigger: "" },
     ],
-    ["deferred", { kind: "deferred", reason: "", reevaluationTrigger: "x", planId: "PLAN-L7-1" }],
-    ["deferred", { kind: "deferred", reason: "r", reevaluationTrigger: "", planId: "PLAN-L7-1" }],
-    ["deferred", { kind: "deferred", reason: "r", reevaluationTrigger: "x", planId: "" }],
+    [
+      "deferred",
+      {
+        kind: "deferred",
+        reason: "",
+        reevaluationTrigger: "x",
+        issue: "https://github.com/example/repo/issues/1",
+      },
+    ],
+    [
+      "deferred",
+      {
+        kind: "deferred",
+        reason: "r",
+        reevaluationTrigger: "",
+        issue: "https://github.com/example/repo/issues/1",
+      },
+    ],
+    ["deferred", { kind: "deferred", reason: "r", reevaluationTrigger: "x", issue: "" }],
     ["not_applicable", { kind: "not_applicable", reason: "", decider: "PO" }],
     ["not_applicable", { kind: "not_applicable", reason: "r", decider: "" }],
   ] as const)("%sの必須field欠落を列挙する", (_name, applicability) => {
@@ -73,10 +89,10 @@ describe("document disposition U-DOCLEDGER-004", () => {
     "merge",
     "supersede",
     "archive",
-  ] as const)("%sはtarget又はPLANを必須とする", (disposition) => {
+  ] as const)("%sはtarget又はIssueを必須とする", (disposition) => {
     expect(validateDocumentDisposition({ ...base, disposition })).toEqual({
       ok: false,
-      missingFields: ["targets_or_plan_ids"],
+      missingFields: ["targets_or_issues"],
     });
   });
 
@@ -114,7 +130,7 @@ describe("document disposition U-DOCLEDGER-004", () => {
         kind: "deferred",
         reason: "後続対応",
         reevaluationTrigger: "PLAN完了",
-        planId: "PLAN-L7-999",
+        issue: "https://github.com/example/repo/issues/999",
       },
       { kind: "not_applicable", reason: "対象機能なし", decider: "PO" },
     ] as const;

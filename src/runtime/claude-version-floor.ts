@@ -1,0 +1,1 @@
+export const CLAUDE_CODE_VERSION_FLOOR = "2.1.295";

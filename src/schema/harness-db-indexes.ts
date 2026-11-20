@@ -1,12 +1,6 @@
 import type { IndexDef } from "./harness-db.ts";
 
 export const HARNESS_DB_INDEXES: IndexDef[] = [
-  {
-    name: "idx_plan_layer_drive_status",
-    table: "plan_registry",
-    // physical-data §9.3 準拠: (plan_id, layer, drive, status)。plan_id は PK だが doc 宣言に整合させる。
-    columns: ["plan_id", "layer", "drive", "status"],
-  },
   { name: "idx_trace_from_to", table: "trace_edges", columns: ["from_artifact", "to_artifact"] },
   {
     name: "idx_findings_subject_status",
@@ -171,24 +165,9 @@ export const HARNESS_DB_INDEXES: IndexDef[] = [
     columns: ["signal", "workflow", "gate"],
   },
   {
-    name: "idx_roadmap_band_status",
-    table: "roadmap_band_coverage",
-    columns: ["status", "band_id"],
-  },
-  {
-    name: "idx_roadmap_gate_plan",
-    table: "roadmap_gate_progress",
-    columns: ["plan_id", "reached"],
-  },
-  {
     name: "idx_review_evidence_plan",
     table: "review_evidence_registry",
     columns: ["plan_id", "has_evidence"],
-  },
-  {
-    name: "idx_github_review_lane_subject",
-    table: "github_review_lane_receipts",
-    columns: ["plan_id", "plan_revision", "subject_head", "lane"],
   },
   {
     name: "idx_descent_obligation_trace_status",
@@ -236,36 +215,6 @@ export const HARNESS_DB_INDEXES: IndexDef[] = [
     name: "idx_spec_relations_to_kind",
     table: "spec_relations",
     columns: ["to_spec_id", "relation_kind"],
-  },
-  {
-    name: "idx_schedule_plan_status",
-    table: "schedule_entries",
-    columns: ["plan_id", "status", "rag"],
-  },
-  {
-    name: "idx_schedule_layer_subdoc_status",
-    table: "schedule_entries",
-    columns: ["layer", "sub_doc", "status"],
-  },
-  {
-    name: "idx_activation_profile_status",
-    table: "activation_entries",
-    columns: ["profile_id", "scope_status"],
-  },
-  {
-    name: "idx_activation_version_status",
-    table: "activation_entries",
-    columns: ["target_version", "scope_status"],
-  },
-  {
-    name: "idx_activation_schedule_plan_profile",
-    table: "activation_schedule_reviews",
-    columns: ["plan_id", "profile_id", "scope_status"],
-  },
-  {
-    name: "idx_activation_schedule_scope_rag",
-    table: "activation_schedule_reviews",
-    columns: ["scope_status", "rag", "enabled"],
   },
   {
     name: "idx_document_catalog_layer_subdoc",
@@ -342,11 +291,6 @@ export const HARNESS_DB_INDEXES: IndexDef[] = [
     name: "idx_document_scale_profile_axis_rank",
     table: "document_scale_profiles",
     columns: ["profile_axis", "profile_rank"],
-  },
-  {
-    name: "idx_execution_readiness_state_order",
-    table: "execution_readiness_projection",
-    columns: ["readiness", "implementation_order", "plan_id"],
   },
   {
     name: "idx_github_project_sync_status",

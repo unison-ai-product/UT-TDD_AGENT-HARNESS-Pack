@@ -4,7 +4,7 @@
 This project uses UT-TDD Agent Harness commands as the local orchestration surface.
 
 - Status: `ut-tdd status`
-- Setup doctor: `ut-tdd doctor --profile consumer-setup-smoke`
+- Setup doctor: `ut-tdd doctor --profile consumer-setup-smoke` (troubleshooting: https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/blob/main/docs/reference/setup-guide.md)
 - Toolchain doctor: `ut-tdd doctor --profile consumer-toolchain`
 - Full doctor: `ut-tdd doctor` (source/governance repositories only)
 - Handover: `ut-tdd handover`

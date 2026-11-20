@@ -3,7 +3,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   unlinkSync,
   utimesSync,
 } from "node:fs";
@@ -24,6 +23,7 @@ import {
 } from "../src/runtime/claude-memory-wake.ts";
 import { resolveProjectMemoryRoot } from "../src/runtime/project-memory-root.ts";
 import { ensureTrackedProjectIdentity } from "./support/project-identity-fixture.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const memory: MemoryEntry = {
   memory_id: "memory:project:terminal-gc",
@@ -127,7 +127,7 @@ describe("Claude inbox terminal GC", () => {
         pullRequest: { pr: 444, state: "MERGED", headSha: "d".repeat(40) },
       }),
     ).toEqual({ terminal: false });
-    rmSync(root, { recursive: true, force: true });
+    removeTestTree(root);
   });
 
   it("U-MEMTERM-003: dry-run predicts recovery and apply writes markers without deleting inbox evidence", async () => {
@@ -178,7 +178,7 @@ describe("Claude inbox terminal GC", () => {
       });
       expect(existsSync(markerPath ?? "")).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -242,7 +242,7 @@ describe("Claude inbox terminal GC", () => {
       expect(summary.pending).toBe(0);
       expect(summary.terminalized).toBe(2);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

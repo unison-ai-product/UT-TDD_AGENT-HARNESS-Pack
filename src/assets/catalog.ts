@@ -48,36 +48,8 @@ export interface SkillCatalogResult {
   optionalRoots: string[];
 }
 
-export interface RosterRegistryEntry {
-  id: string;
-  name: string;
-  path: string;
-  model: string;
-  model_family: "haiku" | "sonnet" | "opus" | "unknown";
-  allowlisted: boolean;
-}
-
-export interface RosterListResult {
-  ok: boolean;
-  entries: RosterRegistryEntry[];
-  count: number;
-}
-
-export interface RosterNameMismatch {
-  id: string;
-  name: string;
-  path: string;
-}
-
-export interface RosterCheckResult extends RosterListResult {
-  allowlistedPresent: number;
-  missingFromRoster: string[];
-  nameMismatches: RosterNameMismatch[];
-  nonAllowlisted: string[];
-}
-
 interface AssetSource {
-  type: "skill" | "roster" | "command";
+  type: "skill" | "command";
   root: string;
 }
 
@@ -90,7 +62,6 @@ function defaultSkillRoot(repoRoot: string): string {
 function assetSources(repoRoot: string): AssetSource[] {
   return [
     { type: "skill", root: defaultSkillRoot(repoRoot) },
-    { type: "roster", root: ".claude/agents" },
     { type: "command", root: "docs/commands" },
   ];
 }
@@ -187,20 +158,6 @@ function skillCatalogEntry(
     applies_layers: stringList(appliesTo.layers).sort(),
     applies_drive_models: stringList(appliesTo.drive_models).sort(),
   };
-}
-
-function modelFamily(raw: string): RosterRegistryEntry["model_family"] {
-  const hits: RosterRegistryEntry["model_family"][] = [];
-  if (/\bhaiku\b/i.test(raw)) hits.push("haiku");
-  if (/\bsonnet\b/i.test(raw)) hits.push("sonnet");
-  if (/\bopus\b/i.test(raw)) hits.push("opus");
-  return hits.length === 1 ? hits[0] : "unknown";
-}
-
-function defaultRosterRoot(repoRoot: string): string {
-  return existsSync(join(repoRoot, ".claude", "agents"))
-    ? join(".claude", "agents")
-    : join("docs", "templates", "adapter", ".claude", "agents");
 }
 
 export function scanSkillCatalog(
@@ -379,7 +336,7 @@ export function catalogAutomationAssets(input: CatalogAutomationAssetsInput): As
       // domain_tags / industry は situation 索引子なので trigger に畳み込み、scoreSkill の
       // metadata 重なり (de-saturate) と FTS tokens の双方へ流す (skill-index.md §5)。
       const trigger = [baseTrigger, domainTags.join(" "), industry].filter(Boolean).join(" ");
-      const role = frontmatterValue(content, "role") || (source.type === "roster" ? name : "");
+      const role = frontmatterValue(content, "role");
       const capability =
         frontmatterValue(content, "description") || `${source.type} metadata from ${rel}`;
       const skillType = source.type === "skill" ? String(metadata.skill_type ?? "") : "";
@@ -445,68 +402,5 @@ export function catalogAutomationAssets(input: CatalogAutomationAssetsInput): As
     findings: findings.sort(
       (a, b) => a.kind.localeCompare(b.kind) || a.subject_id.localeCompare(b.subject_id),
     ),
-  };
-}
-
-export function listRosterRegistry(input: {
-  repoRoot?: string;
-  allowlist?: Iterable<string>;
-}): RosterListResult {
-  const repoRoot = input.repoRoot ?? process.cwd();
-  const allowlist = new Set(input.allowlist ?? []);
-  const root = join(repoRoot, defaultRosterRoot(repoRoot));
-  const entries = assetFiles(root)
-    .filter((path) => /\.md$/i.test(path))
-    .map((path): RosterRegistryEntry => {
-      const content = readFileSync(path, "utf8");
-      const metadata = metadataFromContent(path, content);
-      const rel = normalizeRel(relative(repoRoot, path));
-      const id = filenameStem(path);
-      const name = typeof metadata.name === "string" && metadata.name ? metadata.name : id;
-      const model = typeof metadata.model === "string" ? metadata.model : "";
-      return {
-        id,
-        name,
-        path: rel,
-        model,
-        model_family: modelFamily(model),
-        allowlisted: allowlist.has(id),
-      };
-    })
-    .sort((a, b) => a.id.localeCompare(b.id));
-  return {
-    ok: entries.length > 0,
-    entries,
-    count: entries.length,
-  };
-}
-
-export function checkRosterConsistency(input: {
-  repoRoot?: string;
-  allowlist: Iterable<string>;
-}): RosterCheckResult {
-  const allowlist = [...input.allowlist].sort();
-  const listed = listRosterRegistry({ repoRoot: input.repoRoot, allowlist });
-  const byId = new Map(listed.entries.map((entry) => [entry.id, entry]));
-  const missingFromRoster = allowlist.filter((id) => !byId.has(id));
-  const nameMismatches = listed.entries
-    .filter((entry) => entry.name !== entry.id)
-    .map((entry) => ({ id: entry.id, name: entry.name, path: entry.path }));
-  const nonAllowlisted = listed.entries
-    .filter((entry) => !entry.allowlisted)
-    .map((entry) => entry.id)
-    .sort();
-  const allowlistedPresent = allowlist.length - missingFromRoster.length;
-  return {
-    ...listed,
-    ok:
-      listed.ok &&
-      missingFromRoster.length === 0 &&
-      nameMismatches.length === 0 &&
-      nonAllowlisted.length === 0,
-    allowlistedPresent,
-    missingFromRoster,
-    nameMismatches,
-    nonAllowlisted,
   };
 }

@@ -1,0 +1,102 @@
+/** Built-in fallback for the source template at docs/templates/github/common/harness-check.yml. */
+export const CONSUMER_CI_WORKFLOW = String.raw`
+name: harness-check
+env:
+  UT_TDD_CONSUMER_RUNTIME_VERSION: v0.2.0-canary.7
+  UT_TDD_CONSUMER_RUNTIME_DIGEST: sha256:bb00b13e38d5ac978f8e65e8091fa578aa1de4a3e981f67032c79bd54e8cd019
+on:
+  push:
+    branches: [main]
+  # universal PR trigger: pull_request は base 限定しない (stacked PR も発火)。
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-check-\${{ github.workflow }}-\${{ github.head_ref || github.ref }}
+  cancel-in-progress: \${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  harness-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.3"
+      - name: cache npm when a lockfile exists
+        if: \${{ hashFiles('package-lock.json') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.22.3"
+          cache: npm
+      - name: install dependencies when a lockfile exists
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          fi
+      - name: download pinned UT-TDD consumer runtime release assets
+        run: |
+          release_dir="$RUNNER_TEMP/ut-tdd-consumer-release"
+          mkdir -p "$release_dir"
+          for asset in \
+            "$UT_TDD_CONSUMER_RUNTIME_VERSION.tar.gz" \
+            "$UT_TDD_CONSUMER_RUNTIME_VERSION.tar.gz.sha256" \
+            "$UT_TDD_CONSUMER_RUNTIME_VERSION.ut-tdd.mjs" \
+            "$UT_TDD_CONSUMER_RUNTIME_VERSION.consumer-runtime.json" \
+            "$UT_TDD_CONSUMER_RUNTIME_VERSION.consumer.sha256"; do
+            curl -fsSL --retry 3 "https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/releases/download/$UT_TDD_CONSUMER_RUNTIME_VERSION/$asset" -o "$release_dir/$asset"
+          done
+      - name: install pinned UT-TDD consumer runtime
+        run: |
+          release_dir="$RUNNER_TEMP/ut-tdd-consumer-release"
+          node "$release_dir/$UT_TDD_CONSUMER_RUNTIME_VERSION.ut-tdd.mjs" setup --consumer-runtime-release "$release_dir" --expected-consumer-digest "$UT_TDD_CONSUMER_RUNTIME_DIGEST" --solo
+      - name: verify UT-TDD runtime activation
+        run: |
+          if [ ! -f ".ut-tdd/runtime/activation/active.json" ]; then
+            echo "::error::UT-TDD runtime activation is missing after release setup."
+            exit 1
+          fi
+      - name: fail if runtime setup dirtied the checkout
+        run: |
+          status="$(git status --porcelain)" || {
+            echo "::error::Unable to inspect consumer checkout after runtime setup."
+            exit 1
+          }
+          if [ -n "$status" ]; then
+            git status --short
+            echo "::error::UT-TDD runtime setup modified the consumer checkout."
+            exit 1
+          fi
+      - name: branch-type guard
+        env:
+          HEAD_REF: \${{ github.head_ref || github.ref_name }}
+          BASE_REF: \${{ github.base_ref || 'main' }}
+          PR_TITLE: \${{ github.event_name == 'pull_request' && github.event.pull_request.title || '' }}
+          PR_BODY: \${{ github.event.pull_request.body || '' }}
+        run: |
+          printf '%s\n' "$PR_BODY" > .ut-tdd-pr-body.txt
+          node .ut-tdd/bin/ut-tdd.mjs github guard --head-ref "$HEAD_REF" --base-ref "$BASE_REF" --pr-title "$PR_TITLE" --pr-body-file .ut-tdd-pr-body.txt
+      - name: typecheck when the consumer defines the script
+        run: |
+          if [ -f package.json ] && node -e "const scripts = require('./package.json').scripts || {}; process.exit(scripts.typecheck ? 0 : 1)"; then
+            npm run typecheck
+          fi
+      - name: test when the consumer defines the script
+        run: |
+          if [ -f package.json ] && node -e "const scripts = require('./package.json').scripts || {}; process.exit(scripts.test ? 0 : 1)"; then
+            npm run test
+          fi
+      - name: audit quality
+        run: node .ut-tdd/bin/ut-tdd.mjs audit quality --include-tests --limit 20
+      # Consumer CI gate is doctor --setup-smoke: full doctor asserts source-repo
+      # self-application state (governance/design/test-design corpus) and is structurally red
+      # on a fresh consumer repository (A-172 C-1).
+      - name: setup smoke
+        run: node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+`
+  .slice(1)
+  .replaceAll("\\${{", "${{");

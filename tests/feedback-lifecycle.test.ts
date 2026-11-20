@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -18,6 +18,7 @@ import {
 } from "../src/state-db/feedback-projections.ts";
 import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
 import { migrate } from "../src/state-db/migration.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 describe("feedback lifecycle", () => {
   const open = {
@@ -93,7 +94,7 @@ describe("feedback lifecycle", () => {
       writeFileSync(blockedRoot, "blocked", "utf8");
       expect(appendFeedbackLifecycle(blockedRoot, open)).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -109,7 +110,7 @@ describe("feedback lifecycle", () => {
         parseFeedbackLifecycle(readFileSync(feedbackLifecyclePath(root), "utf8")),
       ).toHaveLength(1_000);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -257,7 +258,7 @@ describe("feedback lifecycle", () => {
       });
     } finally {
       db.close();
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -305,7 +306,7 @@ describe("feedback lifecycle", () => {
       });
     } finally {
       db.close();
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

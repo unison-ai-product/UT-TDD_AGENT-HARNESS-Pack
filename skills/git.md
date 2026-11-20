@@ -50,7 +50,7 @@ PR rules for UT-TDD (FR-L1-17 version control).
 
 ## When to load this skill
 
-- Preparing a commit after implementing or reviewing a PLAN.
+- Preparing a commit after implementing or reviewing an Issue.
 - A CI `branch-type guard` (`commitlint-invalid`) rejection needs diagnosis.
 - A push will touch `.github/workflows/` and needs a workflow-scoped token.
 - A CI `harness-check` failure must be resolved before gate clearance.
@@ -70,7 +70,7 @@ does not (`commitlint-invalid`; regex `CONVENTIONAL_COMMIT_RE` at
 [optional footer]
 ```
 
-Allowed types are those in `CONVENTIONAL_COMMIT_RE`. Scope is the PLAN ID or module name (e.g., `PLAN-L7-44`,
+Allowed types are those in `CONVENTIONAL_COMMIT_RE`. Scope is the module name or Issue number (e.g., `state-db`,
 `projection-writer`). The short description is imperative mood, no trailing
 period.
 
@@ -79,7 +79,7 @@ here-strings are not reliable for this:
 
 ```bash
 git commit -F - <<'EOF'
-feat(PLAN-L7-44): add harness.db projection for model_runs
+feat(state-db): add harness.db projection for model_runs
 
 Implements FR-L1-38 cost telemetry capture.
 EOF
@@ -98,7 +98,7 @@ git status
 git diff --stat
 ```
 
-Confirm the diff contains only the files for the current PLAN.
+Confirm the diff contains only the files for the current Issue.
 
 ## harness-check CI gates
 
@@ -114,7 +114,7 @@ lint :155) and described in `ci-gate-design`. Run them locally before pushing
   merge only via `ut-tdd pr merge --pr <N>`. PR scope (1 PR = 1 論点) and
   post-FLAG corrections in the same PR follow `CLAUDE.md` §Git Rules and
   §PR スコープ規律 / §FLAG 後の限定是正と merge (not restated here).
-- Branch names follow `<type>/<slug>` (e.g., `feat/plan-l7-44-projection`).
+- Branch names follow `<type>/<slug>` (e.g., `feat/gate-run-projection`).
 
 ## Pushing with workflow changes
 
@@ -127,9 +127,27 @@ workflow-scoped tokens in config files or environment variables.
 
 - [ ] `npm run typecheck` exits 0.
 - [ ] `npm run lint` (Biome check + format) exits 0.
-- [ ] `npm run test` (Vitest) exits 0 with no skipped tests in PLAN scope.
+- [ ] `npm run test` (Vitest) exits 0 with no skipped tests in the scoped tests.
 - [ ] `ut-tdd doctor` exits 0.
-- [ ] `git diff --stat HEAD` shows only PLAN-scoped files.
+- [ ] `git diff --stat HEAD` shows only files in the Issue scope.
 - [ ] Commit subject matches Conventional Commits (CI `commitlint-invalid`).
 - [ ] If `.github/workflows/` touched: workflow-scoped PAT is in use and will be
       removed after push.
+
+## Removing a worktree (node_modules junction)
+
+A worktree's `node_modules` is one of three things: a junction/symlink to the primary checkout, an
+independent copy, or absent. Entry counts (`ls | wc -l`) and appearance cannot tell the first two
+apart. Running `git worktree remove` (with or without `--force`) on a worktree whose `node_modules`
+is a junction follows the link and empties the primary's `node_modules`, so every CLI start then
+fails with `ERR_MODULE_NOT_FOUND`.
+
+1. Probe, non-destructively: create a temporary file under the primary's `node_modules` and check
+   whether the same path appears in the worktree's `node_modules` (SHARED vs independent). Remove the
+   probe file afterwards.
+2. If SHARED, unlink only the link with `rmdir` (never `rm -rf`) before `git worktree remove`. After
+   the unlink, confirm the junction is really gone before the next step; do not chain `rmdir` and
+   `git worktree remove --force` unconditionally with `;`.
+3. After removal, verify the primary: its `node_modules` entry count and a CLI start such as
+   `node src/cli.ts --help`. Do not treat the remove command's exit code as the success signal.
+4. Recovery is `npm ci` (the lockfile is the source of truth), seconds to minutes.

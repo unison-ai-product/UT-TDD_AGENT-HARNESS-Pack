@@ -47,6 +47,12 @@ or two regressions in the last three changes for the same module. These
 thresholds create Refactor candidates; they do not automatically authorize a
 behaviour change.
 
+These thresholds are Refactor trigger points, not design upper limits. The
+design limits and guidelines live in the section "量・分割・Refactor の目安" of
+`docs/governance/coding-rules.md`; do not copy its values here. Because PLAN
+authoring is frozen (#1166), read "PLAN" below as "Refactor Issue and design
+document" for new work; existing PLAN wording is kept as is.
+
 ## 2. TDD Brush-up Loop
 
 Refactor uses a TDD-like loop, but its Red is a structural smell or dependency

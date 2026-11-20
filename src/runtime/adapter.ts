@@ -1,6 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join, win32 } from "node:path";
+import { compare } from "semver";
+import { modelOverrideSchema, reasoningEffortSchema } from "../schema/team.ts";
 import {
   ADAPTER_AVAILABLE_MESSAGE,
   ADAPTER_CONTEXT_HEADER,
@@ -144,7 +146,7 @@ function newestExisting(paths: string[]): string | null {
 }
 
 /** Native binary candidate with a source-specific extracted version (A-137 #6). */
-interface VersionedCandidate {
+export interface VersionedCandidate {
   path: string;
   version: string;
 }
@@ -161,16 +163,31 @@ function parseVersion(version: string): number[] {
   });
 }
 
-/** Numeric semver comparison; negative means `a` is older. Missing parts are 0. */
-function compareVersion(a: string, b: string): number {
-  const left = parseVersion(a);
-  const right = parseVersion(b);
+/** Compare numeric parts from `from` on; missing parts are 0, a shared `Infinity` ends the comparison at 0. */
+function compareParts(left: number[], right: number[], from: number): number {
   const length = Math.max(left.length, right.length);
-  for (let index = 0; index < length; index++) {
-    const diff = (left[index] ?? 0) - (right[index] ?? 0);
+  for (let index = from; index < length; index++) {
+    const l = left[index] ?? 0;
+    const r = right[index] ?? 0;
+    const diff = l - r;
+    if (Number.isNaN(diff)) return 0;
     if (diff !== 0) return diff;
   }
   return 0;
+}
+
+/**
+ * Numeric semver comparison; negative means `a` is older. Missing parts are 0.
+ * The first three parts go through `semver.compare` when all are safe integers;
+ * otherwise (and for 4th+ parts) the numeric comparison is used.
+ */
+export function compareLenientVersion(a: string, b: string): number {
+  const left = parseVersion(a);
+  const right = parseVersion(b);
+  const core = (parts: number[]) => [0, 1, 2].map((index) => parts[index] ?? 0);
+  const [leftCore, rightCore] = [core(left), core(right)];
+  if (![...leftCore, ...rightCore].every(Number.isSafeInteger)) return compareParts(left, right, 0);
+  return compare(leftCore.join("."), rightCore.join(".")) || compareParts(left, right, 3);
 }
 
 /**
@@ -178,12 +195,12 @@ function compareVersion(a: string, b: string): number {
  * Lexicographic sort misorders `1.10.0` and `1.9.0`, and mixed-source paths
  * can otherwise dominate comparison. Equal versions keep the earlier source.
  */
-function newestVersioned(candidates: VersionedCandidate[]): string | null {
+export function newestVersioned(candidates: VersionedCandidate[]): string | null {
   const existing = candidates.filter((candidate) => existsSync(candidate.path));
   if (existing.length === 0) return null;
   let best = existing[0];
   for (const candidate of existing.slice(1)) {
-    if (compareVersion(candidate.version, best.version) > 0) best = candidate;
+    if (compareLenientVersion(candidate.version, best.version) > 0) best = candidate;
   }
   return best.path;
 }
@@ -288,6 +305,8 @@ function windowsCommandProcessor(opts: ProviderCommandResolutionOptions = {}): s
   return env.ComSpec ?? win32.join(env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
 }
 
+const CMD_TOKEN_PERCENT_MESSAGE = "provider_cmd_token_percent_forbidden";
+
 function quoteCmdToken(arg: string): string {
   return `"${arg.replace(/"/g, '""')}"`;
 }
@@ -297,6 +316,10 @@ export function buildProviderInvocation(input: ProviderInvocationInput): Provide
   const platform = opts.platform ?? process.platform;
   const resolved = resolveProviderCommand(provider, command, opts);
   if (platform === "win32" && isWindowsCommandScript(resolved)) {
+    // cmd.exe は引用符内でも %VAR% を展開するため、quote / join より前に拒否する。
+    if ([resolved, ...args].some((token) => token.includes("%"))) {
+      throw new Error(CMD_TOKEN_PERCENT_MESSAGE);
+    }
     const innerCommand = [quoteCmdToken(resolved), ...args.map(quoteCmdToken)].join(" ");
     return {
       command: windowsCommandProcessor(opts),
@@ -329,23 +352,23 @@ export function isProviderCommandSpawnable(
   opts: ProviderProbeOptions = {},
 ): boolean {
   const env = opts.env ?? process.env;
-  const invocation = buildProviderInvocation({
-    provider,
-    command: provider,
-    args: ["--version"],
-    opts,
-  });
   const runProbe =
     opts.runProbe ??
     ((input: ProviderProbeInput) => spawnSync(input.command, input.args, input.options));
-  const probeOptions: ProviderProbeSpawnOptions = {
-    env,
-    stdio: "ignore",
-    shell: invocation.shell ?? false,
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
-    windowsHide: true,
-  };
   try {
+    const invocation = buildProviderInvocation({
+      provider,
+      command: provider,
+      args: ["--version"],
+      opts,
+    });
+    const probeOptions: ProviderProbeSpawnOptions = {
+      env,
+      stdio: "ignore",
+      shell: invocation.shell ?? false,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments ?? false,
+      windowsHide: true,
+    };
     return (
       runProbe({
         command: invocation.command,
@@ -359,7 +382,33 @@ export function isProviderCommandSpawnable(
   }
 }
 
+function invalidInputDiagnostic(intent: AdapterIntent): string | undefined {
+  if (intent.model !== undefined && !modelOverrideSchema.safeParse(intent.model).success) {
+    return "provider_model_invalid";
+  }
+  if (intent.effort !== undefined && !reasoningEffortSchema.safeParse(intent.effort).success) {
+    return "provider_effort_invalid";
+  }
+  return undefined;
+}
+
 export function buildAdapterPlan(intent: AdapterIntent, mode: ExecutionMode): AdapterPlan {
+  const invalid = invalidInputDiagnostic(intent);
+  if (invalid) {
+    return {
+      provider: intent.provider,
+      available: false,
+      command: intent.provider,
+      args: [],
+      stdin: formatAdapterPrompt(intent.task, intent.contextInjection),
+      dry_run: !intent.execute,
+      plan_id: intent.planId,
+      model: intent.model,
+      effort: intent.effort,
+      context_injection: intent.contextInjection,
+      messages: [invalid],
+    };
+  }
   const available = providerAvailable(intent.provider, mode);
   const isCodex = intent.provider === "codex";
   const providerEffort = normalizeProviderEffort(intent.provider, intent.effort);

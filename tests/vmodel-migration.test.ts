@@ -3,19 +3,21 @@ import { SCHEMA_VERSION } from "../src/schema/harness-db.ts";
 import { openHarnessDb } from "../src/state-db/index.ts";
 import { migrate } from "../src/state-db/migration.ts";
 
+const LEGACY_V25_PROJECTION_DDLS = [
+  "CREATE TABLE document_catalog_entries (document_catalog_entry_id TEXT PRIMARY KEY, doc_type_id TEXT)",
+  "CREATE TABLE document_scale_profile_entries (document_scale_profile_entry_id TEXT PRIMARY KEY, profile_id TEXT, doc_type_id TEXT)",
+  "CREATE TABLE document_scale_profile_reviews (document_scale_profile_review_id TEXT PRIMARY KEY)",
+] as const;
+
+function createV25LegacyProjectionTables(db: ReturnType<typeof openHarnessDb>): void {
+  for (const ddl of LEGACY_V25_PROJECTION_DDLS) db.exec(ddl);
+}
+
 describe("V-model version 26 projection migration", () => {
   it("rebuilds derived profile tables with typed constraints instead of nullable ALTER", () => {
     const db = openHarnessDb(":memory:");
     try {
-      db.exec(
-        "CREATE TABLE document_catalog_entries (document_catalog_entry_id TEXT PRIMARY KEY, doc_type_id TEXT)",
-      );
-      db.exec(
-        "CREATE TABLE document_scale_profile_entries (document_scale_profile_entry_id TEXT PRIMARY KEY, profile_id TEXT, doc_type_id TEXT)",
-      );
-      db.exec(
-        "CREATE TABLE document_scale_profile_reviews (document_scale_profile_review_id TEXT PRIMARY KEY)",
-      );
+      createV25LegacyProjectionTables(db);
       db.exec("INSERT INTO document_catalog_entries VALUES ('old','DOC-OLD')");
       db.setUserVersion(25);
       const result = migrate(db);

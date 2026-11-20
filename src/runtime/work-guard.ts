@@ -8,7 +8,8 @@
  * in-flight 成果と推定) への Edit/Write を block** し、意図的な編集は override (+evidence)
  * を要求する。これにより「相手の成果の上に積む / 触る前に確認」を機械で担保する。
  *
- * 判定本体は純関数。git / session-log / env の I/O は hook 側 (.claude/hooks/work-guard.ts)。
+ * 判定本体は純関数。git / session-log / env の I/O は hook 側 (source repo は .claude/hooks/work-guard.ts、
+ * 導入先 (Pack consumer) は setup が生成する settings.json の command から `.ut-tdd/bin/ut-tdd.mjs hook work-guard`)。
  */
 
 export { extractEditTargets, normalizeRepoRelative } from "../shared/edit-targets.ts";

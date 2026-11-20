@@ -67,9 +67,9 @@ artifacts.
 - Judging whether a diagnosis or QA checklist row is genuinely satisfied, or
   is just formally filled in.
 - All tests pass on the first run and something about that feels too easy.
-- Deciding how much test depth a PLAN's scope actually warrants under a
+- Deciding how much test depth the Issue's scope actually warrants under a
   limited budget.
-- Deciding whether test coverage for a PLAN is sufficient to close it out.
+- Deciding whether test coverage for an Issue is sufficient to close it out.
 
 ## Boundary with existing skills
 
@@ -279,7 +279,7 @@ than implicitly:
   remains undiagnosed; if it breaks, the impact is Y; detection would come
   from Z (a monitoring signal, an alert, a support report)." If that sentence
   cannot be written, the stop decision was made too casually. When it can be
-  written, record it as part of the PLAN's `review_evidence` or the release
+  written, record it as part of the PR's review evidence or the release
   Go/No-Go record.
 
 ## Mapping to UT-TDD
@@ -293,8 +293,8 @@ than implicitly:
   section 4 self-challenge ("can I construct a counterexample") before
   treating a green gate as sufficient — the same distinction the
   [verification](verification.md) skill draws between coverage and substance.
-- Residual-risk sentences from section 5 belong in the PLAN's
-  `review_evidence` at review/accept gates, and in a release Go/No-Go record
+- Record section 5 residual risks in the PR's review evidence at review/accept
+  gates and in a release Go/No-Go record
   where the harness maintains one.
 
 ## Anti-patterns

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parseDocument, parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { analyzeGithubCiPolicy, type GithubWorkflowDoc } from "./github-ci-policy.ts";
 import {
@@ -75,6 +75,29 @@ const nodeBanProcessObservationSchema = z
     reason: z.string().min(1),
   })
   .strict();
+const nodeInvocationProbeCheckSchemas = [
+  z.object({ id: z.literal("invocation-options"), result: z.literal("passed") }).strict(),
+  z.object({ id: z.literal("compiled-cli-argv0"), result: z.literal("passed") }).strict(),
+  z.object({ id: z.literal("node-path-absolute"), result: z.literal("passed") }).strict(),
+  z.object({ id: z.literal("compiled-cli-path-absolute"), result: z.literal("passed") }).strict(),
+] as const;
+const nodeInvocationProbeResultSchema = z
+  .object({
+    schema: z.literal("node-invocation-probe-result/v1"),
+    candidate_id: z.literal("CAND-NODEBOOT-201"),
+    probe_id: z.literal("CAND-NODEBOOT-201/P1"),
+    test_source: z.literal("src/cli.ts#audit node-invocation-probe"),
+    production_target: z.literal("src/runtime/node-bootstrap.ts#createNodeInvocation"),
+    generation_id: z.string().min(1),
+    subject_revision: nodeBanRevisionSchema,
+    compiled_cli_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    executed: z.literal(1),
+    passed: z.literal(1),
+    failed: z.literal(0),
+    skipped: z.literal(0),
+    checks: z.tuple([...nodeInvocationProbeCheckSchemas]),
+  })
+  .strict();
 const nodeBanAuditReceiptSchema = z
   .object({
     schema_version: z.literal(nodeBanAuditSchemaVersion),
@@ -112,6 +135,13 @@ export interface NodeBanProcessObservation {
   readonly outcome: "allowed" | "blocked";
   readonly spawned: boolean;
   readonly reason: string;
+}
+export interface NodeBanTestProbeOutcome {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly status: number | null;
+  readonly spawnError: string | null;
+  readonly timedOut: boolean;
 }
 export type NodeBanProcessClassifier = (
   command: string,
@@ -242,6 +272,7 @@ export interface NodeBanAuditInput {
   readonly observedScopes: readonly NodeBanRuntimeScope[];
   /** Runtime-specific classification is injected at the composition boundary. */
   readonly classifyProcess: NodeBanProcessClassifier;
+  readonly testProbeOutcome?: NodeBanTestProbeOutcome;
 }
 
 export interface NodeBanAuditResult {
@@ -510,6 +541,56 @@ function validateObservationCoverage(input: NodeBanAuditInput): void {
     throw new NodeBanAuditError("q0-runtime-observer-scope-mismatch");
 }
 
+function hasValidTestProbeOutcomeShape(
+  outcome: NodeBanTestProbeOutcome | undefined,
+): outcome is NodeBanTestProbeOutcome {
+  if (
+    !outcome ||
+    typeof outcome.stdout !== "string" ||
+    typeof outcome.stderr !== "string" ||
+    (outcome.status !== null && typeof outcome.status !== "number") ||
+    (outcome.spawnError !== null && typeof outcome.spawnError !== "string") ||
+    typeof outcome.timedOut !== "boolean"
+  )
+    return false;
+  return true;
+}
+
+function isSuccessfulTestProbeOutcome(outcome: NodeBanTestProbeOutcome): boolean {
+  return (
+    outcome.status === 0 &&
+    outcome.spawnError === null &&
+    !outcome.timedOut &&
+    outcome.stdout.length > 0
+  );
+}
+
+function validateTestProbeOutcome(input: NodeBanAuditInput): void {
+  const outcome = input.testProbeOutcome;
+  if (!hasValidTestProbeOutcomeShape(outcome) || !isSuccessfulTestProbeOutcome(outcome))
+    throw new NodeBanAuditError("q0-node-invocation-probe-outcome-invalid");
+
+  let parsed: unknown;
+  try {
+    JSON.parse(outcome.stdout);
+    const document = parseDocument(outcome.stdout, { schema: "json", uniqueKeys: true });
+    if (document.errors.length > 0)
+      throw new NodeBanAuditError("q0-node-invocation-probe-json-invalid");
+    parsed = document.toJS();
+  } catch {
+    throw new NodeBanAuditError("q0-node-invocation-probe-json-invalid");
+  }
+
+  const probe = nodeInvocationProbeResultSchema.safeParse(parsed);
+  if (!probe.success) throw new NodeBanAuditError("q0-node-invocation-probe-schema-invalid");
+  if (
+    probe.data.generation_id !== input.node.generation_id ||
+    probe.data.subject_revision !== input.subjectRevision ||
+    `sha256:${probe.data.compiled_cli_sha256}` !== input.node.artifact_digest
+  )
+    throw new NodeBanAuditError("q0-node-invocation-probe-binding-mismatch");
+}
+
 function coverage(
   documents: NodeBanDocuments,
   observations: readonly NodeBanProcessObservation[],
@@ -646,6 +727,7 @@ function makeReceipt(input: NodeBanAuditInput, documents: NodeBanDocuments): Nod
 export function runNodeBanAudit(input: NodeBanAuditInput): NodeBanAuditResult {
   validateBinding(input);
   validateObservationCoverage(input);
+  validateTestProbeOutcome(input);
   const documents = input.documents ?? loadNodeBanDocuments(input.repoRoot);
   const receipt = makeReceipt(input, documents);
   return { receipt, findings: receipt.findings };

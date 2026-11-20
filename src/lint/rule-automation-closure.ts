@@ -35,7 +35,8 @@ export interface RuleAutomationClosureResult {
   ok: boolean;
 }
 
-const SECTION_RE = /^##\s+Section\s+2\.3\s+Rule Automation Closure Required\s*$/m;
+const SECTION_RE =
+  /^##\s+(?:Section\s+2\.3\s+Rule Automation Closure Required|§2\.3 規則の自動化責務割当てを必須とする)\s*$/m;
 const NEXT_SECTION_RE = /^##\s+/m;
 const VALID_STATUSES = new Set<RuleAutomationStatus>([
   "closed",
@@ -46,6 +47,11 @@ const VALID_STATUSES = new Set<RuleAutomationStatus>([
 ]);
 const OWNER_PATTERN =
   /\b(doctor|plan-?lint|vmodel|hook|db|database|ci|projection|writer|analyzer|checker|lint|handover|fr-roadmap-coverage)\b/i;
+const JAPANESE_OWNER_PATTERN = /投影|書込み|解析器|チェッカー|検査器|引継ぎ/;
+
+function hasAutomationOwner(owner: string): boolean {
+  return OWNER_PATTERN.test(owner) || JAPANESE_OWNER_PATTERN.test(owner);
+}
 
 function section(content: string): string {
   const match = content.match(SECTION_RE);
@@ -96,9 +102,13 @@ export function analyzeRuleAutomationClosure(
     }
 
     const header = parsed[0].map((cell) => cell.toLowerCase());
-    const ruleIndex = header.indexOf("rule");
-    const ownerIndex = header.indexOf("required automation owner");
-    const statusIndex = header.indexOf("current status");
+    const ruleIndex = header.findIndex((cell) => cell === "rule" || cell === "規則");
+    const ownerIndex = header.findIndex(
+      (cell) => cell === "required automation owner" || cell === "必須の自動化責務",
+    );
+    const statusIndex = header.findIndex(
+      (cell) => cell === "current status" || cell === "現在の状態",
+    );
     if (ruleIndex < 0 || ownerIndex < 0 || statusIndex < 0) {
       violations.push({ file: doc.file, reason: "malformed_row" });
       continue;
@@ -116,7 +126,7 @@ export function analyzeRuleAutomationClosure(
         violations.push({ file: doc.file, rule, reason: "missing_owner" });
         continue;
       }
-      if (!OWNER_PATTERN.test(owner)) {
+      if (!hasAutomationOwner(owner)) {
         violations.push({ file: doc.file, rule, reason: "unknown_owner" });
         continue;
       }
@@ -142,11 +152,12 @@ export function analyzeRuleAutomationClosure(
 export function loadRuleAutomationClosureDocs(
   repoRoot: string = process.cwd(),
 ): RuleAutomationClosureDoc[] {
-  const target = join(repoRoot, "docs", "plans", "PLAN-L3-04-upstream-schedule-reconciliation.md");
+  const file = "docs/design/harness/L3-functional/upstream-schedule-reconciliation.md";
+  const target = join(repoRoot, ...file.split("/"));
   if (!existsSync(target)) return [];
   return [
     {
-      file: join("docs", "plans", "PLAN-L3-04-upstream-schedule-reconciliation.md"),
+      file,
       content: readFileSync(target, "utf8"),
     },
   ];

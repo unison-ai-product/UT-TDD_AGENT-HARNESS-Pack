@@ -183,3 +183,135 @@ export function parse(): never {
     expect(result.violations).toEqual([]);
   });
 });
+
+describe("U-CODE-011 test-title literal recognition", () => {
+  const fixturePath = "src/candidate-title.ts";
+  const machineText = ["bad-rule", " — ", "警告", ": ", "日本語だけ", "の判定語"].join("");
+  const literalKinds = ["string", "template"] as const;
+  type LiteralKind = (typeof literalKinds)[number];
+  const literal = (kind: LiteralKind, value: string): string =>
+    kind === "string" ? JSON.stringify(value) : `\`${value}\``;
+  const fixtureResult = (text: string) =>
+    analyzeCodingRules([{ path: fixturePath, scope: "source", text }]);
+  const expectExempt = (text: string): void => {
+    const result = fixtureResult(text);
+    expect(result.violations).toEqual([]);
+  };
+  const expectLanguageViolation = (text: string, count = 1): void => {
+    const result = fixtureResult(text);
+    expect(result.violations.map(({ path, rule }) => ({ path, rule }))).toEqual(
+      Array.from({ length: count }, () => ({
+        path: fixturePath,
+        rule: "machine-surface-language",
+      })),
+    );
+  };
+
+  const modifierCalls = ["describe", "it", "test"].flatMap((receiver) =>
+    ["fails", "skip", "only", "todo"].map((modifier) => ({
+      name: `${receiver}.${modifier}`,
+      expression: `${receiver}.${modifier}`,
+    })),
+  );
+  const eachCalls = [
+    { name: "describe.each", expression: "describe.each(data)(TITLE)" },
+    { name: "it.each", expression: "it.each(data)(TITLE)" },
+    { name: "test.each", expression: "test.each(data)(TITLE)" },
+    { name: "it.fails.each", expression: "it.fails.each(data)(TITLE)" },
+  ];
+
+  const missingPositiveCases = [
+    ...modifierCalls.flatMap(({ name, expression }) =>
+      literalKinds.map((kind) => ({
+        name: `${name} title ${kind}`,
+        kind,
+        text: `${expression}(${literal(kind, machineText)});`,
+      })),
+    ),
+    ...eachCalls.flatMap(({ name, expression }) =>
+      literalKinds.map((kind) => ({
+        name: `${name} returned-call title ${kind}`,
+        kind,
+        text: `${expression.replace("TITLE", literal(kind, machineText))};`,
+      })),
+    ),
+  ];
+
+  for (const candidate of missingPositiveCases) {
+    it(`U-CODE-011: candidate exemption ${candidate.name}`, () => {
+      expectExempt(candidate.text);
+    });
+  }
+
+  for (const receiver of ["describe", "it", "test"]) {
+    for (const kind of literalKinds) {
+      it(`U-CODE-011: existing bare ${receiver} title ${kind}`, () => {
+        expectExempt(`${receiver}(${literal(kind, machineText)});`);
+      });
+    }
+  }
+
+  for (const candidate of missingPositiveCases) {
+    it(`U-CODE-011: fixture prerequisite ${candidate.name}`, () => {
+      expectLanguageViolation(`const message = ${literal(candidate.kind, machineText)};`);
+    });
+  }
+
+  for (const { name, expression } of eachCalls) {
+    for (const kind of literalKinds) {
+      it(`U-CODE-011: data is not a ${name} title (${kind})`, () => {
+        const fixture = expression
+          .replace("(data)", `(${literal(kind, machineText)})`)
+          .replace("(TITLE)", '("neutral")');
+        expectLanguageViolation(`${fixture};`);
+      });
+    }
+  }
+
+  const negativeLiteralCases = [
+    ...literalKinds.flatMap((kind) => {
+      const value = literal(kind, machineText);
+      return [
+        { name: `unknown receiver ${kind}`, text: `unknownReceiver(${value});` },
+        {
+          name: `unknown receiver modifier chain ${kind}`,
+          text: `unknownReceiver.skip(${value});`,
+        },
+        {
+          name: `unknown receiver each chain ${kind}`,
+          text: `unknownReceiver.each(data)(${value});`,
+        },
+        { name: `unlisted modifier ${kind}`, text: `it.concurrent(${value});` },
+        { name: `other chain ${kind}`, text: `it.each(data).skip(${value});` },
+        { name: `namespace receiver ${kind}`, text: `vitest.it(${value});` },
+        { name: `namespace modifier chain ${kind}`, text: `vitest.it.skip(${value});` },
+        { name: `test fails each chain ${kind}`, text: `test.fails.each(data)(${value});` },
+        { name: `describe fails each chain ${kind}`, text: `describe.fails.each(data)(${value});` },
+        { name: `it only each chain ${kind}`, text: `it.only.each(data)(${value});` },
+        { name: `title outside call ${kind}`, text: `const message = ${value}; it("neutral");` },
+        { name: `second argument ${kind}`, text: `it("neutral", ${value});` },
+        { name: `modifier second argument ${kind}`, text: `it.skip("neutral", ${value});` },
+        {
+          name: `each returned-call second argument ${kind}`,
+          text: `it.each(data)("neutral", ${value});`,
+        },
+      ];
+    }),
+  ];
+  for (const candidate of negativeLiteralCases) {
+    it(`U-CODE-011: negative boundary ${candidate.name}`, () => {
+      expectLanguageViolation(candidate.text);
+    });
+  }
+
+  for (const kind of literalKinds) {
+    it(`U-CODE-011: dynamic title expression remains checked (${kind})`, () => {
+      expectLanguageViolation(`it(${literal(kind, machineText)} + suffix);`);
+    });
+  }
+
+  it(`U-CODE-011: template expression remains checked`, () => {
+    const expression = ["bad-rule — ", "警告", ": $", "{value}"].join("");
+    expectLanguageViolation(`it(\`${expression}\`);`);
+  });
+});

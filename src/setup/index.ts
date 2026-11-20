@@ -26,32 +26,49 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { parseNodeBootstrapReceiptBytes } from "../runtime/node-bootstrap.ts";
+import { GH_COMMAND_TIMEOUT_MS, ghCommandEnv } from "../github/gh-command.ts";
 import { ensureDir } from "../shared/fs.ts";
 import {
   applyBranchProtection as applyBranchProtectionImpl,
   type Confirm,
   type GhRunner,
 } from "./branch-protection.ts";
-import {
-  admitConsumerLocalRuntime,
-  type ConsumerLocalRuntimeAdmission,
-  type ConsumerLocalRuntimeAdmissionInput,
-  isConsumerLocalRuntimeAdmission,
-} from "./consumer-local-runtime-admission.ts";
+import { preserveConsumerCiPins } from "./consumer-ci-pins.ts";
+import { isConsumerLocalRuntimeAdmission } from "./consumer-local-runtime-admission.ts";
 import {
   buildConsumerNodeRuntimeBundle,
   buildConsumerNodeRuntimePayloads,
   type ConsumerNodeRuntimeBundle,
   type ConsumerNodeRuntimeIdentity,
-  type ConsumerNodeRuntimeInstallResult,
   digestConsumerRuntimeBytes,
   digestConsumerRuntimeValue,
   installConsumerNodeRuntimeOnFilesystem,
   renderConsumerNodeWrapper,
   validateConsumerNodeRuntimeBundle,
 } from "./consumer-node-runtime.ts";
+import type {
+  ConsumerRuntimeReleaseInstallResult,
+  SetupConsumerRuntimeInput,
+  SetupConsumerRuntimeInstall,
+  SetupResult,
+} from "./consumer-runtime-contracts.ts";
+import {
+  admitConsumerRuntimeIdentity,
+  cacheAlreadyInstalledRuntime,
+  completeConsumerRuntimeInstallation,
+  consumerReleaseAttestation,
+  createSetupConsumerRuntimeInput,
+  parseConsumerRuntimeReceipt,
+  sameCanonicalSetupPath,
+} from "./consumer-runtime-install.ts";
 import { verifyConsumerRuntimeReleaseAssets } from "./consumer-runtime-release.ts";
+import { createConsumerRuntimeOnlyInstaller } from "./consumer-runtime-transaction.ts";
+import {
+  assertConsumerRuntimePinMatches,
+  type ConsumerRuntimePin,
+  createConsumerRuntimePin,
+  setupConsumerWorktreeRuntime as setupConsumerWorktreeRuntimeImpl,
+} from "./consumer-worktree-runtime.ts";
 import {
   bootstrapProjectIdentity,
   PROJECT_IDENTITY_PATH,
@@ -61,7 +78,6 @@ import {
   admitReleaseAggregate,
   type ReleaseAggregateAdmissionInput,
 } from "./release-aggregate-admission.ts";
-import type { ReleaseChannelAttestation } from "./release-channel-adapter.ts";
 
 export {
   AUTHORING_TEMPLATE_ARTIFACT_PATHS,
@@ -119,6 +135,12 @@ export {
   validateConsumerNodeRuntimeBundle,
   validateConsumerReadiness,
 } from "./consumer-node-runtime.ts";
+export type {
+  ConsumerRuntimeReleaseInstallResult,
+  SetupConsumerRuntimeInput,
+  SetupConsumerRuntimeInstall,
+  SetupResult,
+} from "./consumer-runtime-contracts.ts";
 export {
   buildConsumerRuntimeRelease,
   type ConsumerRuntimeRelease,
@@ -289,19 +311,6 @@ export interface SetupArgs {
   consumerRuntime?: SetupConsumerRuntimeInput;
 }
 
-export interface SetupResult {
-  phase: SetupPhase;
-  written: string[];
-  branchProtection: { applied: boolean; reason: string };
-  notices?: string[];
-  projectIdentity?: ProjectIdentityBootstrapResult;
-  consumerRuntime?: SetupConsumerRuntimeInstall;
-}
-
-export type ConsumerRuntimeReleaseInstallResult =
-  | { readonly status: "installed"; readonly setup: SetupResult }
-  | { readonly status: "already-installed" };
-
 /** Consumer-side composition for a verified, offline Pack Release runtime. */
 export async function installConsumerRuntimeRelease(input: {
   readonly releaseDirectory: string;
@@ -309,7 +318,10 @@ export async function installConsumerRuntimeRelease(input: {
   readonly consumerRoot: string;
   readonly tag: string;
   readonly executingModulePath: string;
-  readonly setupDeps: () => SetupDeps;
+  readonly setupDeps?: () => SetupDeps;
+  readonly expectedPin?: ConsumerRuntimePin;
+  readonly runtimeOnly?: boolean;
+  readonly fault?: Parameters<typeof installConsumerRuntimeOnly>[2];
 }): Promise<ConsumerRuntimeReleaseInstallResult> {
   const assets = verifyConsumerRuntimeReleaseAssets({
     releaseDirectory: input.releaseDirectory,
@@ -322,19 +334,7 @@ export async function installConsumerRuntimeRelease(input: {
   const runtimeRoot = join(consumerRoot, ".ut-tdd", "runtime");
   const release = document.release;
   const generation = document.generation;
-  const rawAttestation = document.admission_input.aggregate_input.attestation;
-  const attestation = {
-    status: "attested" as const,
-    releaseId: rawAttestation.releaseId,
-    artifactSourceCommit: rawAttestation.artifactSourceCommit,
-    expectedDigest: rawAttestation.expectedDigest,
-    actualDigest: rawAttestation.actualDigest,
-    entries: rawAttestation.entries.map((entry) => ({
-      path: entry.path,
-      mode: entry.mode,
-      content: Buffer.from(entry.content_base64, "base64"),
-    })),
-  } satisfies Extract<ReleaseChannelAttestation, { status: "attested" }>;
+  const attestation = consumerReleaseAttestation(document);
   const aggregateInput: ReleaseAggregateAdmissionInput = {
     repository: document.admission_input.aggregate_input.repository,
     channel: document.admission_input.aggregate_input.channel,
@@ -344,16 +344,18 @@ export async function installConsumerRuntimeRelease(input: {
     attestChannel: async () => attestation,
   });
   if (!aggregate.ok) throw new Error(`consumer_runtime_release_aggregate_${aggregate.error}`);
+  assertConsumerRuntimePinMatches({
+    expectedPin: input.expectedPin,
+    releaseId: aggregate.plan.releaseId,
+    artifactSetDigest: generation.artifact_digest,
+    compiledEsmDigest: generation.compiled_esm_digest,
+  });
 
-  let nodeReceipt: ReturnType<typeof parseNodeBootstrapReceiptBytes>;
-  try {
-    nodeReceipt = parseNodeBootstrapReceiptBytes(assets.receiptBytes);
-  } catch {
-    throw new Error("consumer_runtime_node_receipt_invalid");
-  }
-  const operationId = `packrt-${digestConsumerRuntimeBytes(
-    Buffer.from(`${release.tag}\0${generation.generation_id}`, "utf8"),
-  ).slice(7, 31)}`;
+  const { receipt: nodeReceipt, operationId } = parseConsumerRuntimeReceipt({
+    receiptBytes: assets.receiptBytes,
+    tag: release.tag,
+    generationId: generation.generation_id,
+  });
   if (hasActiveConsumerRuntime(runtimeRoot)) {
     assertSameCommittedConsumerRuntime({
       consumerRoot,
@@ -368,80 +370,83 @@ export async function installConsumerRuntimeRelease(input: {
       compiledEsmDigest: generation.compiled_esm_digest,
       operationId,
     });
-    return { status: "already-installed" };
+    if (input.runtimeOnly) ensureConsumerRuntimeLauncher(consumerRoot);
+    return cacheAlreadyInstalledRuntime({
+      consumerRoot,
+      releaseDirectory: input.releaseDirectory,
+      releaseId: aggregate.plan.releaseId,
+      tag: input.tag,
+      expectedConsumerDigest: input.expectedConsumerDigest,
+      executingModulePath: input.executingModulePath,
+      expectedPin: createConsumerRuntimePin({
+        releaseId: aggregate.plan.releaseId,
+        artifactSetDigest: generation.artifact_digest,
+        compiledEsmDigest: generation.compiled_esm_digest,
+        entryPath: input.executingModulePath,
+      }),
+    });
   }
 
-  const controlManifestBytes = Buffer.from(
-    document.admission_input.control_manifest_base64,
-    "base64",
-  );
-  const artifactIdentity = {
-    materializerVersion: release.materializer_version,
+  const { admission, identity } = admitConsumerRuntimeIdentity({
+    productId: release.product_id,
+    consumerRoot,
+    runtimeRoot,
+    operationId,
     releaseId: aggregate.plan.releaseId,
     sourceRevision: release.source_revision,
+    materializerVersion: release.materializer_version,
+    generationId: generation.generation_id,
+    subjectRevision: generation.subject_revision,
     artifactSetDigest: generation.artifact_digest,
-  };
-  const consumerReceipt = {
-    ...artifactIdentity,
-    productId: release.product_id,
-    consumerRoot,
-    runtimeRoot,
-  };
-  const admissionResult = admitConsumerLocalRuntime({
-    productId: release.product_id,
-    consumerRoot,
-    runtimeRoot,
+    compiledEsmDigest: generation.compiled_esm_digest,
+    compiledCliDigest: nodeReceipt.compiled_cli.sha256,
+    nodeVersion: nodeReceipt.node.version,
+    nodeDigest: nodeReceipt.node.sha256,
+    packageLockDigest: nodeReceipt.package_lock_sha256,
+    sourceGraphDigest: nodeReceipt.source_graph_sha256,
+    controlManifestBytes: Buffer.from(document.admission_input.control_manifest_base64, "base64"),
     plan: aggregate.plan,
-    manifest: artifactIdentity,
-    receipt: consumerReceipt,
-    controlManifestBytes,
-  } satisfies ConsumerLocalRuntimeAdmissionInput);
-  if (!admissionResult.ok)
-    throw new Error(`consumer_runtime_release_admission_${admissionResult.error}`);
+  });
 
-  const identity: ConsumerNodeRuntimeIdentity = {
-    product_id: release.product_id,
-    consumer_root: consumerRoot,
-    runtime_root: runtimeRoot,
-    operation_id: operationId,
-    attempt: 1,
-    generation_id: generation.generation_id,
-    subject_revision: generation.subject_revision,
-    artifact_digest: `sha256:${nodeReceipt.compiled_cli.sha256}`,
-    node_executable_identity: `node-${nodeReceipt.node.version}|sha256:${nodeReceipt.node.sha256}`,
-    package_lock_digest: `sha256:${nodeReceipt.package_lock_sha256}`,
-    source_graph_digest: `sha256:${nodeReceipt.source_graph_sha256}`,
-    compiled_esm_digest: generation.compiled_esm_digest,
-    release_id: aggregate.plan.releaseId,
-    materializer_version: release.materializer_version,
-    artifact_set_digest: generation.artifact_digest,
-    control_manifest_digest: admissionResult.admission.controlManifestSnapshotDigest,
-    sealed_policy: "compiled-esm-only",
-  };
-
-  const setup = await runSetupAsync(
-    {
-      phase: "0-A",
-      dryRun: false,
-      applyBranchProtection: false,
-      consumerRuntime: {
-        identity,
-        admission: admissionResult.admission,
-        compiled_esm: assets.compiledEsmBytes,
-        node_bootstrap_receipt: assets.receiptBytes,
-      },
+  const runtimeInput = createSetupConsumerRuntimeInput({
+    identity,
+    admission,
+    compiledEsm: assets.compiledEsmBytes,
+    nodeBootstrapReceipt: assets.receiptBytes,
+  });
+  return completeConsumerRuntimeInstallation({
+    consumerRoot,
+    releaseDirectory: input.releaseDirectory,
+    releaseId: aggregate.plan.releaseId,
+    tag: input.tag,
+    expectedConsumerDigest: input.expectedConsumerDigest,
+    executingModulePath: input.executingModulePath,
+    expectedPin: createConsumerRuntimePin({
+      releaseId: aggregate.plan.releaseId,
+      artifactSetDigest: generation.artifact_digest,
+      compiledEsmDigest: generation.compiled_esm_digest,
+      entryPath: input.executingModulePath,
+    }),
+    setup: () => {
+      if (input.runtimeOnly)
+        return installConsumerRuntimeOnly(runtimeInput, consumerRoot, input.fault);
+      if (!input.setupDeps) throw new Error("consumer_runtime_setup_dependencies_missing");
+      return runSetupAsync(
+        {
+          phase: "0-A",
+          dryRun: false,
+          applyBranchProtection: false,
+          consumerRuntime: runtimeInput,
+        },
+        input.setupDeps(),
+      );
     },
-    input.setupDeps(),
-  );
-  const runtimeInstall = setup.consumerRuntime?.result;
-  if (!runtimeInstall?.ok)
-    throw new Error(
-      runtimeInstall && !runtimeInstall.ok
-        ? runtimeInstall.reason
-        : "consumer_runtime_install_failed",
-    );
-  return { status: "installed", setup };
+  });
 }
+
+export const setupConsumerWorktreeRuntime = (
+  input: Parameters<typeof setupConsumerWorktreeRuntimeImpl>[0],
+) => setupConsumerWorktreeRuntimeImpl(input, installConsumerRuntimeRelease);
 
 function hasActiveConsumerRuntime(runtimeRoot: string): boolean {
   return existsSync(join(runtimeRoot, "activation", "active.json"));
@@ -549,32 +554,6 @@ function assertSameCommittedConsumerRuntime(input: {
   }
 }
 
-/** Sealed runtime input handed from the release materializer to setup. */
-export interface SetupConsumerRuntimeInput {
-  readonly identity: ConsumerNodeRuntimeIdentity;
-  /** Same-process capability returned by admitConsumerLocalRuntime. */
-  readonly admission: ConsumerLocalRuntimeAdmission;
-  readonly compiled_esm: Uint8Array;
-  readonly node_bootstrap_receipt: Uint8Array;
-  readonly prior_bundle_digest?: string;
-  readonly prior_history_tip_digest?: string;
-  readonly history_sequence?: number;
-  readonly prior_history?: Uint8Array;
-  readonly prior_identity?: ConsumerNodeRuntimeIdentity;
-  readonly prior_pointer?:
-    | import("./consumer-node-runtime.ts").ConsumerNodeRuntimePriorPointer
-    | null;
-  readonly operation_kind?: import("./consumer-node-runtime.ts").ConsumerNodeRuntimeOperationKind;
-  readonly prior_attestation?: Uint8Array;
-  readonly fault?: (barrier: string) => void;
-  readonly verifySealedAggregate?: () => void;
-}
-
-export interface SetupConsumerRuntimeInstall {
-  readonly bundle: ConsumerNodeRuntimeBundle;
-  readonly result: ConsumerNodeRuntimeInstallResult;
-}
-
 /**
  * Production setup ingress for a sealed release aggregate.  The caller must
  * provide the actual compiled bytes and the producer's NodeBootstrapReceipt;
@@ -651,7 +630,7 @@ const MERGEABLE_ADAPTER_DOCS = new Set(["AGENTS.md", "CLAUDE.md", join(".claude"
  * gh 不在/未認証/権限不足 → unknown/null。token は読まない (gh 認証状態に委譲)。
  */
 export function detectProjectScale(deps: SetupDeps): ProjectScale {
-  const hasCodeowners = readNonEmpty(deps, join(deps.repoRoot, CODEOWNERS_TARGET));
+  const hasCodeowners = Boolean(deps.readText(join(deps.repoRoot, CODEOWNERS_TARGET))?.trim());
   let ownerType: ProjectScale["ownerType"] = "unknown";
   let collaborators: number | null = null;
   let hasBranchProtection: boolean | null = null;
@@ -782,7 +761,6 @@ function templateNameFor(targetPath: string): string {
   if (targetPath === join(".claude", "settings.json")) return "adapter/.claude/settings.json";
   return `common/${basename(targetPath)}`;
 }
-
 function mergeManagedBlock(existing: string | null, rendered: string): string | null {
   if (existing === null) return rendered;
   const start = rendered.indexOf(MANAGED_START);
@@ -799,7 +777,6 @@ function mergeManagedBlock(existing: string | null, rendered: string): string | 
   const prefix = existing.endsWith("\n") ? existing : `${existing}\n`;
   return `${prefix}\n${managed}\n`;
 }
-
 /** U-SETUP-004: render setup artifacts and write unless dry-run. */
 export function emitSetup(plan: SetupPlan, templates: TemplateSet, deps: SetupDeps): string[] {
   const rendered = renderArtifacts(plan, templates);
@@ -808,8 +785,7 @@ export function emitSetup(plan: SetupPlan, templates: TemplateSet, deps: SetupDe
   for (const r of rendered) {
     const abs = join(deps.repoRoot, r.path);
     const existing = deps.readText(abs);
-    const exists = existing !== null;
-    if (exists && MERGEABLE_ADAPTER_DOCS.has(r.path)) {
+    if (existing !== null && MERGEABLE_ADAPTER_DOCS.has(r.path)) {
       const merged = mergeManagedBlock(existing, r.content);
       if (merged === null) continue;
       if (merged !== existing) {
@@ -818,14 +794,14 @@ export function emitSetup(plan: SetupPlan, templates: TemplateSet, deps: SetupDe
       }
       continue;
     }
-    if (exists) {
+    if (existing !== null) {
       // confirm は isInteractive 時のみ (nodeConfirm の blocking readSync が、stdin が開いたまま
       // 無音の非対話環境 (CI runner / tool shell) で無限待ちになる)。非対話は既存保護 = skip が
       // 既定 (非破壊導入の invariant、PLAN-L7-361)。
       if (deps.isInteractive !== true) continue;
       if (!deps.confirm(`${r.path} は既存です。上書きしますか？`)) continue;
     }
-    deps.writeText(abs, r.content);
+    deps.writeText(abs, preserveConsumerCiPins(r.path, existing, r.content));
     written.push(r.path);
   }
   return written;
@@ -982,26 +958,14 @@ export async function runSetupAsync(args: SetupArgs, deps: SetupDeps): Promise<S
   }
 }
 
-/** Compare an admitted path with its identity across Windows 8.3/case/realpath forms. */
-function sameCanonicalSetupPath(left: string, right: string): boolean {
-  try {
-    return canonicalSetupPath(left) === canonicalSetupPath(right);
-  } catch {
-    return false;
-  }
-}
-
-function canonicalSetupPath(path: string): string {
-  let current = resolve(path);
-  const suffix: string[] = [];
-  while (!existsSync(current)) {
-    const parent = dirname(current);
-    if (parent === current) throw new Error("consumer_runtime_external_path");
-    suffix.unshift(basename(current));
-    current = parent;
-  }
-  return resolve(realpathSync.native(current), ...suffix);
-}
+const consumerRuntimeOnly = createConsumerRuntimeOnlyInstaller({
+  assertSetupRuntimeRoot,
+  captureRuntimeTree,
+  restoreRuntimeTree,
+  installConsumerRuntimeFromSetup,
+});
+const ensureConsumerRuntimeLauncher = consumerRuntimeOnly.ensureLauncher;
+const installConsumerRuntimeOnly = consumerRuntimeOnly.install;
 
 function assertSetupRuntimeRoot(identity: ConsumerNodeRuntimeIdentity, repoRoot: string): void {
   const expectedRoot = resolve(repoRoot);
@@ -1165,16 +1129,13 @@ function makeRuntimeTreeWritable(path: string): void {
 
 // ── node 実 deps (real I/O / gh / confirm / templates) ──────────────────────
 
-function readNonEmpty(deps: SetupDeps, path: string): boolean {
-  const t = deps.readText(path);
-  return t !== null && t.trim().length > 0;
-}
-
 /** gh CLI 実行。失敗 (不在/未認証/非0) は {ok:false}。token は扱わない (gh 認証に委譲)。 */
 export function nodeGh(args: string[]): { ok: boolean; stdout: string } {
   try {
     const stdout = execFileSync("gh", args, {
       encoding: "utf8",
+      timeout: GH_COMMAND_TIMEOUT_MS,
+      env: ghCommandEnv(process.env),
       stdio: ["ignore", "pipe", "ignore"],
     });
     return { ok: true, stdout };

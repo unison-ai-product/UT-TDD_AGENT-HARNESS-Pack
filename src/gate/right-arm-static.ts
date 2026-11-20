@@ -6,8 +6,9 @@ import {
   validateG8IntegrationEvidenceManifest,
 } from "../lint/g8-integration-workflow.ts";
 import { readGateAssetText } from "../lint/gate-confirm.ts";
-import { fmValue } from "../lint/shared.ts";
-import { resolveAuthoringSourceAbsolutePath } from "../shared/design-root.ts";
+import { fmValue, REQUIRED_L2_SCREEN_COLUMNS, tableCells } from "../lint/shared.ts";
+import { resolveAuthoringSourceAbsolutePath, resolveDesignRoot } from "../shared/design-root.ts";
+import { parseIssueUrl } from "../shared/issue-ref.ts";
 import { designLayerFromPath, loadPairDocs } from "../vmodel/lint.ts";
 import {
   loadCompiledRightArmRegistry,
@@ -189,20 +190,12 @@ const REQUIRED_G14_HEADINGS = [
   "#### 第7章 サポート・SLA保守",
   "#### 第8章 運用引継ぎ(ハンドオーバー)",
 ] as const;
-const REQUIRED_L2_SCREEN_COLUMNS = ["画面ID", "画面名称", "概要", "関連機能", "ロール"] as const;
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function tableCells(line: string): string[] {
-  return line
-    .split("|")
-    .slice(1, -1)
-    .map((cell) => cell.trim().replace(/\*\*/g, ""));
 }
 
 function parseG8CaseRows(content: string, violations: string[]): CaseRow[] {
@@ -686,15 +679,17 @@ function checkG13CaseTraces(
   }
 }
 
-function l0PlanIds(repoRoot: string): Set<string> {
-  const planDirectory = join(repoRoot, "docs", "plans");
-  if (!existsSync(planDirectory)) return new Set();
+function l0CharterDocTypeIds(repoRoot: string): Set<string> {
+  const planningDirectory = join(repoRoot, resolveDesignRoot(repoRoot), "L0-planning");
+  if (!existsSync(planningDirectory)) return new Set();
   return new Set(
-    readdirSync(planDirectory, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && /^PLAN-L0-.*\.md$/.test(entry.name))
+    readdirSync(planningDirectory, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
       .flatMap((entry) => {
-        const planId = fmValue(readFileSync(join(planDirectory, entry.name), "utf8"), "plan_id");
-        return planId ? [planId] : [];
+        const content = readFileSync(join(planningDirectory, entry.name), "utf8");
+        if (fmValue(content, "layer") !== "L0") return [];
+        const docTypeId = fmValue(content, "doc_type_id");
+        return docTypeId ? [docTypeId] : [];
       }),
   );
 }
@@ -703,13 +698,13 @@ function checkG14CaseTraces({
   rows,
   pairIds,
   definedIds,
-  l0Ids,
+  l0CharterIds,
   violations,
 }: {
   rows: readonly CaseRow[];
   pairIds: ReadonlySet<string>;
   definedIds: ReadonlySet<string>;
-  l0Ids: ReadonlySet<string>;
+  l0CharterIds: ReadonlySet<string>;
   violations: string[];
 }): void {
   for (const row of rows) {
@@ -718,16 +713,15 @@ function checkG14CaseTraces({
         /\b(?:PLAN-L0-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*|[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)\b/g,
       ),
     ].map((match) => match[0]);
-    if (!citedIds.some((id) => pairIds.has(id) || l0Ids.has(id))) {
+    if (!citedIds.some((id) => pairIds.has(id) || l0CharterIds.has(id))) {
       violations.push(`untraced case ${row.id}`);
     }
     for (const id of citedIds) {
-      if (!definedIds.has(id) && !l0Ids.has(id)) violations.push(`trace target missing ${id}`);
+      if (!definedIds.has(id) && !l0CharterIds.has(id))
+        violations.push(`trace target missing ${id}`);
     }
-    if (row.family === "VALUE" && !citedIds.some((id) => l0Ids.has(id))) {
-      violations.push(
-        `value case ${row.id} does not cite L0 (file the L0 charter as docs/plans/PLAN-L0-*.md and cite its plan_id)`,
-      );
+    if (row.family === "VALUE" && !citedIds.some((id) => l0CharterIds.has(id))) {
+      violations.push(`value case ${row.id} does not cite L0 charter doc_type_id`);
     }
   }
 }
@@ -1220,23 +1214,16 @@ function checkG14Artifacts({
     if (!stringValue(item.summary)) {
       violations.push(`${manifestPath}: improvement_feedback.items[${index}].summary is required`);
     }
-    const routedTo = stringValue(item.routed_to);
-    if (!routedTo) {
+    const routedTo = typeof item.routed_to === "string" ? item.routed_to : "";
+    if (!routedTo.trim()) {
       violations.push(
         `${manifestPath}: improvement_feedback.items[${index}].routed_to is required`,
       );
       continue;
     }
-    if (/^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/[1-9][0-9]*$/.test(routedTo)) continue;
-    if (!/^PLAN-[A-Z0-9]+(?:-[A-Za-z0-9]+)*$/.test(routedTo)) {
+    if (!parseIssueUrl(routedTo)) {
       violations.push(
-        `${manifestPath}: improvement_feedback.items[${index}] routed_to ${routedTo} is not a PLAN or Issue URL`,
-      );
-      continue;
-    }
-    if (!existsSync(join(repoRoot, "docs", "plans", `${routedTo}.md`))) {
-      violations.push(
-        `${manifestPath}: improvement_feedback.items[${index}] routed_to ${routedTo} does not exist`,
+        `${manifestPath}: improvement_feedback.items[${index}] routed_to ${routedTo} is not an Issue URL`,
       );
     }
   }
@@ -1297,15 +1284,8 @@ function checkManifest({
   for (const id of deferredIds) {
     const deferEntries = Array.isArray(evidence.defer) ? evidence.defer : [];
     const defer = deferEntries.find((entry) => isRecord(entry) && entry[deferCaseIdField] === id);
-    if (!isRecord(defer) || !stringValue(defer.reason) || !stringValue(defer.plan_id)) {
-      violations.push(`${path}: stale defer ${id}`);
-      continue;
-    }
-    const planId = stringValue(defer.plan_id);
-    if (
-      !/^PLAN-[A-Z0-9-]+$/.test(planId) ||
-      !existsSync(join(repoRoot, "docs", "plans", `${planId}.md`))
-    ) {
+    const issue = isRecord(defer) && typeof defer.issue === "string" ? defer.issue : "";
+    if (!isRecord(defer) || !stringValue(defer.reason) || !parseIssueUrl(issue)) {
       violations.push(`${path}: stale defer ${id}`);
     }
   }
@@ -1444,10 +1424,10 @@ export function evaluateRightArmStaticGate(
       : new Set<string>();
     checkG13CaseTraces(rows, atIds, violations);
   } else if (key === "G14") {
-    const l0Ids = l0PlanIds(repoRoot);
+    const l0CharterIds = l0CharterDocTypeIds(repoRoot);
     const definedIds = allDesignIds(repoRoot);
-    for (const id of l0Ids) definedIds.add(id);
-    checkG14CaseTraces({ rows, pairIds, definedIds, l0Ids, violations });
+    for (const id of l0CharterIds) definedIds.add(id);
+    checkG14CaseTraces({ rows, pairIds, definedIds, l0CharterIds, violations });
     checkG9Families(rows, obligation.evidenceFamilies, violations);
   } else if (key === "G10") {
     if (fmValue(content, "status") === "skipped") {

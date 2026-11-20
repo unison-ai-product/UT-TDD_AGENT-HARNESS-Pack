@@ -7,9 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyzePairFreeze,
   analyzeVerificationGroups,
-  L0_L7_AUTOMATION_PLAN_IDS,
   loadPairDocs,
-  loadVerificationPlanEvidence,
   type PairDoc,
   pairFreezeMessages,
   parsePairDoc,
@@ -51,7 +49,7 @@ describe("vmodel pair-freeze lint (U-VPAIR)", () => {
     expect(d.pairArtifact).toBe("docs/test-design/harness/L10-ux-validation-test-design.md");
   });
 
-  it("U-VPAIR-002: pair-missing / ref-unresolved を検出", () => {
+  it("U-VPAIR-002: pair-missing / ref-unresolved を検出 [ST-DATA-07]", () => {
     const docs = [
       doc("docs/design/harness/L4-basic-design/data.md", "L4", null), // pair 欠落
       doc(
@@ -65,7 +63,7 @@ describe("vmodel pair-freeze lint (U-VPAIR)", () => {
     expect(r.orphans.map((o) => o.reason).sort()).toEqual(["pair-missing", "ref-unresolved"]);
   });
 
-  it("U-VPAIR-003: trace-bidir — test-design の dir 集合参照が design dir を含めば成立、無ければ孤児", () => {
+  it("U-VPAIR-003: trace-bidir — test-design の dir 集合参照が design dir を含めば成立、無ければ孤児 [ST-DATA-07]", () => {
     const ok = analyzePairFreeze([
       doc(
         "docs/design/harness/L4-basic-design/data.md",
@@ -123,6 +121,12 @@ describe("vmodel pair-freeze lint (U-VPAIR)", () => {
       "docs/design/harness/L1-requirements/",
       "confirmed",
     );
+    const missingBaseTrace = analyzePairFreeze([baseDesign, { ...baseTest, pairArtifact: null }]);
+    expect(missingBaseTrace.ok).toBe(false);
+    expect(missingBaseTrace.pairs).toBe(0);
+    expect(missingBaseTrace.orphans.map(({ path, reason }) => ({ path, reason }))).toEqual([
+      { path: baseDesign.path, reason: "trace-orphan" },
+    ]);
     const deltaDesign = {
       ...doc(
         "docs/design/harness/L1-requirements/delta.md",
@@ -321,7 +325,7 @@ describe("verification trigger (U-VTRIG、層群 freeze の機械発火、IMP-06
     expect(g?.hasOrphan).toBe(true);
   });
 
-  it("U-VTRIG-006: L0-L7 freeze requires confirmed L7 automation PLAN evidence", () => {
+  it("U-VTRIG-006: L0-L7はconfirmedのpair-doc状態だけでfreezeする", () => {
     const docs = [
       doc("docs/design/harness/L1-requirements/a.md", "L1", "x", "confirmed"),
       doc("docs/design/harness/L2-screen/b.md", "L2", "x", "confirmed"),
@@ -330,38 +334,34 @@ describe("verification trigger (U-VTRIG、層群 freeze の機械発火、IMP-06
       doc("docs/design/harness/L5-physical-data/e.md", "L5", "x", "confirmed"),
       doc("docs/design/harness/L6-function-design/f.md", "L6", "x", "confirmed"),
     ];
-    const missing = analyzeVerificationGroups(docs, [], new Map()).find((g) => g.id === "L0-L7");
-    expect(missing?.frozen).toBe(false);
-    expect(missing?.missingPlanIds).toEqual([...L0_L7_AUTOMATION_PLAN_IDS]);
+    const group = analyzeVerificationGroups(docs, []).find((g) => g.id === "L0-L7");
+    expect(group?.frozen).toBe(true);
+  });
 
-    const statuses = new Map(L0_L7_AUTOMATION_PLAN_IDS.map((id) => [id, "confirmed"]));
-    const frozen = analyzeVerificationGroups(docs, [], statuses).find((g) => g.id === "L0-L7");
-    expect(frozen?.frozen).toBe(true);
-    expect(frozen?.confirmedPlanIds).toHaveLength(L0_L7_AUTOMATION_PLAN_IDS.length);
+  it("U-VTRIG-006: draftまたはpair孤児が1件あればL0-L7はfreezeしない", () => {
+    const docs = [
+      doc("docs/design/harness/L1-requirements/a.md", "L1", "x", "confirmed"),
+      doc("docs/design/harness/L2-screen/b.md", "L2", "x", "confirmed"),
+      doc("docs/design/harness/L3-functional/c.md", "L3", "x", "confirmed"),
+      doc("docs/design/harness/L4-basic-design/d.md", "L4", "x", "confirmed"),
+      doc("docs/design/harness/L5-physical-data/e.md", "L5", "x", "confirmed"),
+      doc("docs/design/harness/L6-function-design/f.md", "L6", "x", "confirmed"),
+    ];
+    const draftDocs = docs.map((pairDoc) =>
+      pairDoc.layer === "L6" ? { ...pairDoc, status: "draft" } : pairDoc,
+    );
+    expect(analyzeVerificationGroups(draftDocs, []).find((g) => g.id === "L0-L7")?.frozen).toBe(
+      false,
+    );
 
-    const noEvidence = new Map(
-      L0_L7_AUTOMATION_PLAN_IDS.map((id) => [
-        id,
-        { status: "confirmed", hasReviewEvidence: false, hasGenerates: true },
-      ]),
+    const orphan = {
+      path: "docs/design/harness/L1-requirements/a.md",
+      reason: "pair-missing" as const,
+      detail: "L1 pair missing",
+    };
+    expect(analyzeVerificationGroups(docs, [orphan]).find((g) => g.id === "L0-L7")?.frozen).toBe(
+      false,
     );
-    const evidenceMissing = analyzeVerificationGroups(docs, [], noEvidence).find(
-      (g) => g.id === "L0-L7",
-    );
-    expect(evidenceMissing?.frozen).toBe(false);
-    expect(evidenceMissing?.evidenceMissingPlanIds).toEqual([...L0_L7_AUTOMATION_PLAN_IDS]);
-
-    const fullEvidence = new Map(
-      L0_L7_AUTOMATION_PLAN_IDS.map((id) => [
-        id,
-        { status: "confirmed", hasReviewEvidence: true, hasGenerates: true },
-      ]),
-    );
-    const evidenceReady = analyzeVerificationGroups(docs, [], fullEvidence).find(
-      (g) => g.id === "L0-L7",
-    );
-    expect(evidenceReady?.frozen).toBe(true);
-    expect(evidenceReady?.evidenceReadyPlanIds).toHaveLength(L0_L7_AUTOMATION_PLAN_IDS.length);
   });
 
   it("U-VTRIG-004: verificationGroupMessages — freeze 完了(park 表示) / Forward 進行中", () => {
@@ -379,11 +379,6 @@ describe("verification trigger (U-VTRIG、層群 freeze の機械発火、IMP-06
         activeRevisionConfirmed: 0,
         activeRevisionDraft: 0,
         activeRevisionHasOrphan: false,
-        requiredPlanIds: [],
-        confirmedPlanIds: [],
-        missingPlanIds: [],
-        evidenceReadyPlanIds: [],
-        evidenceMissingPlanIds: [],
         frozen: true,
       },
     ]);
@@ -406,11 +401,6 @@ describe("verification trigger (U-VTRIG、層群 freeze の機械発火、IMP-06
         activeRevisionConfirmed: 0,
         activeRevisionDraft: 0,
         activeRevisionHasOrphan: false,
-        requiredPlanIds: [],
-        confirmedPlanIds: [],
-        missingPlanIds: [],
-        evidenceReadyPlanIds: [],
-        evidenceMissingPlanIds: [],
         frozen: false,
       },
     ]);
@@ -420,15 +410,34 @@ describe("verification trigger (U-VTRIG、層群 freeze の機械発火、IMP-06
   it("U-VTRIG-005: 実 repo ガード — L0-L3 と L4-L6 は freeze 完了", () => {
     const docs = loadPairDocs();
     const { orphans } = analyzePairFreeze(docs);
-    const groups = analyzeVerificationGroups(docs, orphans, loadVerificationPlanEvidence());
-    expect(groups.find((g) => g.id === "L0-L3")?.frozen).toBe(true);
-    expect(groups.find((g) => g.id === "L4-L6")?.frozen).toBe(true);
+    const groups = analyzeVerificationGroups(docs, orphans);
+    const upstream = groups.find((g) => g.id === "L0-L3");
+    const design = groups.find((g) => g.id === "L4-L6");
+    expect(upstream).toBeDefined();
+    expect(upstream?.confirmed).toBeGreaterThan(0);
+    expect(upstream?.draft).toBe(0);
+    expect(upstream?.hasOrphan).toBe(false);
+    expect(upstream?.frozen).toBe(true);
+    expect(design).toBeDefined();
+    expect(design?.confirmed).toBeGreaterThan(0);
+    expect(design?.draft).toBe(0);
+    expect(design?.hasOrphan).toBe(false);
+    expect(design?.frozen).toBe(true);
     // 全 3 検証サイクルゲート名が実 repo の surface に出る (PLAN-REVERSE-36、命名の壊れを CI で検知)。
     const surface = verificationGroupMessages(groups).join("\n");
     expect(surface).toContain("L3 検証サイクルゲート");
     expect(surface).toContain("L6 検証サイクルゲート");
     expect(surface).toContain("設計検証サイクルゲート");
     expect(surface).toContain("実装検証サイクルゲート");
-    expect(groups.find((g) => g.id === "L0-L7")?.frozen).toBe(true);
+  });
+
+  it("U-VTRIG-005-L7: 実 repo の L0-L7 はpair-doc状態だけでfreezeする", () => {
+    const docs = loadPairDocs();
+    const { orphans } = analyzePairFreeze(docs);
+    const groups = analyzeVerificationGroups(docs, orphans);
+    const implementation = groups.find((g) => g.id === "L0-L7");
+    expect(implementation).toBeDefined();
+    expect(implementation?.frozen).toBe(true);
+    expect(verificationGroupMessages(groups).join("\n")).toContain("実装検証サイクルゲート");
   });
 });

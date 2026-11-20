@@ -37,7 +37,7 @@ G1〜G5 を運用してきたが、(a) **各 G_N が何を check するか**の�
 
 > 上表の G0.5-G14 は **① 必須スケルトン (Forward spine、V-model)**。これだけでは不完全で、各工程は **② ケースバイケース駆動モデル**を合成する (concept §2.5 9-mode / metamodel / PLAN-DISCOVERY-01 PoC)。**本来 Reverse / Discovery 等に流す**経路を本節で明示する。
 
-**メタモデル**: V字各層 = **① 作成必須タスク/doc (固定スケルトン)** + **② 駆動モデル**。**PLAN が ①＋該当② を合成**して構築。② 介入時にその進捗点で **駆動プラン spawn → exit 3 分岐 → fullback で V字回帰**。
+**メタモデル**: V字各層 = **① 作成必須タスク/doc (固定スケルトン)** + **② 駆動モデル**。Issue と設計文書に、対象工程、適用する駆動モデル、合流条件を記録する。
 
 ### 入口 9-mode → 出口 Forward 合流
 
@@ -109,7 +109,7 @@ G3/G4/G5 で運用した audit を正式 spec 化。各ゲートは以下 4 軸 
 
 | 軸 | 判定 | 機械化 (§4 engine) | 意味レビュー (intra_runtime_subagent / cross-agent / 人手) |
 |---|---|---|---|
-| **A1 DoD 充足** | 当該層 child PLAN §4 + Master §5 を全件満たす | 構造 (§必須/frontmatter) | 完成度の意味判断 |
+| **A1 DoD 充足** | 当該層の完了条件と必須の子 Issue の完了を確かめる | 構造 (§必須/frontmatter) | 完成度の意味判断 |
 | **A2 上流 trace** | 上流要素 (要求/集約/module/FR) が当層に漏れなく着地、孤児 0 | `upstream-coverage` rule | 詳細化の妥当性 |
 | **A3 V-pair** | pair_artifact が実在し相互参照 (L_N↔L_M) | `pair-exists` / `trace-bidir` | テスト設計の網羅性 |
 | **A4 sub-doc 間整合** | 当層 sub-doc 間に矛盾・二重定義・循環なし | `ref-resolves` / 依存 drift (ADR-002) | 意味的一貫性 |
@@ -123,7 +123,7 @@ G3/G4/G5 で運用した audit を正式 spec 化。各ゲートは以下 4 軸 
 
 ```
 [1] doc レジストリ      docs/** の frontmatter 走査 → {path, layer, sub_doc,
-                        pair_artifact, related_*, generates, dependencies, 宣言件数}
+                        pair_artifact, related_*, dependencies, 宣言件数}
         │               (frontmatter schema は src/schema/frontmatter.ts 既存)
 [2] ルールレジストリ    関係の「型」ごとに 1 回実装した layer 非依存ルール (§5)
         │
@@ -142,14 +142,14 @@ G3/G4/G5 で運用した audit を正式 spec 化。各ゲートは以下 4 軸 
 |---|---|---|---|
 | `pair-exists` | `pair_artifact` が実在 | frontmatter pair_artifact + V_MODEL_PAIRS | (G4/G5 audit 手動 → 自動化) |
 | `ref-resolves` | `related_*`/`parent`/`requires` の path 実在 | frontmatter dependencies | (新規、IMP-003 = path fs 実在検証の backlog ID) |
-| `trace-bidir` | `generates` ↔ pair の相互参照 (双方向 edge) | generates + pair | g3-trace (一般化) / vmodel lint |
+| `trace-bidir` | 設計文書とテスト設計の相互参照 (双方向 edge) | pair_artifact と trace | g3-trace (一般化) / vmodel lint |
 | `upstream-coverage` | 下流参照 ⊆ 上流レジストリ (孤児 0) | layer 順 + ID 抽出 | **g3-trace** / **entity-coverage** |
 | `count-matches` | header 件数宣言 vs 実数 | 宣言件数 + table 行数 | **fr-registry-audit** / **doc-consistency** (一般化、IMP-001) |
-| `id-format` | ID が layer 別 regex 適合 | layer + ID pattern | (plan-id-schema IMP-004) |
+| `id-format` | ID が layer 別 regex 適合 | layer + ID pattern | (ID 検査の課題 IMP-004) |
 | `dup-id` | 同一 ID 二重定義検出 | ID レジストリ | IMP-002 |
 | `glossary-delta` | 用語が L0 §10 へ back-merge | sub-doc §用語更新 | G.9 (IMP-012) |
 | `dependency-drift` | 実 import グラフ vs 期待依存マップ | src/ import + architecture §3 | **ADR-002 / IMP-032** |
-| `asset-drift` | 内部資産 .md の legacy source 前提残存 + roster↔guard 整合 | `.claude/agents/*.md` + `docs/skills/` + roster allowlist | **FR-L1-49 / inventory §1 / ADR-004 (A-85)** |
+| `asset-drift` | 内部資産 .md の legacy source 前提残存 + roster↔guard 整合 | ランタイムの委譲設定、guard、アダプター文書 | **FR-L1-49 / inventory §1 / ADR-004 (A-85)** |
 | `backlog-format` | backlog 書式 | backlog table | **improvement-backlog** |
 
 > 既存 5 lint (g3-trace/entity-coverage/fr-registry/doc-consistency/improvement-backlog) は L7 で本エンジンの**ルール型インスタンスへリファクタ吸収**。新 doc/層は手書き不要で `upstream-coverage`/`pair-exists`/`count-matches` 等が自動適用される。

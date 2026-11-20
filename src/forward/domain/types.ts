@@ -1,4 +1,4 @@
-import type { EvidenceRecord } from "../../plan-asset/domain/evidence-record.ts";
+import type { EvidenceRecord } from "./evidence-record.ts";
 import type { ForwardEventName, ForwardState, TransitionSpec } from "./transition-policy.ts";
 
 export interface ForwardSubject {

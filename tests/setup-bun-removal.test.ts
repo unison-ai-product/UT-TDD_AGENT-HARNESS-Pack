@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -9,6 +9,7 @@ import {
   planSetup,
   transformCleanDistributionArtifact,
 } from "../src/setup/index.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 type BunRemovalCase = {
   name: string;
@@ -128,7 +129,7 @@ describe("Issue #470 S1-b setup generated Bun removal", () => {
     try {
       expect(scanGeneratedConsumerTree(consumerRoot)).toEqual([]);
     } finally {
-      rmSync(consumerRoot, { recursive: true, force: true });
+      removeTestTree(consumerRoot);
     }
   });
 
@@ -139,7 +140,7 @@ describe("Issue #470 S1-b setup generated Bun removal", () => {
       mutate(consumerRoot);
       expect(scanGeneratedConsumerTree(consumerRoot)).toEqual([...expected].sort());
     } finally {
-      rmSync(consumerRoot, { recursive: true, force: true });
+      removeTestTree(consumerRoot);
     }
   });
 });

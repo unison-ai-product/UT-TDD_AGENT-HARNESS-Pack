@@ -37,6 +37,10 @@ export {
 
 export type { DocumentDeltaFinding } from "./document-delta-finding.ts";
 
+function validateReplayDecision(record: DocumentDispositionInput) {
+  return validateDocumentDisposition(record, { allowLegacyPlanReferences: true });
+}
+
 export interface DocumentDeltaDecision {
   readonly deltaId: string;
   readonly ledgerId: string;
@@ -72,7 +76,7 @@ export function documentDeltaDecisionDigest(decision: DocumentDeltaDecisionDraft
     canonicalField("disposition", record.disposition),
     canonicalField("reason", record.reason),
     canonicalField("targets", [...record.targets].sort(compareUtf8).join("\0")),
-    canonicalField("plan_ids", [...record.planIds].sort(compareUtf8).join("\0")),
+    canonicalField("plan_ids", [...(record.planIds ?? [])].sort(compareUtf8).join("\0")),
     canonicalField("application_status", record.applicationStatus),
     canonicalField("applicability_kind", applicability.kind),
     canonicalField("applicability_reason", applicability.reason ?? ""),
@@ -80,6 +84,12 @@ export function documentDeltaDecisionDigest(decision: DocumentDeltaDecisionDraft
     canonicalField("reevaluation_trigger", applicability.reevaluationTrigger ?? ""),
     canonicalField("applicability_plan_id", applicability.planId ?? ""),
     canonicalField("applicability_decider", applicability.decider ?? ""),
+    ...(record.issues === undefined
+      ? []
+      : [canonicalField("issues", [...record.issues].sort(compareUtf8).join("\0"))]),
+    ...(applicability.issue === undefined
+      ? []
+      : [canonicalField("applicability_issue", applicability.issue)]),
   ]);
 }
 
@@ -228,7 +238,7 @@ export function replayDocumentDeltas(input: ReplayDocumentDeltasInput): Document
     const delta = deltas[index];
     const decisions = input.decisions.filter(({ deltaId }) => deltaId === delta.deltaId);
     const decision = decisions[0];
-    const decisionValidation = decision && validateDocumentDisposition(decision.record);
+    const decisionValidation = decision && validateReplayDecision(decision.record);
     const reason =
       delta.ledgerId !== input.ledgerId
         ? "ledger-mismatch"

@@ -20,7 +20,7 @@ triggers: "vmodel-docgen で「どの設計書を書くべきか」「どの粒�
 
 > 移植元: zip `.claude/skills/vmodel-design-judgement/SKILL.md` (Apache-2.0、PLAN-L7-676 PR-T3)。
 > **本ファイルは薄い橋渡し (bridge) であり、判断ロジックの正本は既存 [[design-tailoring-and-granularity]] に統合済み**
-> (docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1「意味が重なる skill は既存 skill への
+> (plans-archive-20261102:docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1「意味が重なる skill は既存 skill への
 > 統合を優先し、同じ内容を 2 本持たない」)。実測: 原文の判断内容 (下記見出し) は [[design-tailoring-and-granularity]] の
 > decision_points に相当する内容が英語で既にカバーされている。判断が必要なときは [[design-tailoring-and-granularity]]
 > を読むこと。本ファイルは zip 原文の日本語見出しへの索引と、移植元固有の語彙 (vmodel-docgen の文書番号

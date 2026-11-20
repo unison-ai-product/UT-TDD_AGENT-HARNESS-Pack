@@ -40,7 +40,9 @@ function fakeBlobReader(store: Record<string, string>): BlobReader {
 }
 
 function gitQ(cwd: string, args: string[], input?: string) {
-  return spawnSync("git", args, { cwd, encoding: "utf8", input });
+  const result = spawnSync("git", args, { cwd, encoding: "utf8", input });
+  expect(result.status, `fixture git ${args[0]} (signal ${result.signal})`).toBe(0);
+  return result;
 }
 
 function initGitRepo(root: string): void {
@@ -308,6 +310,8 @@ describe("scripts/git-hooks/pre-push (shell 経路 e2e、bare remote + hooksPath
 
       const push = pushViaHooksPath(cloneDir, { UT_TDD_PRE_PUSH_SECRET_SCAN_MODE: "fail-close" });
 
+      expect(push.error).toBeUndefined();
+      expect(push.signal).toBeNull();
       expect(push.status).not.toBe(0);
       expect(`${push.stdout}${push.stderr}`).toContain("github-token");
     } finally {

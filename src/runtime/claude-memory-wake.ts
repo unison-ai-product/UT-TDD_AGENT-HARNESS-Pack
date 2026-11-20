@@ -44,6 +44,7 @@ function runtimeSourceRevision(): string {
         cwd,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
       }).trim();
     } catch {
       // A sealed consumer supplies the revision through the runtime receipt override.

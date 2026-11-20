@@ -7,12 +7,12 @@ source_entries:
     sha256: "sha256:392f8d8ab23996fbdf82a80654a25528b5d2b5816882b88ab3c478d4b191090c"
 disposition: "merge → docs/governance/vmodel-document-catalog.md"
 port_index: docs/templates/vmodel/README.md
-plan: docs/plans/PLAN-<id>.md
+issue: <Issue 番号>
 ---
 
 # ZIP-DOC-017: 一覧・定義集
 
-本テンプレートは `Vモデル設計ドキュメント_checked.zip` (PO 承認、issue #676) の該当 source document を PLAN-L7-676 §3.5.2 の変換規則で Markdown 化した optional テンプレートである (§3.5.3: required slot には束ねない)。項目名・説明文は zip の日本語をそのまま使い、意味は書き換えていない。zip で空欄・空表の箇所には、記入欄の placeholder のみを置き、記入例の内容は機械生成しない。 <!-- 説明用の表記例: <記入>、<本文を記入>、<項目を記入> -->
+本テンプレートは `Vモデル設計ドキュメント_checked.zip` (PO 承認、issue #676) の該当 source document を、変換規則（対応 Issue #676）で Markdown 化した optional テンプレートである (required slot には束ねない)。項目名・説明文は zip の日本語をそのまま使い、意味は書き換えていない。zip で空欄・空表の箇所には、記入欄の placeholder のみを置き、記入例の内容は機械生成しない。 <!-- 説明用の表記例: <記入>、<本文を記入>、<項目を記入> -->
 
 ## 本文
 

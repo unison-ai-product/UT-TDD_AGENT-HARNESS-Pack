@@ -23,7 +23,7 @@ export type ProposalDocumentCoverageClassifier = (input: { text: string }) => {
   required_test_docs: ProposalDocumentCoverageDocument[];
   required_evidence: string[];
   required_gates: string[];
-  recommended_subagents?: { tier: string; guard: string }[];
+  recommended_lanes?: { tier: string; guard: string }[];
   findings: { code: string }[];
 };
 

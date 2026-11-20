@@ -10,7 +10,6 @@ import {
   type DoctorOptions,
   resolveDoctorRunProfile,
 } from "./check-registry.ts";
-import { checkPlanReferenceFreshnessAdvisory } from "./plan-governance.ts";
 import type { DoctorRunProfile } from "./profiles.ts";
 import { buildDoctorResult, type DoctorResult } from "./result.ts";
 import {
@@ -27,6 +26,7 @@ import { checkWorktreeTopologyAdvisory } from "./worktree-topology-advisory.ts";
 export { checkErasableSyntax } from "../lint/erasable-syntax.ts";
 export { checkImportSpecifiers } from "../lint/import-specifier.ts";
 export type { DoctorOptions } from "./check-registry.ts";
+export { checkClaudeVersionFloor } from "./claude-version-floor-check.ts";
 export {
   checkAgentContractDetection,
   checkDbProjectionCoverage,
@@ -51,26 +51,12 @@ export {
   checkVerificationProfile,
 } from "./lint-gates.ts";
 export {
-  checkBackfill,
-  checkBackfillResult,
-  checkForwardConvergence,
-  checkForwardConvergenceAudit,
-  checkGuardrailInvariants,
   checkPairFreeze,
-  checkPlanBodySubstance,
-  checkPlanCompletionDrift,
-  checkPlanGovernance,
-  checkPlanReferenceFreshnessAdvisory,
-  checkPlanSchedule,
-  checkPlanSupersession,
   checkPropagation,
-  checkReviewEvidence,
-  checkScrumReverse,
 } from "./plan-governance.ts";
 export {
   checkCycleP4Verification,
   checkDbCurrency,
-  checkDriveDbRegistration,
   checkDriveModelPassage,
   checkFeedbackLog,
   checkFrRoadmapCoverage,
@@ -80,13 +66,12 @@ export {
   checkL7Completion,
   checkL14CloseAudit,
   checkPlaceholderDeps,
-  checkPlanDod,
-  checkPlanTraceGate,
   checkRuleAutomationClosure,
   checkScreenImplPairFreeze,
   checkSubDocCatalogDrift,
   checkSubDocSectionStructure,
   checkTelemetryClosure,
+  checkTraceGate,
 } from "./process-quality.ts";
 export {
   checkRoadmap,
@@ -124,11 +109,8 @@ export {
   checkProjectHooks,
 } from "./runtime-surface.ts";
 export {
-  checkDeliverablePlanTrace,
   checkImplPlanTrace,
-  checkMergedPlanStatus,
   checkOracleTestTrace,
-  checkPlanArtifactExistence,
   checkTrackedCanonical,
 } from "./source-trace.ts";
 export { checkTestRepositoryIsolation } from "./test-repository-isolation.ts";
@@ -141,7 +123,6 @@ export {
   checkImprovementBacklog,
   checkLintWiring,
   checkProposalDocumentCoverage,
-  checkRightArmGatePlanning,
   checkRightLungDocGovernance,
 } from "./workflow-quality.ts";
 export {
@@ -171,7 +152,6 @@ export function runDoctorMeasured(
     checkHandover(deps),
     ...checkHandoverDisciplineMessages(deps).map((m) => `doctor: handover-discipline — ${m}`),
     checkAgentSlots(doctorSlotsDeps(deps)),
-    ...checkPlanReferenceFreshnessAdvisory(deps.repoRoot),
     ...checkWorktreeTopologyAdvisory(
       typeof deps.worktreeTopology === "function"
         ? deps.worktreeTopology()

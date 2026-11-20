@@ -14,18 +14,18 @@ applies_to:
     - Discovery
 decision_points:
   - when: "a subtask is multi-source web research or doc summarisation with no repository-state judgement required"
-    choose: "delegate to pmo-haiku"
+    choose: "delegate to docs"
     over: "running it on the primary session model"
     because: "it is parallelisable, needs no repo-state judgement, and the cost saving outweighs verification overhead"
-  - when: "a subtask requires answering whether a PLAN or repository state is complete/correct"
+  - when: "a subtask requires answering whether an Issue or repository state is complete/correct"
     choose: "keep it on the primary model, not a lightweight role"
-    over: "delegating repository-state judgement to pmo-haiku or another lightweight role"
+    over: "delegating repository-state judgement to docs or another lightweight role"
     because: "lightweight roles cannot reliably read .ut-tdd/ state — this is a named anti-pattern"
   - when: "spawning any subagent via ut-tdd claude/codex/team run"
     choose: "pass the model field explicitly"
     over: "omitting model and letting it inherit the parent"
     because: "an omitted model inherits the expensive parent model and silently burns budget"
-  - when: "delegated agent output will be recorded as authoritative or change a PLAN dependency/ADR"
+  - when: "delegated agent output will be recorded as authoritative or change an Issue dependency or ADR"
     choose: "spot-check at least one cited source and escalate to a full review gate"
     over: "forwarding the delegated output to the PO as-is"
     because: "delegated output is a claim, not evidence — forwarding raw output without a spot-check is a named anti-pattern"
@@ -59,11 +59,11 @@ orchestration so expensive model capacity is used only where it is needed
 
 | Task type | Assign to |
 |---|---|
-| Multi-source web research, doc summarisation | `pmo-haiku` |
-| Hypothesis generation from collected facts | `pmo-haiku` |
+| Multi-source web research, doc summarisation | `docs` |
+| Hypothesis generation from collected facts | `docs` |
 | ADR authoring, gate review, design judgement | primary session model |
 | Security / adversarial review | primary model or `security-audit` / `code-reviewer` |
-| Routine status / handover formatting | `pmo-haiku` |
+| Routine status / handover formatting | `docs` |
 
 Delegation is justified when the subtask is parallelisable, needs no
 repository-state judgement, and the cost saving outweighs the verification
@@ -73,8 +73,8 @@ model inherits the expensive parent model and burns budget.
 ## Delegation via ut-tdd
 
 ```
-ut-tdd claude --role pmo-haiku --task "..."            # execute
-ut-tdd claude --role pmo-haiku --task "..." --dry-run  # inspect the prompt first
+ut-tdd claude --role docs --task "..."            # execute
+ut-tdd claude --role docs --task "..." --dry-run  # inspect the prompt first
 ```
 
 Route subagent calls through `ut-tdd claude` / `ut-tdd codex` / `ut-tdd team
@@ -93,20 +93,20 @@ hypothesis → verification method), not a bare summary.
 Delegated agent output is a claim, not evidence. Before recording it as
 authoritative: spot-check at least one cited source yourself; confirm the
 reasoning chain is present; and escalate to a full review gate if the output
-would change an existing PLAN dependency or ADR decision. Re-compute any counts
+would change an existing Issue dependency or ADR decision. Re-compute any counts
 the agent reports rather than trusting its narration.
 
 ## Cost evidence
 
 Token/cost telemetry is exposed by `ut-tdd telemetry` and projected into
 `model_runs` (FR-L1-38). When adding an agent call path, record run metadata
-(runtime, model, role, drive, plan_id, timings) — metadata only, never prompt or
+(runtime, model, role, drive, Issue reference, timings) — metadata only, never prompt or
 response text, credentials, or PII. If a call escapes the wrapper, record a
 manual `.ut-tdd/audit/` entry so the cost obligation is not silently dropped.
 
 ## Anti-patterns
 
-- Delegating repository-state judgement ("is this PLAN complete?") to a
+- Delegating repository-state judgement ("is this Issue complete?") to a
   lightweight role — it cannot reliably read `.ut-tdd/` state.
 - Sequential delegations where one well-structured parallel split is cheaper.
 - Forwarding raw delegated output to the PO without a spot-check.

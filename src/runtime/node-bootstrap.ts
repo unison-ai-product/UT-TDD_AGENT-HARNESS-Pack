@@ -1,3 +1,4 @@
+import { deepStrictEqual, strictEqual } from "node:assert";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -17,8 +18,8 @@ import {
 } from "node:fs";
 import { builtinModules } from "node:module";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
-export const REVIEWED_NODE_VERSION = "v24.13.0";
-export const REVIEWED_NPM_VERSION = "11.6.2";
+export const REVIEWED_NODE_VERSION = "v24.22.3";
+export const REVIEWED_NPM_VERSION = "11.19.1";
 export const NODE_GENERATIONS = "dist/node-generations";
 export const NODE_LEASE = "dist/node-publish.lock";
 const HEX = /^[0-9a-f]{64}$/;
@@ -64,6 +65,29 @@ export interface NodeInvocation {
   command: string;
   args: string[];
   options: { shell: false; windowsHide: true };
+}
+export interface NodeInvocationProbeCheck {
+  id:
+    | "invocation-options"
+    | "compiled-cli-argv0"
+    | "node-path-absolute"
+    | "compiled-cli-path-absolute";
+  result: "passed";
+}
+export interface NodeInvocationProbeResult {
+  schema: "node-invocation-probe-result/v1";
+  candidate_id: "CAND-NODEBOOT-201";
+  probe_id: "CAND-NODEBOOT-201/P1";
+  test_source: "src/cli.ts#audit node-invocation-probe";
+  production_target: "src/runtime/node-bootstrap.ts#createNodeInvocation";
+  generation_id: string;
+  subject_revision: string;
+  compiled_cli_sha256: string;
+  executed: 1;
+  passed: 1;
+  failed: 0;
+  skipped: 0;
+  checks: NodeInvocationProbeCheck[];
 }
 export interface NodeGenerationBuildInput {
   readonly repoRoot?: string;
@@ -452,18 +476,54 @@ function inputPath(
 function isNodeModulesInput(path: string): boolean {
   return path.split("/").includes("node_modules");
 }
-function packageJsonForInput(root: string, input: string): string {
+function packageJsonForInput(
+  root: string,
+  input: string,
+): { packageJson: string; scopeManifests: string[] } {
+  const segments = slash(relative(root, input)).split("/");
+  const nodeModulesIndex = segments.lastIndexOf("node_modules");
+  const packageIndex = nodeModulesIndex + 1;
+  if (nodeModulesIndex < 0 || packageIndex >= segments.length)
+    throw new NodeBootstrapError("node-bootstrap-dependency-package-missing");
+  const packageSegment = segments[packageIndex];
+  if (!packageSegment) throw new NodeBootstrapError("node-bootstrap-dependency-package-missing");
+  const packageEnd = packageSegment.startsWith("@") ? packageIndex + 1 : packageIndex;
+  if (!segments[packageEnd])
+    throw new NodeBootstrapError("node-bootstrap-dependency-package-missing");
+
+  const ownerRoot = resolve(root, ...segments.slice(0, packageEnd + 1));
+  const ownerRelative = relative(root, ownerRoot);
+  if (
+    !ownerRelative ||
+    ownerRelative === ".." ||
+    ownerRelative.startsWith(`..${sep}`) ||
+    isAbsolute(ownerRelative)
+  )
+    throw new NodeBootstrapError("node-bootstrap-dependency-path-escape");
+  const identityManifest = resolve(ownerRoot, "package.json");
+  if (!existsSync(identityManifest))
+    throw new NodeBootstrapError("node-bootstrap-dependency-package-missing");
+  let packageJson: string;
+  try {
+    packageJson = realpathSync(identityManifest);
+  } catch {
+    throw new NodeBootstrapError("node-bootstrap-dependency-package-missing");
+  }
+
+  const scopeManifests: string[] = [];
   let current = dirname(input);
-  const rootReal = realpathSync(root);
   while (true) {
-    const packageJson = resolve(current, "package.json");
-    if (existsSync(packageJson)) return realpathSync(packageJson);
-    if (current === rootReal) break;
+    const withinOwner = relative(ownerRoot, current);
+    if (withinOwner === "") break;
+    if (withinOwner === ".." || withinOwner.startsWith(`..${sep}`) || isAbsolute(withinOwner))
+      throw new NodeBootstrapError("node-bootstrap-dependency-path-escape");
+    const candidate = resolve(current, "package.json");
+    if (existsSync(candidate)) scopeManifests.push(candidate);
     const parent = dirname(current);
-    if (parent === current) break;
+    if (parent === current) throw new NodeBootstrapError("node-bootstrap-dependency-path-escape");
     current = parent;
   }
-  throw new NodeBootstrapError("node-bootstrap-dependency-package-missing");
+  return { packageJson, scopeManifests };
 }
 function externalImports(meta: BuildMetadata): string[] {
   return Object.values(meta.outputs ?? {}).flatMap((output) =>
@@ -475,32 +535,47 @@ function externalDependencies(root: string, meta: BuildMetadata): ExternalDepend
   for (const input of Object.keys(meta.inputs ?? {})) {
     const resolvedInput = inputPath(root, input, "node-bootstrap-dependency-path-escape");
     if (!isNodeModulesInput(resolvedInput.relative)) continue;
-    const packageJson = packageJsonForInput(root, resolvedInput.absolute);
-    const packageJsonPath = slash(relative(root, packageJson));
-    const identity = JSON.parse(readFileSync(packageJson, "utf8")) as {
-      name?: unknown;
-      version?: unknown;
-    };
+    const owner = packageJsonForInput(root, resolvedInput.absolute);
+    const packageJsonPath = slash(relative(root, owner.packageJson));
+    let parsedIdentity: unknown;
+    try {
+      parsedIdentity = JSON.parse(readFileSync(owner.packageJson, "utf8"));
+    } catch {
+      throw new NodeBootstrapError("node-bootstrap-dependency-invalid");
+    }
+    if (!parsedIdentity || typeof parsedIdentity !== "object" || Array.isArray(parsedIdentity))
+      throw new NodeBootstrapError("node-bootstrap-dependency-invalid");
+    const identity = parsedIdentity as { name?: unknown; version?: unknown };
     if (typeof identity.name !== "string" || typeof identity.version !== "string")
       throw new NodeBootstrapError("node-bootstrap-dependency-invalid");
     const existing = byPackage.get(identity.name);
-    const bundleFile = { path: resolvedInput.relative, sha256: hashFile(resolvedInput.absolute) };
+    const bundleFilesByPath = new Map<string, { path: string; sha256: string }>();
+    const addBundleFile = (path: string, absolute: string): void => {
+      if (!bundleFilesByPath.has(path))
+        bundleFilesByPath.set(path, { path, sha256: hashFile(absolute) });
+    };
+    addBundleFile(resolvedInput.relative, resolvedInput.absolute);
+    for (const manifest of owner.scopeManifests)
+      addBundleFile(slash(relative(root, manifest)), manifest);
+    const bundleFilesForInput = [...bundleFilesByPath.values()];
     if (existing) {
       if (
         existing.package_json_path !== packageJsonPath ||
         existing.package_version !== identity.version
       )
         throw new NodeBootstrapError("node-bootstrap-dependency-identity-mismatch");
-      if (!existing.bundle_files.some((file) => file.path === bundleFile.path))
-        existing.bundle_files.push(bundleFile);
+      for (const bundleFile of bundleFilesForInput) {
+        if (!existing.bundle_files.some((file) => file.path === bundleFile.path))
+          existing.bundle_files.push(bundleFile);
+      }
       continue;
     }
     byPackage.set(identity.name, {
       package_name: identity.name,
       package_version: identity.version,
       package_json_path: packageJsonPath,
-      package_json_sha256: hashFile(packageJson),
-      bundle_files: [bundleFile],
+      package_json_sha256: hashFile(owner.packageJson),
+      bundle_files: bundleFilesForInput,
     });
   }
   return [...byPackage.values()]
@@ -573,6 +648,51 @@ export function createNodeInvocation(
   };
 }
 
+/** Run the fixed read-only probe against the production invocation builder. */
+export function runNodeInvocationProbe(generation: NodeGeneration): NodeInvocationProbeResult {
+  const invocation = createNodeInvocation(generation, [
+    "audit",
+    "node-invocation-probe",
+    "--generation",
+    generation.generationPath,
+    "--json",
+  ]);
+  const checks: NodeInvocationProbeCheck[] = [];
+  const check = (id: NodeInvocationProbeCheck["id"], assertion: () => void): void => {
+    try {
+      assertion();
+    } catch {
+      throw new NodeBootstrapError(id);
+    }
+    checks.push({ id, result: "passed" });
+  };
+
+  check("invocation-options", () =>
+    deepStrictEqual(invocation.options, { shell: false, windowsHide: true }),
+  );
+  check("compiled-cli-argv0", () => strictEqual(invocation.args[0], generation.compiledCliPath));
+  check("node-path-absolute", () => strictEqual(isAbsolute(generation.nodePath), true));
+  check("compiled-cli-path-absolute", () =>
+    strictEqual(isAbsolute(generation.compiledCliPath), true),
+  );
+
+  return {
+    schema: "node-invocation-probe-result/v1",
+    candidate_id: "CAND-NODEBOOT-201",
+    probe_id: "CAND-NODEBOOT-201/P1",
+    test_source: "src/cli.ts#audit node-invocation-probe",
+    production_target: "src/runtime/node-bootstrap.ts#createNodeInvocation",
+    generation_id: generation.receipt.generation_id,
+    subject_revision: generation.receipt.subject_revision,
+    compiled_cli_sha256: generation.receipt.compiled_cli.sha256,
+    executed: 1,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    checks,
+  };
+}
+
 export async function buildNodeGeneration(
   input: NodeGenerationBuildInput | string,
 ): Promise<NodeGeneration> {
@@ -638,19 +758,26 @@ export async function buildNodeGeneration(
     assertReviewedExternalImports(externalImports(meta));
     if (!existsSync(compiled) || statSync(compiled).size === 0)
       throw new NodeBootstrapError("node-bootstrap-compiled-cli-missing");
-    const sourcePaths = Object.keys(meta.inputs ?? {})
+    const sourceInputs = Object.keys(meta.inputs ?? {})
       .map((path) => inputPath(root, path, "node-bootstrap-source-path-escape"))
-      .filter(({ relative: relativePath }) => !isNodeModulesInput(relativePath))
-      .map(({ absolute: source, relative: relativePath }) => {
-        try {
-          execFileSync("git", ["-C", root, "ls-files", "--error-unmatch", "--", relativePath], {
-            stdio: "ignore",
-          });
-        } catch {
-          throw new NodeBootstrapError("node-bootstrap-source-untracked");
-        }
-        return source;
-      });
+      .filter(({ relative: relativePath }) => !isNodeModulesInput(relativePath));
+    if (sourceInputs.length > 0) {
+      let trackedPathsOutput: string;
+      try {
+        trackedPathsOutput = execFileSync("git", ["-C", root, "ls-files", "-z"], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch {
+        throw new NodeBootstrapError("node-bootstrap-source-untracked");
+      }
+      const trackedPaths = new Set(
+        trackedPathsOutput.split("\0").filter((path) => path.length > 0),
+      );
+      if (sourceInputs.some(({ relative: relativePath }) => !trackedPaths.has(relativePath)))
+        throw new NodeBootstrapError("node-bootstrap-source-untracked");
+    }
+    const sourcePaths = sourceInputs.map(({ absolute: source }) => source);
     if (sourcePaths.length === 0) sourcePaths.push(resolve(root, "src/cli.ts"));
     const sources = sourcePaths
       .map((path) => ({ path: slash(relative(root, path)), sha256: hashFile(path) }))

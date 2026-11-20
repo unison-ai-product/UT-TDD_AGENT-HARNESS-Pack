@@ -445,12 +445,15 @@ function detectStaleEdges(
   const findings: RelationFinding[] = [];
   for (const edge of projection.edges) {
     // from (edge の所有 node) は kind を問わず projection 内に実在すべき。
-    // to は構造 edge では実在必須だが、upstream の target (requirement/ADR/PLAN) のみ
-    // 未 materialize な外部 governance 参照を許す (ADR は node kind を持たない)。
+    // to は構造 edge では実在必須だが、upstream は未 materialize な外部 governance 参照を許す。
+    // generates は宣言 metadata を保持し、target の実在を要求しない。
     const targetExternal = edge.kind === "upstream";
     const dangling =
       !index.nodeById.has(edge.from) ||
-      (!targetExternal && edge.lifecycle !== "planned" && !index.nodeById.has(edge.to));
+      (!targetExternal &&
+        edge.kind !== "generates" &&
+        edge.lifecycle !== "planned" &&
+        !index.nodeById.has(edge.to));
     if (dangling) {
       findings.push({
         code: "stale-edge",

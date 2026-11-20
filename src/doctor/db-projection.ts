@@ -13,7 +13,7 @@ import {
   type DbTelemetryProvenanceStats,
   dbProjectionIngestionMessages,
 } from "../lint/db-projection-ingestion.ts";
-import type { LintResult } from "../plan/lint.ts";
+import type { LintResult } from "../lint/lint-result.ts";
 import {
   analyzeDesignDetectionStats,
   collectDesignDetectionStats,

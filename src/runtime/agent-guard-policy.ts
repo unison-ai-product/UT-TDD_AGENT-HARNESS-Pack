@@ -1,28 +1,20 @@
-/** Allowed subagent_type values for Claude Code Agent calls. */
-export const SUBAGENT_ALLOWLIST: ReadonlySet<string> = new Set([
-  "be-api",
-  "be-logic",
-  "db-schema",
-  "devops-deploy",
-  "pmo-sonnet",
-  "pmo-haiku",
-  "pmo-project-explorer",
-  "pmo-project-scout",
-  "pmo-tech-docs",
-  "pmo-tech-fork",
-  "pmo-tech-news",
-  "refactor-scout",
-  "pdm-tech-innovation",
-  "pdm-marketing-innovation",
-  "pdm-innovation-manager",
-  "code-reviewer",
-  "blind-reviewer",
-  "security-audit",
-  "qa-test",
-  "ut-tdd-tl",
+/**
+ * Closed set of subagent_type values the Agent tool may use (issue #1002).
+ * Matching is exact (case-sensitive; only surrounding whitespace is trimmed).
+ * Specialization is passed as skills / decision packs / design excerpts, not by type name.
+ * Adding a type requires revising docs/design/harness/L6-function-design/agent-guard-delegation-boundary.md.
+ */
+export const GENERIC_SUBAGENT_TYPES: ReadonlySet<string> = new Set([
+  "general-purpose",
+  "Explore",
+  "Plan",
+  "claude",
 ]);
 
-/** Codex adapter workspace-write grant is limited to approved artifact workers (Issue #676). */
+/**
+ * Role names (not definition files) that get the Codex workspace-write sandbox (Issue #676).
+ * Unrelated to Claude subagent definitions.
+ */
 export const CODEX_WORKSPACE_WRITE_ROLES: ReadonlySet<string> = new Set([
   "se",
   "docs",
@@ -42,7 +34,7 @@ export const CLAUDE_MODEL_FAMILY_CATALOG = {
   haiku: "claude-haiku-5-5",
   sonnet: "claude-sonnet-5-5",
   opus: "claude-opus-5-5",
-  fable: "claude-fable-5-1",
+  fable: "claude-fable-5-2",
 } as const;
 
 export const AGENT_GUARD_BYPASS_HINT =

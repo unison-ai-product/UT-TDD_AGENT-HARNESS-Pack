@@ -31,7 +31,7 @@ export const sliceAdmissionReceiptSchema = z
     subject_revision: gitObjectIdSchema,
     required_input_receipt_digests: z.array(receiptDigestSchema).superRefine((values, ctx) => {
       if (new Set(values).size !== values.length) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "duplicate-required-input" });
+        ctx.addIssue({ code: "custom", message: "duplicate-required-input" });
       }
     }),
     decision: sliceDecisionSchema,

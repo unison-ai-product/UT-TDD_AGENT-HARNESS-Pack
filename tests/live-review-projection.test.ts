@@ -20,7 +20,7 @@ import type {
   ReviewVerdictProjectionResult,
 } from "../src/feedback/review-attestation.ts";
 import { issueReviewRequest, projectReviewVerdict } from "../src/feedback/review-attestation.ts";
-import { runPrMerge } from "../src/feedback/review-merge-gate.ts";
+import { type GhPrMergePorts, runPrMerge } from "../src/feedback/review-merge-gate.ts";
 import type { ClaudeReviewInboxEntry } from "../src/runtime/claude-memory-wake.ts";
 import { ensureTrackedProjectIdentity } from "./support/project-identity-fixture.ts";
 
@@ -33,6 +33,18 @@ const canonicalRequest: ReviewAttestationRequest = {
   authorFamily: "codex",
   requestedAt: "2026-08-14T00:00:00.000Z",
 };
+// baseline 競合と無関係なテストなので、競合なしを返す stub を注入する (実 origin を使う判定は tests/review-merge-gate-baseline-conflict.test.ts)。
+const mergePorts = (headSha: string, mergePullRequest: () => void): GhPrMergePorts => ({
+  getPullRequest: () => ({
+    pr: canonicalRequest.pr,
+    headSha,
+    evaluatedHeadSha: headSha,
+    state: "OPEN",
+    checksGreen: true,
+  }),
+  mergePullRequest,
+  checkBaselineConflict: () => null,
+});
 const liveRequest: LiveReviewRequestInput = {
   ...canonicalRequest,
   memoryPath: ".ut-tdd/memory/feedback-d3a.md",
@@ -567,16 +579,7 @@ describe("live review projection (U-RVATT-023..026)", () => {
         repoRoot: root,
         pr: canonicalRequest.pr,
         now: () => "2026-08-14T02:00:00.000Z",
-        ports: {
-          getPullRequest: () => ({
-            pr: canonicalRequest.pr,
-            headSha: head,
-            evaluatedHeadSha: head,
-            state: "OPEN",
-            checksGreen: true,
-          }),
-          mergePullRequest,
-        },
+        ports: mergePorts(head, mergePullRequest),
       });
       expect(merge).toMatchObject({ ok: true, decision: "merge", headSha: head });
       expect(mergePullRequest).toHaveBeenCalledWith(canonicalRequest.pr, head);
@@ -609,16 +612,7 @@ describe("live review projection (U-RVATT-023..026)", () => {
             repoRoot: variant === "stale_head" ? root : deniedRoot,
             pr: canonicalRequest.pr,
             now: () => "2026-08-14T02:00:00.000Z",
-            ports: {
-              getPullRequest: () => ({
-                pr: canonicalRequest.pr,
-                headSha: variant === "stale_head" ? "c".repeat(40) : head,
-                evaluatedHeadSha: variant === "stale_head" ? "c".repeat(40) : head,
-                state: "OPEN",
-                checksGreen: true,
-              }),
-              mergePullRequest: deniedMerge,
-            },
+            ports: mergePorts(variant === "stale_head" ? "c".repeat(40) : head, deniedMerge),
           });
           expect(denied).toMatchObject({ ok: false, decision: "deny" });
           expect(deniedMerge).not.toHaveBeenCalled();

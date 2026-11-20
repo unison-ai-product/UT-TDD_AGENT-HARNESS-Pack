@@ -1,3 +1,4 @@
+import "../src/runtime/windows-hide.ts";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -125,6 +126,56 @@ export function resolveSnapshotSource(repoRoot: string): SnapshotSource {
   const revision = output("git", ["rev-parse", "HEAD"], repoRoot);
   if (!revision) throw new Error("snapshot source HEAD cannot be resolved");
   return { kind: "git", revision };
+}
+
+export function parseSnapshotDirtyPaths(status: string): string[] | null {
+  const fields = status.split("\0");
+  const paths: string[] = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index];
+    if (!field) continue;
+    if (field.length < 4 || field[2] !== " ") return null;
+    paths.push(field.slice(3));
+    if (field[0] === "R" || field[0] === "C" || field[1] === "R" || field[1] === "C") {
+      const sourcePath = fields[index + 1];
+      if (!sourcePath) return null;
+      paths.push(sourcePath);
+      index += 1;
+    }
+  }
+  return paths.sort();
+}
+
+function snapshotDirtyPaths(repoRoot: string): string[] | null {
+  const result = spawnSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0)
+    return null;
+  return parseSnapshotDirtyPaths(result.stdout);
+}
+
+export function reportSnapshotSource(source: SnapshotSource, repoRoot: string): void {
+  if (source.kind === "copy") {
+    process.stdout.write(`source: copy (commit なし)\nsource path: ${repoRoot}\n`);
+    return;
+  }
+
+  process.stdout.write(`snapshot source: git commit ${source.revision}\n`);
+  const dirtyPaths = snapshotDirtyPaths(repoRoot);
+  if (dirtyPaths === null) {
+    process.stderr.write(
+      `warning: working-tree status is unavailable; validating commit ${source.revision}, but uncommitted paths could not be enumerated.\n`,
+    );
+    return;
+  }
+  if (dirtyPaths.length === 0) return;
+
+  process.stderr.write(
+    `warning: uncommitted working-tree differences are excluded; validating commit ${source.revision}, not the working tree. Paths:\n${dirtyPaths.map((path) => `  ${JSON.stringify(path)}`).join("\n")}\n`,
+  );
 }
 
 /**
@@ -258,6 +309,84 @@ export function assertBatchVitestArgs(args: readonly string[]): void {
     throw new Error("vitest snapshot runner is batch-only; watch mode would observe a stale snapshot");
 }
 
+const SNAPSHOT_VALUE_OPTIONS = [
+  "-t",
+  "--testNamePattern",
+  "--reporter",
+  "--maxWorkers",
+  "--shard",
+  "--exclude",
+  "--pool",
+  "--outputFile",
+] as const;
+const SNAPSHOT_FLAG_OPTIONS = ["--browser"] as const;
+const SNAPSHOT_ALLOWED_OPTIONS = [
+  ...SNAPSHOT_VALUE_OPTIONS,
+  ...SNAPSHOT_FLAG_OPTIONS,
+].join(", ");
+
+export type SnapshotRunnerArgs =
+  | { kind: "help"; args: readonly string[] }
+  | { kind: "unknown-option"; args: readonly string[]; token: string; message: string }
+  | { kind: "run"; args: readonly string[] };
+
+export function parseSnapshotRunnerArgs(args: readonly string[]): SnapshotRunnerArgs {
+  assertBatchVitestArgs(args);
+  const separatorIndex = args.indexOf("--");
+  const wrapperArgs = separatorIndex < 0 ? args : args.slice(0, separatorIndex);
+
+  for (let index = 0; index < wrapperArgs.length; index += 1) {
+    const token = wrapperArgs[index];
+    if (token === "-h" || token === "--help") return { kind: "help", args };
+    if (!token.startsWith("-")) continue;
+
+    if (SNAPSHOT_VALUE_OPTIONS.includes(token as (typeof SNAPSHOT_VALUE_OPTIONS)[number])) {
+      index += 1;
+      continue;
+    }
+    if (
+      SNAPSHOT_VALUE_OPTIONS.some((option) =>
+        token.startsWith(`${option}=`),
+      ) || SNAPSHOT_FLAG_OPTIONS.includes(token as (typeof SNAPSHOT_FLAG_OPTIONS)[number])
+    ) {
+      continue;
+    }
+
+    const optionName = token.startsWith("--") ? token.split("=")[0] : token;
+    return {
+      kind: "unknown-option",
+      args,
+      token: optionName,
+      message:
+        `Unknown snapshot runner option ${JSON.stringify(token)}. ` +
+        `Allowed options: ${SNAPSHOT_ALLOWED_OPTIONS}. ` +
+        "To pass other Vitest arguments, use -- as a standalone token before them.",
+    };
+  }
+
+  if (separatorIndex >= 0) {
+    const misplacedPath = args
+      .slice(separatorIndex + 1)
+      .find((token) => token.startsWith("tests/") || token.endsWith(".test.ts"));
+    if (misplacedPath) {
+      return {
+        kind: "unknown-option",
+        args,
+        token: misplacedPath,
+        message:
+          `Snapshot runner test path ${JSON.stringify(misplacedPath)} appears after --. ` +
+          "Move test paths before --; arguments after -- are passed to Vitest.",
+      };
+    }
+  }
+
+  return { kind: "run", args };
+}
+
+const SNAPSHOT_RUNNER_USAGE =
+  `Usage: node scripts/run-vitest-snapshot.ts [options] [test paths] [-- <Vitest arguments>]\n` +
+  `Options: ${SNAPSHOT_ALLOWED_OPTIONS}, --help, -h\n`;
+
 export function assertNotRoot(getuid = process.getuid): void {
   if (!getuid || getuid() !== 0) return;
   throw new Error(
@@ -377,7 +506,13 @@ export function runSnapshotTests(
   repoRoot = process.cwd(),
   getuid = process.getuid,
 ): void {
-  assertBatchVitestArgs(args);
+  const parsedArgs = parseSnapshotRunnerArgs(args);
+  if (parsedArgs.kind === "help") {
+    process.stdout.write(SNAPSHOT_RUNNER_USAGE);
+    return;
+  }
+  if (parsedArgs.kind === "unknown-option") throw new Error(parsedArgs.message);
+  args = [...parsedArgs.args];
   assertNotRoot(getuid);
   const snapshotRoot = join(
     tmpdir(),
@@ -399,6 +534,7 @@ export function runSnapshotTests(
     const source = measureSnapshotStage("resolve-source", () =>
       resolveSnapshotSource(repoRoot),
     );
+    measureSnapshotStage("report-source", () => reportSnapshotSource(source, repoRoot));
     measureSnapshotStage("create-execution-snapshot", () =>
       createSnapshot(repoRoot, snapshotRoot, source),
     );

@@ -426,7 +426,7 @@ describe("claudeProjectSlug (repo -> Claude Code project-slug directory name)", 
     expect(claudeProjectSlug("C:\\Users\\example\\OneDrive\\Desktop\\UT-TDD-agent-harness")).toBe(
       "C--Users-example-OneDrive-Desktop-UT-TDD-agent-harness",
     );
-    expect(claudeProjectSlug("c:\\dev\\seo-agent")).toBe("c--dev-seo-agent");
+    expect(claudeProjectSlug("c:\\dev\\example-project")).toBe("c--dev-example-project");
   });
 });
 
@@ -711,25 +711,11 @@ describe("projectTokenUsage + projectModelEvaluations (token efficiency)", () =>
     return root;
   }
 
-  it("aggregates token totals + tokens_per_success + cost_per_success across sources", () => {
+  it("aggregates token totals across sources and leaves success values NULL", () => {
     const root = makeRoot(true);
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
-      // success row from review-evidence (no tokens), joined via plan_registry
-      upsertRow(db, {
-        table: "plan_registry",
-        primaryKey: "plan_id",
-        row: {
-          plan_id: "PLAN-X",
-          kind: "impl",
-          layer: "L7",
-          drive: "db",
-          status: "confirmed",
-          updated_at: "",
-          decision_outcome: "",
-        },
-      });
       upsertRow(db, {
         table: "model_runs",
         primaryKey: "run_id",
@@ -739,7 +725,7 @@ describe("projectTokenUsage + projectModelEvaluations (token efficiency)", () =>
           model: "claude-opus-4-8",
           role: "worker",
           drive: "db",
-          plan_id: "PLAN-X",
+          plan_id: null,
           started_at: "",
           completed_at: "",
           evidence_path: "",
@@ -767,36 +753,22 @@ describe("projectTokenUsage + projectModelEvaluations (token efficiency)", () =>
         .get("claude-opus-4-8") as Record<string, number>;
       expect(row.total_output_tokens).toBe(1000);
       expect(row.total_input_tokens).toBe(400);
-      expect(row.success_count).toBe(1);
-      // I-2 (意図的非対称): 分子=全 model_runs の output (session 行 plan_id='' 含む 1000)、
-      // 分母=plan 紐づき success (1) → 1000。「success PLAN あたり token コスト」proxy (定義は projection-writer JSDoc)。
-      expect(row.tokens_per_success).toBeCloseTo(1000, 2);
+      // S7 (#1379): PLAN 由来の成功値は NULL。token / cost 総量は維持する。
+      expect(row.success_count).toBeNull();
+      expect(row.tokens_per_success).toBeNull();
       expect(row.total_cost_usd).toBeCloseTo(0.05, 6);
-      expect(row.cost_per_success).toBeCloseTo(0.05, 6);
+      expect(row.cost_per_success).toBeNull();
     } finally {
       db.close();
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it("Codex token rows give token efficiency with NULL cost (no fabricated $)", () => {
+  it("Codex token rows keep token totals with NULL cost (no fabricated $)", () => {
     const root = makeRoot(true);
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
-      upsertRow(db, {
-        table: "plan_registry",
-        primaryKey: "plan_id",
-        row: {
-          plan_id: "PLAN-Y",
-          kind: "impl",
-          layer: "L7",
-          drive: "db",
-          status: "completed",
-          updated_at: "",
-          decision_outcome: "",
-        },
-      });
       upsertRow(db, {
         table: "model_runs",
         primaryKey: "run_id",
@@ -806,7 +778,7 @@ describe("projectTokenUsage + projectModelEvaluations (token efficiency)", () =>
           model: "gpt-5.4-codex",
           role: "worker",
           drive: "db",
-          plan_id: "PLAN-Y",
+          plan_id: null,
           started_at: "",
           completed_at: "",
           evidence_path: "",
@@ -831,7 +803,7 @@ describe("projectTokenUsage + projectModelEvaluations (token efficiency)", () =>
         .prepare("SELECT * FROM model_evaluations WHERE model = ?")
         .get("gpt-5.4-codex") as Record<string, number | null>;
       expect(row.total_output_tokens).toBe(600);
-      expect(row.tokens_per_success).toBeCloseTo(600, 2);
+      expect(row.tokens_per_success).toBeNull();
       expect(row.total_cost_usd).toBeNull(); // codex has no cost source
       expect(row.cost_per_success).toBeNull();
     } finally {

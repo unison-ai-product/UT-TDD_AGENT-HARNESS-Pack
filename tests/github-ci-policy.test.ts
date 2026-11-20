@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import {
@@ -13,6 +14,9 @@ import {
   REQUIRED_AGGREGATE_COMMAND,
   resolveGithubCiRuntimeProfile,
 } from "../src/lint/github-ci-policy.ts";
+import { workflowNodeVersion } from "./support/github-workflow-fixture.ts";
+import { registerPlanret016Oracle } from "./support/planret-s4-review-custody-oracles.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const AGGREGATE_ALWAYS = "$" + "{{ always() }}";
 // PLAN-L7-455 (troubleshoot): doc-only lane 分岐の canonical if 条件式。
@@ -124,7 +128,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
-          node-version: "24.13.0"
+          node-version: "24.22.3"
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
@@ -206,8 +210,7 @@ const SOURCE_WORKFLOW = readFileSync(
   "utf8",
 );
 const SOURCE_WORKFLOW_WITH_LANE = SOURCE_WORKFLOW;
-void LEGACY_SOURCE_WORKFLOW;
-void LEGACY_SOURCE_WORKFLOW_WITH_LANE;
+void [LEGACY_SOURCE_WORKFLOW, LEGACY_SOURCE_WORKFLOW_WITH_LANE];
 
 function replaceRequired(source: string, from: string | RegExp, to: string): string {
   expect(source).toMatch(
@@ -246,6 +249,30 @@ function docs(source = SOURCE_WORKFLOW, pack = PACK_WORKFLOW): GithubWorkflowDoc
     },
   ];
 }
+
+describe("Issue #1411 Node pin Red oracles", () => {
+  const sourceDocs = loadGithubCiPolicyDocs({ repoRoot: REPO_ROOT, runtimeProfile: "source" });
+  const reviewAttestation = sourceDocs.find((doc) => doc.role === "attestation_runtime");
+  const packTemplate = sourceDocs.find((doc) => doc.role === "pack_template");
+
+  if (!reviewAttestation || !packTemplate)
+    throw new Error("Issue #1411 requires the source attestation workflow and Pack template");
+  registerPlanret016Oracle(sourceDocs, reviewAttestation);
+
+  it("U-CIPOL-040: review-attestation pins the reviewed Node version", () => {
+    expect(workflowNodeVersion(reviewAttestation.content)).toBe("24.22.3");
+  });
+
+  it("U-CIPOL-041: Pack policy fixture mirrors the template's reviewed Node pin", () => {
+    const reviewedNodeVersion = "24.22.3";
+    const fixtureVersion = workflowNodeVersion(PACK_WORKFLOW);
+    const templateVersion = workflowNodeVersion(packTemplate.content);
+
+    expect(templateVersion).toBe(reviewedNodeVersion);
+    expect(fixtureVersion).toBe(reviewedNodeVersion);
+    expect(fixtureVersion).toBe(templateVersion);
+  });
+});
 
 describe("github-ci-policy lint", () => {
   it("U-CIPOL-013: accepts Linux and Windows runtime legs behind one final aggregate gate", () => {
@@ -402,8 +429,8 @@ describe("github-ci-policy lint", () => {
     for (const workflow of [
       SOURCE_WORKFLOW.replace("runs-on: windows-latest", "runs-on: ubuntu-latest"),
       SOURCE_WORKFLOW.replace(
-        "  harness-check-windows:\n    runs-on: windows-latest\n    steps:",
-        "  harness-check-windows:\n    runs-on: windows-latest\n    continue-on-error: true\n    steps:",
+        "  harness-check-windows:\n    runs-on: windows-latest\n    strategy:",
+        "  harness-check-windows:\n    runs-on: windows-latest\n    continue-on-error: true\n    strategy:",
       ),
     ]) {
       expect(analyzeGithubCiPolicy(docs(workflow)).violations).toContainEqual({
@@ -449,23 +476,15 @@ describe("github-ci-policy lint", () => {
       const result = analyzeGithubCiPolicy(docs);
 
       expect(docs.map((doc) => [doc.file, doc.profile, doc.role])).toEqual([
-        [join(".github", "workflows", "harness-check.yml"), "source", "runtime"],
-        [
-          join("docs", "templates", "github", "common", "harness-check.yml"),
-          "source",
-          "source_template",
-        ],
-        [
-          join("docs", "templates", "github", "common", "pack-harness-check.yml"),
-          "pack",
-          "pack_template",
-        ],
+        [".github/workflows/harness-check.yml", "source", "runtime"],
+        ["docs/templates/github/common/harness-check.yml", "source", "source_template"],
+        ["docs/templates/github/common/pack-harness-check.yml", "pack", "pack_template"],
         ["setup-builtin:common/harness-check.yml", "source", "setup_builtin"],
       ]);
       expect(result.ok).toBe(true);
       expect(result.violations).toEqual([]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 
@@ -492,23 +511,15 @@ describe("github-ci-policy lint", () => {
       const result = analyzeGithubCiPolicy(docs);
 
       expect(docs.map((doc) => [doc.file, doc.profile, doc.role])).toEqual([
-        [join(".github", "workflows", "harness-check.yml"), "pack", "runtime"],
-        [
-          join("docs", "templates", "github", "common", "harness-check.yml"),
-          "source",
-          "source_template",
-        ],
-        [
-          join("docs", "templates", "github", "common", "pack-harness-check.yml"),
-          "pack",
-          "pack_template",
-        ],
+        [".github/workflows/harness-check.yml", "pack", "runtime"],
+        ["docs/templates/github/common/harness-check.yml", "source", "source_template"],
+        ["docs/templates/github/common/pack-harness-check.yml", "pack", "pack_template"],
         ["setup-builtin:common/harness-check.yml", "source", "setup_builtin"],
       ]);
       expect(result.ok).toBe(true);
       expect(result.violations).toEqual([]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 
@@ -861,7 +872,7 @@ describe("github-ci-policy lint", () => {
       );
       expect(resolveGithubCiRuntimeProfile(repo)).toBe("pack");
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 
@@ -887,13 +898,13 @@ describe("github-ci-policy lint", () => {
       });
       expect(loaded[0]?.profile).toBe("source");
       expect(analyzeGithubCiPolicy(loaded).violations).toContainEqual({
-        file: join(".github", "workflows", "harness-check.yml"),
+        file: ".github/workflows/harness-check.yml",
         profile: "source",
         reason: "missing_runtime_leg",
         detail: "jobs.harness-check-linux",
       });
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 
@@ -914,7 +925,7 @@ describe("github-ci-policy lint", () => {
         replaceRequired(
           SOURCE_WORKFLOW,
           // PLAN-L7-461 で doctor step は envelope 書き出し付きの folded scalar になった。
-          "        run: >-\n          node src/cli.ts doctor --strict-green-command-digest\n",
+          '        run: >-\n          node src/cli.ts doctor\n          --result-file "$UT_TDD_DOCTOR_RESULT_FILE"\n',
           "        run: echo doctor omitted\n",
         ),
       ),
@@ -1099,11 +1110,10 @@ describe("github-ci-policy lint", () => {
       expect(result.violations.map((v) => v.reason)).toContain("missing_runtime_leg");
     });
 
-    it.each([
-      ["branch guard separator", "\n          git log --format=%s", " git log --format=%s"],
-      ["doc checks separator", "\n          npm run test:doc-lane", " npm run test:doc-lane"],
-    ])("U-CIPOL-019aa: preserves command-separator newline: %s", (_label, from, to) => {
-      const result = analyzeGithubCiPolicy(docs(SOURCE_WORKFLOW_WITH_LANE.replace(from, to)));
+    it("U-CIPOL-019aa: preserves command-separator newline", () => {
+      const result = analyzeGithubCiPolicy(
+        docs(SOURCE_WORKFLOW_WITH_LANE.replace(/\n {10}(?=node src\/cli\.ts github guard)/, " ")),
+      );
       expect(result.violations.map((v) => v.reason)).toContain("missing_runtime_leg");
     });
 
@@ -1123,7 +1133,7 @@ describe("github-ci-policy lint", () => {
 
     it("U-CIPOL-019b: rejects runtime step reorder", () => {
       const checkout = `      - name: checkout\n        uses: actions/checkout@v5\n        with:\n          fetch-depth: 0\n\n`;
-      const setup = `      - name: setup node (harness 実行系の正式 runtime、PLAN-L7-462 step 2)\n        uses: actions/setup-node@v4\n        with:\n          node-version: "24.13.0"\n          cache: npm\n\n`;
+      const setup = `      - name: setup node (harness 実行系の正式 runtime、PLAN-L7-462 step 2)\n        uses: actions/setup-node@v4\n        with:\n          node-version: "24.22.3"\n          cache: npm\n\n`;
       const result = analyzeGithubCiPolicy(
         docs(SOURCE_WORKFLOW_WITH_LANE.replace(`${checkout}${setup}`, `${setup}${checkout}`)),
       );
@@ -1616,5 +1626,72 @@ describe("Issue #472 S1-c: source CI Bun removal", () => {
         expect(step.name ?? "").not.toMatch(/\bbun\b/i);
       }
     }
+  });
+});
+
+describe("U-OIDBASE-013: Issue #1099 必須PR baseline ratchet", () => {
+  it("U-OIDBASE-013: docs-onlyでも固定CI contextのratchetを実行し、不明なcontextをnon-zeroへ投影する", () => {
+    type Step = {
+      run?: string;
+      if?: string;
+      env?: Record<string, string>;
+      "continue-on-error"?: boolean;
+    };
+    const workflow = parseYaml(SOURCE_WORKFLOW) as {
+      jobs: Record<string, { if?: string; steps?: Step[] }>;
+    };
+    const job = workflow.jobs["harness-check-linux"];
+    const ratchetSteps = (job.steps ?? []).filter((step) =>
+      step.run?.includes("checkOracleBaselineRatchet"),
+    );
+    // 足場ではこのassertionがRed。存在しないscriptの実行失敗をRedと数えない。
+    expect(ratchetSteps).toHaveLength(1);
+    const step = ratchetSteps[0];
+    if (!step || typeof step.run !== "string") throw new Error("ratchet run step is missing");
+    const run = step.run;
+    for (const condition of [job.if, step.if]) {
+      const expression = (condition ?? "true").trim().replace(/^\$\{\{\s*|\s*\}\}$/g, "");
+      expect([
+        "true",
+        "always()",
+        "github.event_name == 'pull_request'",
+        'github.event_name == "pull_request"',
+      ]).toContain(expression);
+    }
+    expect(step["continue-on-error"] ?? false).toBe(false);
+    const executableRun = run
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split(/\r?\n/)
+      .filter((line) => !/^\s*(?:#|\/\/)/.test(line))
+      .join("\n");
+    expect(executableRun).toMatch(/\bcheckOracleBaselineRatchet\s*\(/);
+    const binding = JSON.stringify(step);
+    expect(binding).toContain("$" + "{{ github.event_name }}");
+    expect(binding).toContain("$" + "{{ github.sha }}");
+    expect(binding).not.toContain("github.event.pull_request.base.sha");
+
+    const bindInvalidContext = (text: string): string =>
+      text
+        .replace(/\$\{\{\s*github\.event_name\s*\}\}/g, "pull_request")
+        .replace(/\$\{\{\s*github\.sha\s*\}\}/g, "");
+    const env = { ...process.env };
+    for (const [key, value] of Object.entries(step.env ?? {})) {
+      env[key] = bindInvalidContext(value);
+    }
+    // Linux required legの実run本文を、同じGit Bash/POSIX shellで実行する。
+    // merge SHA欠落はGit I/O以前のtyped rejectionであり、remoteへは接続しない。
+    const gitExecPath = execFileSync("git", ["--exec-path"], { encoding: "utf8" }).trim();
+    const bash =
+      process.platform === "win32" ? resolve(gitExecPath, "../../../bin/bash.exe") : "bash";
+    const result = spawnSync(bash, ["--noprofile", "--norc", "-c", bindInvalidContext(run)], {
+      cwd: REPO_ROOT,
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).not.toBeNull();
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain("pr_context_invalid");
   });
 });

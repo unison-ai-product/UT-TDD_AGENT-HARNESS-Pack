@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { canonicalJson } from "../../plan-asset/domain/evidence-canonical.ts";
+import { canonicalJson } from "./evidence-canonical.ts";
 import { edgeFor, type ForwardState } from "./transition-policy.ts";
 import type { ForwardError, ForwardEvent, ForwardReduction } from "./types.ts";
 

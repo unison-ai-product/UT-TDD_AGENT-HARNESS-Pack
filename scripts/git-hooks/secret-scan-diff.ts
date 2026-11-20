@@ -28,6 +28,7 @@
  * 初回導入は warn-only。`UT_TDD_PRE_PUSH_SECRET_SCAN_MODE=fail-close` で
  * fail-close へ昇格できる (PLAN-L7-260 §4 DoD)。
  */
+import "../../src/runtime/windows-hide.ts";
 import { spawnSync } from "node:child_process";
 import { analyzeSecretScan, secretScanMessages, type SecretScanArtifact } from "../../src/lint/secret-scan.ts";
 

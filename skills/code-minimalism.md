@@ -14,8 +14,8 @@ applies_to:
     - Refactor
     - Retrofit
 decision_points:
-  - when: "a new requirement, feature request, or 'nice to have' is about to be turned into a design/PLAN item before any code is written"
-    choose: "ask whether the requirement can be dropped and, if so, record the reason in the PLAN's tailoring/scope note and skip implementation"
+  - when: "a new requirement, feature request, or 'nice to have' is about to be turned into a design or Issue before any code is written"
+    choose: "ask whether the requirement can be dropped and, if so, record the reason in the Issue's tailoring/scope note and skip implementation"
     over: "accept the requirement as given and start scoping the implementation"
     because: "code is a liability (maintenance, review, attack surface), not an asset — the feature is the asset — so a requirement that can be legitimately dropped is worth more than the code that would have implemented it"
   - when: "a candidate feature is a low-frequency, low-effort manual task (e.g. quarterly, 5 minutes) that someone proposes to automate"
@@ -27,11 +27,11 @@ decision_points:
     over: "write a custom implementation without checking for an existing standard mechanism"
     because: "reinventing a wheel that already exists is a research failure, not a knowledge gap — these primitives are almost always already available"
   - when: "a branch condition or literal value encodes a business-decided number, environment-specific value, or anything someone may want to change without a release"
-    choose: "move it to `.ut-tdd/` config, an external settings file, or a master/reference table, with the source decision traced (PLAN ID or requirement ID), not just a comment"
+    choose: "move it to `.ut-tdd/` config, an external settings file, or a master/reference table, with the source decision traced (Issue or requirement ID), not just a comment"
     over: "hardcode the value directly in source and leave an explanatory comment"
     because: "the test for placement is whether the value/branch is something someone will want to change without shipping a release — hardcoding it means every future business change becomes a release event"
   - when: "an early hardcode, `@ts-ignore`, or design gap is found during implementation but cannot be fixed right now"
-    choose: "file it as a tracked debt entry via [[debt-register]] (dedicated PLAN or `debt_items` field) with a concrete TTL"
+    choose: "file it as a tracked debt entry via [[debt-register]] (GitHub Issue) with a concrete TTL"
     over: "leave a bare `// TODO: fix later` comment and move on silently"
     because: "recorded debt is a management decision with an owner and expiry; a silent, unrecorded shortcut is an accident waiting to be discovered later, invisible to `ut-tdd doctor`"
   - when: "the same behaviour appears to require a new abstraction layer, extension point, or configuration option that no current caller needs yet"
@@ -60,8 +60,7 @@ of writing it yourself.
 
 ## When to load this skill
 
-- Before writing any new code for a requirement, feature, or fix — at PLAN
-  scoping time or at the start of L5/L6 design.
+- Before writing any new code for a requirement, feature, or fix — when scoping the Issue or at the start of L5/L6 design.
 - Before proposing to add a library, framework, or SaaS dependency.
 - When a literal value, threshold, or branch condition is about to be written
   directly into source.
@@ -91,13 +90,13 @@ code was produced.
 
 Before writing a line of implementation code, work through these questions
 **in order**, and record where the ladder stopped (a one-line note in the
-PLAN or proposal is the accountability mechanism: "considered 1-6, wrote at
+The Issue or proposal is the accountability mechanism: "considered 1-6, wrote at
 7"):
 
 1. **Can the requirement be dropped?** Is this requirement actually
    necessary? "Would be nice to have" is a euphemism for "not needed." A
    proposal to drop scope can be worth more than the implementation — record
-   the reason in the PLAN's tailoring/scope note.
+   the reason in the Issue's tailoring/scope note.
 2. **Can operations absorb it?** The break-even for automation is
    frequency × per-run effort × lifetime. Automating a task that runs once a
    quarter and takes five minutes manually is a net loss once maintenance
@@ -202,13 +201,13 @@ changes, and ramp-up cost. Decision criteria:
   step 4: resolved by config, no code needed" is a top-tier answer, not a
   non-answer.
 - Do not report code volume as an achievement. Report satisfied requirement
-  IDs (PLAN/assign trace), not line counts.
+  IDs (Issue and assignment trace), not line counts.
 - This principle is a valid attack angle in [[adversarial-review]]: "this
   implementation should have stopped at ladder step 3 (already exists)" is a
   legitimate finding. A design/code review should look not only for what is
   missing but for **what did not need to be written**.
 - Guard against the volume temptation: do not fold "while I'm in here" extra
-  implementation into a task beyond the single PLAN/assign-table line being
+  implementation into a task beyond the single Issue or assignment line being
   worked. Unscoped extra code has no requirement trace (orphaned), no test
   obligation captured (gap), and skips review — exactly what the gates exist
   to catch, so avoid generating it in the first place.
@@ -236,7 +235,7 @@ exists**:
   before `incremental-implementation`'s per-commit rules apply.
 - [[spec-driven-development]] — defines the spec that a test is written
   against once a feature is confirmed in scope. `code-minimalism` is
-  consulted earlier, often during the same PLAN-scoping conversation that
+  consulted earlier, often during the same Issue-scoping conversation that
   produces the spec, to negotiate the requirement itself down (ladder step 1)
   before a spec is written for it.
 

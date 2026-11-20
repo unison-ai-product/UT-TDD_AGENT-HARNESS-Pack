@@ -74,8 +74,9 @@ A team definition declares:
 | `mode` | `parallel` or `serial` |
 | `judgement_gate` | Which role produces the binding verdict |
 
-Each `agent` value must be an allowlisted `subagent_type`; each `model` must
-match that agent's frontmatter family. The team runner does not relax the guard.
+Each `model` must be explicit. A defined (allowlisted) `agent` needs a model at or
+above its frontmatter floor; any other `agent` takes the generic route and needs a
+recognised, non-fable model (#1002). The team runner does not relax the guard.
 
 ## Role separation rules
 
@@ -85,7 +86,7 @@ families to worker and reviewer slots:
 
 | Slot | Example assignment | Rule |
 |---|---|---|
-| Worker / implementer | `pmo-haiku` | Produces artefact |
+| Worker / implementer | `docs` | Produces artefact |
 | Reviewer / frontier | `code-reviewer` (primary model) | Clears gate — different family |
 | Fast checker | `pmo-project-scout` | Structural checks only, not final verdict |
 
@@ -109,8 +110,9 @@ single team definition is not supported; split into two team runs instead.
 
 ## Team design checklist
 
-- [ ] Each `agent` value is in the guard allowlist.
-- [ ] Each `model` is explicit and matches the agent's frontmatter family.
+- [ ] Each `model` is explicit.
+- [ ] A defined `agent` gets a model at or above its frontmatter floor; any other
+  `agent` gets a recognised, non-fable model (generic route).
 - [ ] Worker and judgement-gate slots use different model families (or
       `intra_runtime_subagent` evidence is planned).
 - [ ] `mode` is explicitly `parallel` or `serial`.

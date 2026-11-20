@@ -11,10 +11,8 @@
  *     redesign は spike 破棄→Forward 再実装のため Reverse 不要 (concept §10.2、例 DISCOVERY-02)。
  *  2. badReverseRefs — reverse PLAN が指す poc が rejected/pivot (confirmed でない)。§1.2 line 139/809。
  *
- * 純関数 (analyze) + I/O loader 分離 (backfill-pairing / fr-registry-audit と同方針)。
+ * 純関数 (parse/analyze/messages) の synthetic unit coverage を維持する。
  */
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { fmValue } from "./shared.ts";
 
 /** promotion_strategy が redesign のとき Reverse 不要 (throwaway 再設計 → Forward 再実装)。 */
@@ -107,17 +105,6 @@ export function analyzeScrumReverse(plans: ParsedSrPlan[]): ScrumReverseResult {
     badReverseRefs,
     ok: pocOrphans.length === 0 && badReverseRefs.length === 0,
   };
-}
-
-/** docs/plans/*.md (archive/template 除く) を読み込む。 */
-export function loadSrPlans(repoRoot: string = process.cwd()): ParsedSrPlan[] {
-  const plansDir = join(repoRoot, "docs", "plans");
-  const plans: ParsedSrPlan[] = [];
-  for (const f of readdirSync(plansDir)) {
-    if (!f.endsWith(".md")) continue;
-    plans.push(parseSrPlan(f, readFileSync(join(plansDir, f), "utf8")));
-  }
-  return plans;
 }
 
 /** doctor / CLI 向けの 1 行サマリ群 (fail-close、ok は呼び出し側で参照)。 */

@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { describe, expect, it, vi } from "vitest";
 import { registerForwardWorkflowCommands } from "../../src/forward/adapters/cli-registrar.ts";
+import { HmacEvidenceAttestationIssuer } from "../../src/forward/adapters/hmac-evidence-attestation-authority.ts";
 import { InMemoryForwardLedger } from "../../src/forward/adapters/in-memory-forward-ledger.ts";
 import { InMemoryForwardProjection } from "../../src/forward/adapters/in-memory-forward-projection.ts";
 import { ForwardEvidencePolicy } from "../../src/forward/application/forward-evidence-policy.ts";
@@ -8,6 +9,10 @@ import {
   type ForwardTransitionRequest,
   ForwardWorkflowApplication,
 } from "../../src/forward/application/forward-workflow.ts";
+import {
+  createRedactedCommandArgs,
+  EvidenceRecord,
+} from "../../src/forward/domain/evidence-record.ts";
 import { eventDigest, reduceForward } from "../../src/forward/domain/reducer.ts";
 import {
   edgeFor,
@@ -19,13 +24,8 @@ import {
 } from "../../src/forward/domain/transition-policy.ts";
 import type { ForwardEvent, ForwardReduction } from "../../src/forward/domain/types.ts";
 import { ForwardWorkflow } from "../../src/forward/domain/workflow.ts";
+import { HmacEvidenceAttestationVerifier } from "../../src/forward/kernel/hmac-evidence-attestation-verifier.ts";
 import type { ForwardProjectionPort } from "../../src/forward/ports/forward-projection.ts";
-import { HmacEvidenceAttestationIssuer } from "../../src/plan-asset/adapters/hmac-evidence-attestation-authority.ts";
-import {
-  createRedactedCommandArgs,
-  EvidenceRecord,
-} from "../../src/plan-asset/domain/evidence-record.ts";
-import { HmacEvidenceAttestationVerifier } from "../../src/plan-asset/kernel/hmac-evidence-attestation-verifier.ts";
 
 const subject = {
   subjectId: "asset:344",
@@ -65,7 +65,7 @@ describe("Forward FSM", () => {
     expect((app.ledger as InMemoryForwardLedger).appended).toHaveLength(12);
   });
 
-  it("U-FSM-001: evaluates the complete 17 state by 17 event closed world", () => {
+  it("U-FSM-001: evaluates the complete 17 state by 17 event closed world [ST-FUNC-11 support]", () => {
     const evidencePolicy = new ForwardEvidencePolicy(verifier);
     for (const state of FORWARD_STATES) {
       const workflow = ForwardWorkflow.reconstruct(subject, eventsForState(state), evidencePolicy);
@@ -88,7 +88,7 @@ describe("Forward FSM", () => {
     }
   });
 
-  it("U-FSM-002: refuses skip, reverse, and terminal commands without changing state", () => {
+  it("U-FSM-002: refuses skip, reverse, and terminal commands without changing state [ST-FUNC-11 support]", () => {
     const app = createApp();
     const before = app.status(subject);
     const result = app.transition({
@@ -106,7 +106,7 @@ describe("Forward FSM", () => {
     });
   });
 
-  it("U-FSM-003: specialized implementation admission fails closed and emits no write", () => {
+  it("U-FSM-003: specialized implementation admission fails closed and emits no write [ST-FUNC-11]", () => {
     const app = createApp();
     seedTo(app, "pair_frozen");
     const result = app.transition({ ...request("begin-implementation"), evidence: [] });
@@ -340,8 +340,8 @@ describe("Forward FSM", () => {
         "ut-tdd",
         "workflow",
         "status",
-        "--plan",
-        subject.subjectId,
+        "--issue",
+        "344",
         "--revision",
         String(subject.subjectRevision),
         "--source-commit",
@@ -357,7 +357,7 @@ describe("Forward FSM", () => {
         exitCode: 3,
       });
       expect(envelope.digest).toBe(`sha256:${"0".repeat(64)}`);
-      expect(process.exitCode).toBe(3);
+      expect([process.exitCode, envelope.subjectId]).toEqual([3, "344"]);
     } finally {
       stdout.mockRestore();
       stderr.mockRestore();

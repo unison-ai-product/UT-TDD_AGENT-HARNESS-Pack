@@ -20,14 +20,14 @@ applies_to:
     - Refactor
 decision_points:
   - when: "An `npm audit` (or equivalent) finding reports a critical or high severity advisory on a new/updated dependency."
-    choose: "block accept and document the accepted risk in `docs/design/L5/<plan-id>-dependency-risk.md` before proceeding"
-    over: "suppressing or ignoring the advisory to keep the PLAN moving"
+    choose: "block accept and document the accepted risk in `docs/design/L5/<subject>-dependency-risk.md` before proceeding"
+    over: "suppressing or ignoring the advisory to keep the Issue moving"
     because: "the checklist requires zero critical/high advisories or an explicit documented risk-acceptance; an undocumented pass-through leaves an unreviewed supply-chain exposure in the codebase."
   - when: "A version pin in `package.json` uses `*` or `latest`."
     choose: "treat it as prohibited and require a pinned or `^x.y.z` range"
     over: "accepting it as a temporary convenience for a development-only dependency"
     because: "the anti-patterns section explicitly names floating ranges as a supply-chain risk even in development, not just production."
-  - when: "This skill's checklist overlaps with `security.md` (e.g. a PLAN touches both dependency hygiene and agent-guard escalation)."
+  - when: "This skill's checklist overlaps with `security.md` (e.g. an Issue touches both dependency hygiene and agent-guard escalation)."
     choose: "run both skills' checklists independently and satisfy both before accept"
     over: "treating either skill's pass as sufficient for the other"
     because: "the file states this skill is the systematic hardening sweep while `security.md` covers design-time escalation/agent-guard architecture — they are non-overlapping obligations, not alternatives."
@@ -47,12 +47,12 @@ Hardening pass procedure: dependency supply-chain hygiene, secret redaction
 verification, Biome security-lint rules, and runtime surface reduction. Distinct
 from `security.md` (which covers escalation boundaries and agent-guard design);
 this skill covers the systematic hardening sweep applied at L7 and above before
-a PLAN crosses the accept gate.
+an Issue crosses the accept gate.
 
 ## When to load this skill
 
-- A PLAN adds or upgrades a runtime dependency (`package.json` changes).
-- A Retrofit or Refactor PLAN must demonstrate the hardened surface is not
+- An Issue adds or upgrades a runtime dependency (`package.json` changes).
+- A Retrofit or Refactor Issue must demonstrate the hardened surface is not
   expanded.
 - The `pre-push` secret scan fails after a dependency change.
 - A harness release (L11/L12) requires a full hardening attestation.
@@ -76,7 +76,7 @@ For every new or updated entry in `package.json`:
       `git+ssh:`, or `http:` protocol references without PO approval.
 - [ ] Run `npm audit` (or equivalent) and confirm zero critical or high severity
       advisories. If an advisory exists, document the accepted risk in
-      `docs/design/L5/<plan-id>-dependency-risk.md` before accept.
+      `docs/design/L5/<subject>-dependency-risk.md` before accept.
 - [ ] Confirm the version pin is not a floating range (`^x.y.z` is acceptable;
       `*` or `latest` is prohibited in production dependencies).
 
@@ -93,8 +93,8 @@ For every new or updated entry in `package.json`:
 
 - [ ] `npm run lint` exits 0 with no suppressions added beyond the pre-change
       count.
-- [ ] Any new `// biome-ignore` line has a PLAN-linked comment on the same line.
-- [ ] `// @ts-ignore` and `// @ts-expect-error` lines are zero or PLAN-justified.
+- [ ] Any new `// biome-ignore` line has an Issue-linked comment on the same line.
+- [ ] `// @ts-ignore` and `// @ts-expect-error` lines are zero or justified by the linked Issue.
 
 ### 4. Runtime surface reduction
 
@@ -116,12 +116,12 @@ For every new or updated entry in `package.json`:
 
 ## Hardening attestation record
 
-For Retrofit/Refactor PLANs and L11/L12 gates, write:
+For Retrofit/Refactor Issues and L11/L12 gates, write:
 
 ```
-.ut-tdd/audit/<PLAN-id>-hardening.json
+.ut-tdd/audit/<issue-number>-hardening.json
 {
-  "plan_id": "<id>",
+  "issue": "<GitHub Issue number>",
   "gate": "accept | L12",
   "dependency_audit": "pass | advisory-accepted:<reference>",
   "secret_scan": "pass | finding:<description>",
@@ -132,13 +132,13 @@ For Retrofit/Refactor PLANs and L11/L12 gates, write:
 }
 ```
 
-Link this file from the PLAN `review_evidence` field.
+Link this file in the PR review evidence.
 
 ## Anti-patterns
 
 - Checking for secrets only at the end of a sprint — the `pre-push` hook scans each pushed commit (within its
   scan scope: `docs/` and `.ut-tdd/{audit,logs,memory}/`), so do not defer pushes to the end of a sprint.
-- Treating a floating dependency range as "safe for now" without a PLAN to pin
+- Treating a floating dependency range as "safe for now" without an Issue to pin
   it — floating ranges are a supply-chain risk even in development.
 - Conflating this skill with `security.md` — this skill is the *hardening sweep*
   (systematic, checklist-driven); `security.md` covers design-time escalation

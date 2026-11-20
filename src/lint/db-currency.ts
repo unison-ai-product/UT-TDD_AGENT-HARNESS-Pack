@@ -1,9 +1,4 @@
-import type { DriveDbRegistrationStats } from "./drive-db-registration.ts";
-
-export type DbCurrencyViolationReason =
-  | "missing_db"
-  | "stale_plan_registry"
-  | "stale_plan_registry_fingerprint";
+export type DbCurrencyViolationReason = "missing_db";
 
 export interface DbCurrencyViolation {
   reason: DbCurrencyViolationReason;
@@ -11,12 +6,14 @@ export interface DbCurrencyViolation {
 }
 
 export interface DbCurrencyResult {
-  stats: DriveDbRegistrationStats | null;
+  stats: Readonly<Record<string, unknown>> | null;
   violations: DbCurrencyViolation[];
   ok: boolean;
 }
 
-export function analyzeDbCurrency(stats: DriveDbRegistrationStats | null): DbCurrencyResult {
+export function analyzeDbCurrency(
+  stats: Readonly<Record<string, unknown>> | null,
+): DbCurrencyResult {
   if (!stats) {
     return {
       stats,
@@ -25,26 +22,7 @@ export function analyzeDbCurrency(stats: DriveDbRegistrationStats | null): DbCur
     };
   }
 
-  const violations: DbCurrencyViolation[] = [];
-  if (stats.expectedPlanCount !== undefined && stats.planCount !== stats.expectedPlanCount) {
-    violations.push({
-      reason: "stale_plan_registry",
-      count: stats.planCount - stats.expectedPlanCount,
-    });
-  }
-  if (
-    stats.expectedPlanRegistryFingerprint !== undefined &&
-    stats.planRegistryFingerprint !== stats.expectedPlanRegistryFingerprint
-  ) {
-    violations.push({ reason: "stale_plan_registry_fingerprint" });
-  }
-
-  return { stats, violations, ok: violations.length === 0 };
-}
-
-function fingerprintLabel(value: string | undefined): string {
-  if (!value) return "unknown";
-  return value.replace(/^sha256:/, "").slice(0, 12);
+  return { stats, violations: [], ok: true };
 }
 
 export function dbCurrencyMessages(result: DbCurrencyResult): string[] {
@@ -55,9 +33,5 @@ export function dbCurrencyMessages(result: DbCurrencyResult): string[] {
     return [`db-currency - violation ${result.violations.length} (${sample})`];
   }
 
-  const stats = result.stats;
-  if (!stats) return ["db-currency - violation: stats unavailable"];
-  return [
-    `db-currency - OK (plans=${stats.planCount}, fingerprint=${fingerprintLabel(stats.planRegistryFingerprint)})`,
-  ];
+  return ["db-currency - OK"];
 }

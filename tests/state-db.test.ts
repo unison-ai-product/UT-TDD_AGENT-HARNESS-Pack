@@ -29,6 +29,19 @@ import { removeTestTree } from "./support/temp-tree.ts";
  */
 const cleanupRepo = removeTestTree;
 
+const retiredTables = [
+  "plan_registry",
+  "roadmap_rollups",
+  "roadmap_band_coverage",
+  "roadmap_gate_progress",
+];
+
+const retiredIndexes = [
+  "idx_plan_layer_drive_status",
+  "idx_roadmap_band_status",
+  "idx_roadmap_gate_plan",
+];
+
 /**
  * IT-DB-01: harness.db state-db foundation。
  * table 作成 (registry-driven migration) + idempotent upsert 基盤 + DB path guard。
@@ -109,11 +122,15 @@ describe("IT-DB-01: harness.db state-db foundation", () => {
     for (const table of HARNESS_DB_TABLES) {
       expect(present).toContain(table.name);
     }
-    const planRegistryColumns = db
-      .prepare("PRAGMA table_info(plan_registry)")
-      .all()
-      .map((row) => String(row.name));
-    expect(planRegistryColumns).toContain("source_hash");
+    for (const table of retiredTables) {
+      expect(HARNESS_DB_TABLE_BY_NAME.has(table)).toBe(false);
+      expect(present).not.toContain(table);
+    }
+    const indexNames = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all();
+    for (const name of retiredIndexes) {
+      expect(HARNESS_DB_INDEXES.some((index) => index.name === name)).toBe(false);
+      expect(indexNames).not.toContainEqual({ name });
+    }
     const specDefsColumns = db
       .prepare("PRAGMA table_info(spec_defs)")
       .all()
@@ -242,6 +259,32 @@ describe("IT-DB-01: harness.db state-db foundation", () => {
     db.close();
   });
 
+  it("migrate preserves unregistered PLAN-era tables, rows, and indexes", () => {
+    const db = openHarnessDb(":memory:");
+    try {
+      for (const table of retiredTables) {
+        db.exec(`CREATE TABLE ${table} (legacy_id TEXT PRIMARY KEY)`);
+        db.prepare(`INSERT INTO ${table} (legacy_id) VALUES (?)`).run("legacy:keep");
+        db.exec(`CREATE INDEX legacy_${table}_index ON ${table}(legacy_id)`);
+      }
+      const legacySchema = db.prepare(
+        `SELECT type, name, sql FROM sqlite_master WHERE tbl_name IN (
+          ${retiredTables.map(() => "?").join(", ")}
+        ) ORDER BY type, name`,
+      );
+      const before = legacySchema.all(...retiredTables);
+      expect(migrate(db).applied).toBe(true);
+      expect(missingTables(db)).toEqual([]);
+      expect(legacySchema.all(...retiredTables)).toEqual(before);
+      for (const table of retiredTables) {
+        expect(db.prepare(`SELECT * FROM ${table}`).all()).toEqual([{ legacy_id: "legacy:keep" }]);
+        expect(rowCounts(db)).not.toHaveProperty(table);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("migrate composes with an existing sqlite transaction", () => {
     const db = openHarnessDb(":memory:");
     const result = runSqliteTransaction(db, () => migrate(db));
@@ -337,23 +380,27 @@ describe("IT-DB-01: harness.db state-db foundation", () => {
   it("upsertRow が PK conflict で idempotent (二重適用で重複せず更新)", () => {
     const db = openHarnessDb(":memory:");
     migrate(db);
-    const planTable = HARNESS_DB_TABLE_BY_NAME.get("plan_registry");
-    if (!planTable) throw new Error("plan_registry が registry に存在しません");
-    const pk = primaryKeyOf(planTable);
+    const artifactTable = HARNESS_DB_TABLE_BY_NAME.get("artifact_registry");
+    if (!artifactTable) throw new Error("artifact_registry が registry に存在しません");
+    const pk = primaryKeyOf(artifactTable);
 
     const row = {
-      plan_id: "PLAN-L7-45-harness-db-foundation",
-      kind: "impl",
-      layer: "L7",
+      artifact_id: "artifact:state-db-fixture",
+      artifact_type: "spec",
+      path: "docs/fixture.md",
       status: "draft",
     };
-    upsertRow(db, { table: "plan_registry", primaryKey: pk, row });
-    upsertRow(db, { table: "plan_registry", primaryKey: pk, row: { ...row, status: "confirmed" } });
+    upsertRow(db, { table: "artifact_registry", primaryKey: pk, row });
+    upsertRow(db, {
+      table: "artifact_registry",
+      primaryKey: pk,
+      row: { ...row, status: "confirmed" },
+    });
 
-    expect(rowCounts(db).plan_registry).toBe(1);
+    expect(rowCounts(db).artifact_registry).toBe(1);
     const stored = db
-      .prepare("SELECT status FROM plan_registry WHERE plan_id = ?")
-      .get("PLAN-L7-45-harness-db-foundation");
+      .prepare("SELECT status FROM artifact_registry WHERE artifact_id = ?")
+      .get("artifact:state-db-fixture");
     expect(stored?.status).toBe("confirmed");
     db.close();
   });
@@ -362,7 +409,11 @@ describe("IT-DB-01: harness.db state-db foundation", () => {
     const db = openHarnessDb(":memory:");
     migrate(db);
     expect(() =>
-      upsertRow(db, { table: "plan_registry", primaryKey: "plan_id", row: { kind: "impl" } }),
+      upsertRow(db, {
+        table: "artifact_registry",
+        primaryKey: "artifact_id",
+        row: { artifact_type: "spec" },
+      }),
     ).toThrow();
     db.close();
   });
@@ -372,16 +423,16 @@ describe("IT-DB-01: harness.db state-db foundation", () => {
     migrate(db);
     expect(() =>
       upsertRow(db, {
-        table: "plan_registry; DROP TABLE plan_registry",
-        primaryKey: "plan_id",
-        row: { plan_id: "x" },
+        table: "artifact_registry; DROP TABLE artifact_registry",
+        primaryKey: "artifact_id",
+        row: { artifact_id: "x" },
       }),
     ).toThrow();
     expect(() =>
       upsertRow(db, {
-        table: "plan_registry",
-        primaryKey: "plan_id",
-        row: { plan_id: "x", "evil)--": "y" },
+        table: "artifact_registry",
+        primaryKey: "artifact_id",
+        row: { artifact_id: "x", "evil)--": "y" },
       }),
     ).toThrow();
     db.close();
@@ -406,8 +457,8 @@ describe("IT-DB-01: harness.db state-db foundation", () => {
 
   it("schemaDdl は deterministic (同一順序の DDL を返す)", () => {
     expect(schemaDdl()).toEqual(schemaDdl());
-    expect(schemaDdl().some((s) => s.startsWith("CREATE TABLE IF NOT EXISTS plan_registry"))).toBe(
-      true,
+    expect(schemaDdl()).toContainEqual(
+      expect.stringMatching(/^CREATE TABLE IF NOT EXISTS artifact_registry\s*\(/),
     );
   });
 });

@@ -17,7 +17,7 @@ import { digestMaterializedReleaseEntries } from "./release-materializer.ts";
 
 const REVISION = /^[a-f0-9]{40}$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 export interface ConsumerRuntimeRelease {
   readonly schema_version: "ut-tdd.consumer-runtime.v1";

@@ -14,150 +14,31 @@ applies_to:
     - Recovery
     - Incident
 decision_points:
-  - when: "a candidate new PLAN would duplicate more than 50% of an existing PLAN's `generates` artifacts"
-    choose: "extend the existing PLAN"
-    over: "create a new PLAN for the overlapping scope"
-    because: "duplicated generates targets between PLANs create ambiguous ownership and break per-requirement traceability"
-  - when: "scheduling parallel agent work across a program's PLAN graph"
-    choose: "mark only PLANs with no shared design-doc writes and no overlapping `generates` targets as `並列`-safe"
-    over: "parallelize all independent-looking PLANs to save time"
-    because: "shared design-doc writes or overlapping generates targets across concurrently-run PLANs produce write conflicts that are hard to detect after the fact"
-  - when: "populating the `carry` field in a milestone handover"
-    choose: "include only items verified against current PLAN status and `git log`"
-    over: "copy forward carry items from the previous handover unchanged"
-    because: "carrying forward an item already done in the PLAN registry misleads the next session into re-investigating solved work"
-  - when: "`ut-tdd graph export` output shows a PLAN that directly or transitively depends on itself"
-    choose: "extract the shared dependency into a new upstream PLAN"
-    over: "reorder dependencies within the existing PLANs to break the cycle informally"
-    because: "a dependency cycle is a hard block on advancement; the only structural fix is separating the shared concern into its own upstream PLAN"
-  - when: "declaring a milestone complete"
-    choose: "require `ut-tdd status` (no stalled PLANs), `ut-tdd doctor` exit 0, and a written `ut-tdd handover` before declaring it closed"
-    over: "declare the milestone done once the main feature work looks finished"
-    because: "a milestone with no recorded handover is not closed by definition — later sessions have no verified state snapshot to resume from"
-  - when: "advancing a parent PLAN's status to `done`"
-    choose: "confirm all child PLANs are also `done` first"
-    over: "mark the parent done once its own primary deliverable is complete"
-    because: "a parent marked done with open children is a false-green at program level that hides unfinished dependent work"
+  - when: "A proposed Issue overlaps existing work"
+    choose: "Extend the Issue that owns the outcome when appropriate"
+    over: "Creating another Issue with the same deliverable"
+    because: "Each outcome needs a clear owner"
+  - when: "Work is being scheduled in parallel"
+    choose: "Check prerequisites and shared write paths before scheduling child Issues together"
+    over: "Starting parallel work from labels alone"
+    because: "Shared files and dependencies can invalidate the order"
+  - when: "A parent Issue is ready to close"
+    choose: "Verify its own acceptance conditions and the completion of required child Issues"
+    over: "Closing the parent when its first implementation merges"
+    because: "The parent describes the full outcome"
 ---
 
 # project management
 
-Cross-PLAN program/portfolio view for UT-TDD (FR-L1-01 PLAN-as-orchestration).
-This skill governs the multi-PLAN perspective: milestone health, inter-PLAN
-dependency sequencing, stall detection, and handover discipline at program
-boundaries.
+Use GitHub Issues and the project roadmap to track milestone outcomes, ownership, and dependencies. Follow the repository's Issue hierarchy rules.
 
-DISTINCT from `planning-and-task-breakdown`, which handles authoring the
-internal anatomy of a single PLAN (frontmatter fields, §工程表 steps,
-WBS granularity). This skill operates one level above: which PLANs exist,
-how they depend on each other, and whether the program as a whole is healthy.
+## Sequence work
 
-## When to load this skill
+- Search for an existing owner of the outcome. Use formal sub-issues for bounded deliverables under the owning Issue.
+- Record dependency links, serial reasons, and the files shared by concurrent work. Resolve dependency cycles before starting the affected work.
+- Track Add-feature and Reverse pairing through the relevant design and Issue links. For Recovery work, identify the affected gates and the evidence for resuming work.
+- Compare open Issues and PRs with the roadmap and verify merged work against the committed head and its CI.
 
-- Reviewing overall program state across multiple active PLANs before a
-  milestone or session handover.
-- `ut-tdd doctor` or `ut-tdd status` shows stalled, orphaned, or
-  dependency-blocked PLANs that span more than one layer group.
-- Deciding whether to launch a new PLAN or extend an existing one (overlap
-  detection).
-- A session boundary is crossed and a program-level handover must be written.
-- A Recovery or Incident drive requires enumerating which PLANs are
-  affected and in what sequence they should be unblocked.
+## Close a milestone
 
-## Program health commands
-
-```
-ut-tdd status               # active/stalled/draft PLANs across all layers
-ut-tdd doctor               # governance violations across the full program
-ut-tdd graph export         # relation graph diagram — spot cycles and orphans
-ut-tdd plan lint            # per-PLAN schema and dependency existence
-ut-tdd handover             # generate .ut-tdd/handover/CURRENT.json
-ut-tdd metrics skill       # skill firing / acceptance metrics (the only metrics subcommand)
-```
-
-Run `ut-tdd status` and `ut-tdd graph export --format mermaid` together at the start of a program
-review. A PLAN that has been `active` for more than one sprint without a
-`trace-freeze` advancement is a stall signal.
-
-## Per-requirement PLAN discipline
-
-One PLAN per FR that requires a design artifact. This is the foundational
-rule (FR-L1-01):
-
-- Lumping multiple FRs into one PLAN is a `ut-tdd plan lint` violation.
-- A PLAN without a corresponding FR in the requirement registry is an orphan
-  that `ut-tdd doctor` will surface.
-- When a new FR is elicited mid-program, a PLAN must be created before
-  implementation begins — retroactive PLANs are Reverse back-fills, not
-  Forward work.
-
-## Dependency sequencing at program level
-
-`ut-tdd graph export --format mermaid` renders the cross-artifact relation
-graph (PLANs plus design / test-design / source / test nodes — not a
-PLAN-only view; `ut-tdd graph impact --changed <path...>` computes the impact
-set of changed files). Before scheduling
-parallel work across agents:
-
-1. Identify the critical path (longest chain of `直列` dependencies).
-2. Mark PLANs that are `並列`-safe (no shared design doc writes, no
-   overlapping `generates` targets).
-3. Record the parallel/serial grouping in the program milestone note in
-   `.ut-tdd/handover/` — do not rely on memory alone.
-
-Cycles in the exported graph are hard blocks: a PLAN that directly or
-transitively depends on itself cannot advance; resolve by extracting the
-shared dependency into a new upstream PLAN.
-
-## Milestone handover discipline
-
-At each program milestone (layer group Forward freeze, Sprint boundary,
-Recovery closure, Incident post-mortem):
-
-1. Run `ut-tdd status` — confirm no active PLAN is stalled.
-2. Run `ut-tdd doctor` — exit 0 required before milestone is declared.
-3. Run `ut-tdd handover` — write `.ut-tdd/handover/CURRENT.json` with the
-   program state snapshot.
-4. Populate the handover `carry` field only with items verified against
-   actual PLAN status and `git log` — never copy forward a carry item that
-   is already `done` in the PLAN registry.
-5. Archive the prior `CURRENT.json` to `.ut-tdd/handover/archive/` before
-   overwriting.
-
-A milestone with no recorded handover is not closed.
-
-## PLAN overlap detection
-
-Before creating a new PLAN, run:
-
-```
-ut-tdd status               # check for existing PLANs at the same layer/FR
-ut-tdd plan lint            # will flag duplicate plan_id
-ut-tdd graph impact --changed <path...>   # shows what the proposed dependency would touch
-```
-
-If a candidate PLAN would duplicate more than 50% of an existing PLAN's
-`generates` artifacts, extend the existing PLAN rather than creating a new
-one.
-
-## Drive-model program patterns
-
-| Drive | Program-level concern |
-|-------|-----------------------|
-| Forward | One PLAN per FR; strict layer-descending order |
-| Add-feature | New PLAN requires Reverse back-fill PLAN in `dependencies` |
-| Recovery | Enumerate affected PLANs first; sequence unblock in `troubleshoot` PLAN |
-| Incident | Time-boxed; `status: active` PLANs frozen until incident PLAN is `done` |
-| Discovery | PoC PLANs time-boxed to S0-S4; `decision_outcome` required at S4 |
-| Scrum | Sprint boundary = milestone handover; carry items reviewed against code |
-
-## Anti-patterns
-
-- Using `ut-tdd handover` output as a substitute for reading PLAN status —
-  handover is a snapshot, not a live view; verify against `ut-tdd status`.
-- Advancing a PLAN to `done` without all its child PLANs also `done` —
-  false-green at program level.
-- Creating a PLAN for convenience (grouping work) rather than for a specific
-  FR — inflates program scope and breaks per-requirement traceability.
-- Scheduling all steps as `[並列]` to maximize speed — gates (pair-freeze,
-  trace-freeze, accept) are always `[直列]`; omitting them hides drift.
+Reconcile each outstanding item with its current Issue and PR. Record unresolved dependencies and the next owner in the handover. Close the parent only when its acceptance conditions and required child work are complete.

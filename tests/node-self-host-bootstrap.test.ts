@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
@@ -9,12 +9,35 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import * as bootstrap from "../src/runtime/node-bootstrap.ts";
+import { heavyAfterAll, heavyBeforeAll } from "./support/hook-bounds.ts";
+
+const sourceTrackingObservations = vi.hoisted(() => ({ active: false, gitLsFilesCalls: 0 }));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    execFileSync: (...args: Parameters<typeof actual.execFileSync>) => {
+      const commandArgs = args[1];
+      if (
+        sourceTrackingObservations.active &&
+        args[0] === "git" &&
+        Array.isArray(commandArgs) &&
+        commandArgs.some((argument) => String(argument) === "ls-files")
+      ) {
+        sourceTrackingObservations.gitLsFilesCalls += 1;
+      }
+      return actual.execFileSync(...args);
+    },
+  };
+});
 
 const root = process.cwd();
 
@@ -48,10 +71,12 @@ const build = (
     npmCliPath?: string;
     fault?: (barrier: string) => void;
     compileInputs?: Record<string, unknown>;
+    outputRoot?: string;
   } = {},
 ) =>
   bootstrap.buildNodeGeneration({
     repoRoot: root,
+    outputRoot: options.outputRoot,
     candidateRevision: candidate,
     nodePath: options.nodePath,
     npmCliPath: options.npmCliPath,
@@ -61,6 +86,45 @@ const build = (
       return { inputs: options.compileInputs ?? { "src/cli.ts": {} } };
     },
   });
+
+type BuildObservation =
+  | { ok: true; generation: bootstrap.NodeGeneration }
+  | { ok: false; error: unknown };
+
+async function observeBuild(options: Parameters<typeof build>[0]): Promise<BuildObservation> {
+  try {
+    return { ok: true, generation: await build(options) };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+function createDependencyFixture(): {
+  outputRoot: string;
+  absolute: (path: string) => string;
+  input: (path: string) => string;
+  write: (path: string, content: string) => string;
+  cleanup: () => void;
+} {
+  const fixtureRoot = mkdtempSync(join(root, "node_modules", ".ut-tdd-node-bootstrap-fixture-"));
+  const outputRoot = mkdtempSync(join(tmpdir(), "ut-tdd-node-bootstrap-output-"));
+  const absolute = (path: string): string => resolve(fixtureRoot, path);
+  return {
+    outputRoot,
+    absolute,
+    input: (path) => relative(root, absolute(path)).replaceAll("\\", "/"),
+    write: (path, content) => {
+      const target = absolute(path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content, "utf8");
+      return target;
+    },
+    cleanup: () => {
+      rmTestDist(outputRoot);
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    },
+  };
+}
 
 const buildReal = async () => {
   realGeneration ??= await bootstrap.buildNodeGeneration({
@@ -108,13 +172,11 @@ function createVerificationFixture(real: bootstrap.NodeGeneration): {
 }
 
 describe("F0b sealed Node producer candidate oracles", () => {
-  beforeAll(async () => {
+  heavyBeforeAll("pack", async () => {
     rmTestDist(resolve(root, "dist"));
     generation = await build();
   });
-  afterAll(() => {
-    rmTestDist(resolve(root, "dist"));
-  });
+  heavyAfterAll("teardown", () => rmTestDist(resolve(root, "dist")));
 
   it("CAND-NODEBOOT-001/102 seals and reloads one immutable receipt", () => {
     expect(generation.receipt.subject_revision).toBe(candidate);
@@ -189,6 +251,390 @@ describe("F0b sealed Node producer candidate oracles", () => {
     await expect(build({ compileInputs: { "../untracked.ts": {} } })).rejects.toThrow(
       /source-path-escape|source-untracked/,
     );
+  });
+
+  it("issue #1154 rejects an in-root untracked compile input with its typed error", async () => {
+    await expect(
+      build({ compileInputs: { "src/__issue1154_untracked_input__.ts": {} } }),
+    ).rejects.toMatchObject({
+      name: "NodeBootstrapError",
+      code: "node-bootstrap-source-untracked",
+    });
+  });
+
+  it("issue #1154 rejects an in-root untracked input even beside a tracked input", async () => {
+    await expect(
+      build({
+        compileInputs: {
+          "src/cli.ts": {},
+          "src/__issue1154_untracked_among_tracked__.ts": {},
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: "NodeBootstrapError",
+      code: "node-bootstrap-source-untracked",
+    });
+  });
+
+  it("issue #1154 rejects a case-variant compile input as untracked", async () => {
+    await expect(build({ compileInputs: { "src/CLI.ts": {} } })).rejects.toMatchObject({
+      name: "NodeBootstrapError",
+      code: "node-bootstrap-source-untracked",
+    });
+  });
+
+  it("issue #1154 normalizes native separators in tracked compile inputs", async () => {
+    const result = await build({
+      compileInputs: {
+        [join("src", "cli.ts")]: {},
+        "package.json": {},
+      },
+    });
+    expect(result.receipt.source_files.map(({ path }) => path)).toEqual([
+      "package.json",
+      "src/cli.ts",
+    ]);
+  });
+
+  it("issue #1154 checks three tracked compile inputs with one git ls-files invocation", async () => {
+    sourceTrackingObservations.gitLsFilesCalls = 0;
+    sourceTrackingObservations.active = true;
+    let result: bootstrap.NodeGeneration;
+    try {
+      result = await build({
+        compileInputs: {
+          "src/cli.ts": {},
+          "package.json": {},
+          "tsconfig.node.json": {},
+        },
+      });
+    } finally {
+      sourceTrackingObservations.active = false;
+    }
+    expect(result.receipt.source_files.map(({ path }) => path)).toEqual([
+      "package.json",
+      "src/cli.ts",
+      "tsconfig.node.json",
+    ]);
+    expect(sourceTrackingObservations.gitLsFilesCalls).toBe(1);
+  });
+
+  it("CAND-NODEBOOT-001 Issue #1343 variant resolves a type-only nested manifest to its owner", async () => {
+    const fixture = createDependencyFixture();
+    const packageRoot = "node_modules/@ut-tdd-test/owner";
+    const ownerManifest = `${packageRoot}/package.json`;
+    const nestedManifest = `${packageRoot}/lib/esm/package.json`;
+    const entry = `${packageRoot}/lib/esm/index.js`;
+    try {
+      fixture.write(
+        ownerManifest,
+        JSON.stringify({ name: "@ut-tdd-test/owner", version: "1.0.0" }),
+      );
+      fixture.write(nestedManifest, JSON.stringify({ type: "module" }));
+      fixture.write(entry, "export const value = 1;\n");
+      const observed = await observeBuild({
+        outputRoot: fixture.outputRoot,
+        compileInputs: { [fixture.input(entry)]: {} },
+      });
+      expect(observed).toMatchObject({ ok: true });
+      if (!observed.ok) return;
+      const dependency = observed.generation.receipt.external_dependencies.find(
+        (item) => item.package_name === "@ut-tdd-test/owner",
+      );
+      expect(dependency?.package_json_path).toBe(fixture.input(ownerManifest));
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("CAND-NODEBOOT-001 Issue #1343 variant does not rescue a missing owner manifest from an ancestor", async () => {
+    const fixture = createDependencyFixture();
+    const entry = "node_modules/owner-without-manifest/index.js";
+    try {
+      fixture.write(entry, "export const value = 1;\n");
+      const observed = await observeBuild({
+        outputRoot: fixture.outputRoot,
+        compileInputs: { [fixture.input(entry)]: {} },
+      });
+      expect(observed).toMatchObject({
+        ok: false,
+        error: expect.objectContaining({
+          name: "NodeBootstrapError",
+          code: "node-bootstrap-dependency-package-missing",
+        }),
+      });
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it.each([
+    ["missing", null],
+    ["malformed", "{not-json"],
+    ["name-version-missing", JSON.stringify({ type: "module" })],
+    ["name-version-invalid", JSON.stringify({ name: 42, version: [] })],
+  ] as const)("CAND-NODEBOOT-001 Issue #1343 variant rejects %s owner manifest despite a nested valid manifest", async (_caseName, ownerManifestContent) => {
+    const fixture = createDependencyFixture();
+    const packageRoot = "node_modules/@ut-tdd-test/invalid-owner";
+    const nestedManifest = `${packageRoot}/lib/esm/package.json`;
+    const entry = `${packageRoot}/lib/esm/index.js`;
+    try {
+      if (ownerManifestContent !== null)
+        fixture.write(`${packageRoot}/package.json`, ownerManifestContent);
+      fixture.write(
+        nestedManifest,
+        JSON.stringify({ name: "@ut-tdd-test/nested-rescue", version: "9.9.9" }),
+      );
+      fixture.write(entry, "export const value = 1;\n");
+      const observed = await observeBuild({
+        outputRoot: fixture.outputRoot,
+        compileInputs: { [fixture.input(entry)]: {} },
+      });
+      expect(observed).toMatchObject({
+        ok: false,
+        error: expect.objectContaining({
+          name: "NodeBootstrapError",
+          code: expect.stringMatching(/node-bootstrap-dependency-(package-missing|invalid)$/),
+        }),
+      });
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("CAND-NODEBOOT-001 Issue #1343 variant attributes a scoped package to its package root", async () => {
+    const fixture = createDependencyFixture();
+    const packageRoot = "node_modules/@ut-tdd-test/scoped";
+    const ownerManifest = `${packageRoot}/package.json`;
+    const entry = `${packageRoot}/index.js`;
+    try {
+      fixture.write(
+        ownerManifest,
+        JSON.stringify({ name: "@ut-tdd-test/scoped", version: "1.2.3" }),
+      );
+      fixture.write(entry, "export const value = 1;\n");
+      const observed = await observeBuild({
+        outputRoot: fixture.outputRoot,
+        compileInputs: { [fixture.input(entry)]: {} },
+      });
+      expect(observed.ok).toBe(true);
+      if (!observed.ok) return;
+      expect(observed.generation.receipt.external_dependencies).toContainEqual(
+        expect.objectContaining({
+          package_name: "@ut-tdd-test/scoped",
+          package_version: "1.2.3",
+          package_json_path: fixture.input(ownerManifest),
+        }),
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("CAND-NODEBOOT-001 Issue #1343 variant selects the inner package in nested node_modules", async () => {
+    const fixture = createDependencyFixture();
+    const outerRoot = "node_modules/@ut-tdd-test/outer";
+    const innerRoot = `${outerRoot}/node_modules/@ut-tdd-test/inner`;
+    const outerManifest = `${outerRoot}/package.json`;
+    const innerManifest = `${innerRoot}/package.json`;
+    const outerEntry = `${outerRoot}/index.js`;
+    const innerEntry = `${innerRoot}/index.js`;
+    try {
+      fixture.write(
+        outerManifest,
+        JSON.stringify({ name: "@ut-tdd-test/outer", version: "1.0.0" }),
+      );
+      fixture.write(
+        innerManifest,
+        JSON.stringify({ name: "@ut-tdd-test/inner", version: "2.0.0" }),
+      );
+      fixture.write(outerEntry, "export const outer = 1;\n");
+      fixture.write(innerEntry, "export const inner = 1;\n");
+      const observed = await observeBuild({
+        outputRoot: fixture.outputRoot,
+        compileInputs: {
+          [fixture.input(outerEntry)]: {},
+          [fixture.input(innerEntry)]: {},
+        },
+      });
+      expect(observed.ok).toBe(true);
+      if (!observed.ok) return;
+      expect(
+        observed.generation.receipt.external_dependencies.map((item) => [
+          item.package_name,
+          item.package_json_path,
+        ]),
+      ).toEqual(
+        expect.arrayContaining([
+          ["@ut-tdd-test/outer", fixture.input(outerManifest)],
+          ["@ut-tdd-test/inner", fixture.input(innerManifest)],
+        ]),
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("CAND-NODEBOOT-004 Issue #1343 variant rejects a lexical compile-input escape", async () => {
+    const fixture = createDependencyFixture();
+    try {
+      const observed = await observeBuild({
+        outputRoot: fixture.outputRoot,
+        compileInputs: { "../outside/node_modules/pkg/index.js": {} },
+      });
+      expect(observed).toMatchObject({
+        ok: false,
+        error: expect.objectContaining({
+          name: "NodeBootstrapError",
+          code: "node-bootstrap-source-path-escape",
+        }),
+      });
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("CAND-NODEBOOT-004 Issue #1343 variant rejects a symlinked package outside the repository", async () => {
+    const fixture = createDependencyFixture();
+    const outsideRoot = mkdtempSync(join(tmpdir(), "ut-tdd-node-bootstrap-outside-"));
+    try {
+      const link = fixture.absolute("node_modules/escaped-package");
+      const outsideManifest = join(outsideRoot, "package.json");
+      const outsideEntry = join(outsideRoot, "index.js");
+      mkdirSync(dirname(link), { recursive: true });
+      writeFileSync(outsideManifest, JSON.stringify({ name: "escaped-package", version: "1.0.0" }));
+      writeFileSync(outsideEntry, "export const value = 1;\n");
+      symlinkSync(outsideRoot, link, process.platform === "win32" ? "junction" : "dir");
+      const observed = await observeBuild({
+        outputRoot: fixture.outputRoot,
+        compileInputs: { [fixture.input("node_modules/escaped-package/index.js")]: {} },
+      });
+      expect(observed).toMatchObject({
+        ok: false,
+        error: expect.objectContaining({
+          name: "NodeBootstrapError",
+          code: "node-bootstrap-dependency-path-escape",
+        }),
+      });
+    } finally {
+      fixture.cleanup();
+      rmSync(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("CAND-NODEBOOT-B1 Issue #1343 variant seals the package-root manifest digest", async () => {
+    const fixture = createDependencyFixture();
+    const packageRoot = "node_modules/@ut-tdd-test/root-digest";
+    const ownerManifest = `${packageRoot}/package.json`;
+    const nestedManifest = `${packageRoot}/lib/esm/package.json`;
+    const entry = `${packageRoot}/lib/esm/index.js`;
+    try {
+      const originalManifest = fixture.write(
+        ownerManifest,
+        JSON.stringify({ name: "@ut-tdd-test/root-digest", version: "1.0.0" }),
+      );
+      fixture.write(
+        nestedManifest,
+        JSON.stringify({ name: "@ut-tdd-test/nested-module", version: "1.0.0", type: "module" }),
+      );
+      fixture.write(entry, "export const value = 1;\n");
+      const observed = await observeBuild({
+        outputRoot: fixture.outputRoot,
+        compileInputs: { [fixture.input(entry)]: {} },
+      });
+      expect(observed).toMatchObject({ ok: true });
+      if (!observed.ok) return;
+      const original = readFileSync(originalManifest);
+      try {
+        writeFileSync(originalManifest, Buffer.concat([original, Buffer.from("\nmutation\n")]));
+        expect(() =>
+          bootstrap.verifyNodeGeneration(root, observed.generation.generationPath, candidate),
+        ).toThrow(/dependency-digest-mismatch/);
+      } finally {
+        writeFileSync(originalManifest, original);
+      }
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("CAND-NODEBOOT-B1 Issue #1343 variant retains nested-manifest digest coverage", async () => {
+    const fixture = createDependencyFixture();
+    const packageRoot = "node_modules/@ut-tdd-test/nested-digest";
+    const ownerManifest = `${packageRoot}/package.json`;
+    const nestedManifest = `${packageRoot}/lib/esm/package.json`;
+    const entry = `${packageRoot}/lib/esm/index.js`;
+    try {
+      fixture.write(
+        ownerManifest,
+        JSON.stringify({ name: "@ut-tdd-test/nested-digest", version: "1.0.0" }),
+      );
+      const originalManifest = fixture.write(
+        nestedManifest,
+        JSON.stringify({ name: "@ut-tdd-test/nested-module", version: "2.0.0", type: "module" }),
+      );
+      fixture.write(entry, "export const value = 1;\n");
+      const observed = await observeBuild({
+        outputRoot: fixture.outputRoot,
+        compileInputs: { [fixture.input(entry)]: {} },
+      });
+      expect(observed.ok).toBe(true);
+      if (!observed.ok) return;
+      const dependency = observed.generation.receipt.external_dependencies.find(
+        (item) => item.package_name === "@ut-tdd-test/nested-digest",
+      );
+      expect(dependency?.package_json_path).toBe(fixture.input(ownerManifest));
+      const bundledPaths = observed.generation.receipt.external_dependencies.flatMap((item) =>
+        item.bundle_files.map((file) => file.path),
+      );
+      expect(bundledPaths).toContain(fixture.input(nestedManifest));
+      const original = readFileSync(originalManifest);
+      try {
+        writeFileSync(originalManifest, Buffer.concat([original, Buffer.from("\nmutation\n")]));
+        expect(() =>
+          bootstrap.verifyNodeGeneration(root, observed.generation.generationPath, candidate),
+        ).toThrow(/dependency-digest-mismatch/);
+      } finally {
+        writeFileSync(originalManifest, original);
+      }
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("CAND-NODEBOOT-B1 Issue #1343 variant rejects bundled JavaScript digest drift", async () => {
+    const fixture = createDependencyFixture();
+    const packageRoot = "node_modules/@ut-tdd-test/javascript-digest";
+    const ownerManifest = `${packageRoot}/package.json`;
+    const entry = `${packageRoot}/index.js`;
+    try {
+      fixture.write(
+        ownerManifest,
+        JSON.stringify({ name: "@ut-tdd-test/javascript-digest", version: "1.0.0" }),
+      );
+      const originalEntry = fixture.write(entry, "export const value = 1;\n");
+      const observed = await observeBuild({
+        outputRoot: fixture.outputRoot,
+        compileInputs: { [fixture.input(entry)]: {} },
+      });
+      expect(observed.ok).toBe(true);
+      if (!observed.ok) return;
+      const dependency = observed.generation.receipt.external_dependencies.find(
+        (item) => item.package_name === "@ut-tdd-test/javascript-digest",
+      );
+      expect(dependency?.bundle_files.map((file) => file.path)).toContain(fixture.input(entry));
+      const original = readFileSync(originalEntry);
+      try {
+        writeFileSync(originalEntry, Buffer.concat([original, Buffer.from("\nmutation\n")]));
+        expect(() =>
+          bootstrap.verifyNodeGeneration(root, observed.generation.generationPath, candidate),
+        ).toThrow(/dependency-digest-mismatch/);
+      } finally {
+        writeFileSync(originalEntry, original);
+      }
+    } finally {
+      fixture.cleanup();
+    }
   });
 
   it("CAND-NODEBOOT-B1 real bundle seals its external dependency closure", async () => {
@@ -270,5 +716,44 @@ describe("F0b sealed Node producer candidate oracles", () => {
       writeFileSync(builderPath, original);
       rmTestDist(fixture.root);
     }
+  });
+
+  it("ST-NODEPROBE-001 public probe route emits the bound four-check result", async () => {
+    const real = await buildReal();
+    const invocation = bootstrap.createNodeInvocation(real, [
+      "audit",
+      "node-invocation-probe",
+      "--generation",
+      real.generationPath,
+      "--json",
+    ]);
+    const child = spawnSync(real.nodePath, invocation.args, {
+      cwd: root,
+      ...invocation.options,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(child.error).toBeUndefined();
+    expect(child.status).toBe(0);
+    expect(JSON.parse(child.stdout ?? "")).toEqual({
+      schema: "node-invocation-probe-result/v1",
+      candidate_id: "CAND-NODEBOOT-201",
+      probe_id: "CAND-NODEBOOT-201/P1",
+      test_source: "src/cli.ts#audit node-invocation-probe",
+      production_target: "src/runtime/node-bootstrap.ts#createNodeInvocation",
+      generation_id: real.receipt.generation_id,
+      subject_revision: real.receipt.subject_revision,
+      compiled_cli_sha256: real.receipt.compiled_cli.sha256,
+      executed: 1,
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      checks: [
+        { id: "invocation-options", result: "passed" },
+        { id: "compiled-cli-argv0", result: "passed" },
+        { id: "node-path-absolute", result: "passed" },
+        { id: "compiled-cli-path-absolute", result: "passed" },
+      ],
+    });
   });
 });

@@ -27,15 +27,15 @@ decision_points:
   - when: "R3 is about to advance to R4 but PO has not reviewed the intent hypotheses"
     choose: "Block the advance until po_reviewed=true and po_review_evidence is populated"
     over: "Advancing to R4 on the hypotheses alone"
-    because: "PO verification is mandatory for R3; this is an operational rule — ut-tdd plan lint does not read po_reviewed / po_review_evidence (it only requires a po agent slot on an R3 reverse PLAN, src/plan/lint.ts:242), so the reviewer must confirm the sign-off by hand"
+    because: "PO verification is mandatory for R3 and the reviewer must confirm sign-off."
   - when: "Drafting the forward_routing candidate for a gap"
     choose: "Select the routing layer using the reverse.md §4 routing table"
     over: "Choosing a layer ad hoc based on where the gap seems to fit"
     because: "The routing table encodes the established L1/L3/L4/L5/gap-only mapping rules for consistency across Reverse cycles"
   - when: "Recording PO sign-off for the intent hypotheses"
-    choose: "Record it in the PLAN review_evidence field and in .ut-tdd/audit/"
+    choose: "Record it in the Reverse Issue and its linked evidence"
     over: "Treating a chat discussion with the PO as sufficient evidence"
-    because: "Only PLAN review_evidence and .ut-tdd/audit/ entries are machine-visible and verifiable at the R3-to-R4 gate"
+    because: "The Issue and linked evidence let the R3 reviewer verify the sign-off"
 ---
 
 # reverse r3
@@ -48,7 +48,7 @@ All 5 reverse types pass through R3 (no skip).
 
 ## When to load this skill
 
-- The `kind=reverse` PLAN has `workflow_phase: R3`.
+- The Reverse Issue has reached R3.
 
 ## Inputs
 
@@ -85,20 +85,18 @@ R3 cannot exit without PO sign-off. The PO reviews:
 - Do gap classifications (`confirmed`/`gap`/`conflict`) match PO's understanding?
 - Is the draft `forward_routing` selection appropriate?
 
-Record PO review evidence in the PLAN `review_evidence` field and in
-`.ut-tdd/audit/` before advancing.
+Record PO review evidence in the Reverse Issue or linked audit evidence before advancing.
 
 ## Output artifact: intent-hypotheses
 
-Write to `.ut-tdd/reverse/<plan_id>/R3-intent-hypotheses.yaml`:
+Record R3-intent-hypotheses.yaml as Reverse evidence and link it in the Issue:
 
 ```yaml
-plan_id: <PLAN-REVERSE-NN>
 hypotheses:
   - id: <H-NN>
     subject: ""          # module, contract, or design element
     classification: <confirmed|gap|conflict>
-    linked_forward_artifact: <PLAN-ID or FR-ID or null>
+    linked_forward_artifact: <design reference, FR ID, or null>
     conflict_gate: <G1|G3|G4|G5 or null>
     draft_routing: <L1|L3|L4|L5|gap-only>
     intent_summary: ""
@@ -116,11 +114,8 @@ Before advancing `workflow_phase` to `R4`, verify:
 - [ ] Conflict entries name the specific Forward gate to invalidate.
 - [ ] Each hypothesis has a `draft_routing` value from the valid enum
   (L1/L3/L4/L5/gap-only).
-- [ ] PLAN `review_evidence` field is updated with PO sign-off reference.
-- [ ] `ut-tdd plan lint` exits 0 with `workflow_phase: R4`.
+- [ ] The Reverse Issue links the PO sign-off.
 - [ ] `ut-tdd doctor` exits 0.
 
 Advancing R3 without PO verification is a blocking violation by operational rule.
-`po_reviewed` / `po_review_evidence` are not machine-checked: `ut-tdd plan lint`
-only requires a `po` agent slot on a `reverse` PLAN at `workflow_phase: R3`
-(`src/plan/lint.ts:242`), which does not prove sign-off happened.
+The reviewer verifies `po_reviewed` and `po_review_evidence` at R3.

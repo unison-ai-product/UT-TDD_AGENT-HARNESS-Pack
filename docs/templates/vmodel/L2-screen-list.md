@@ -6,15 +6,15 @@ source_id: [ZIP-DOC-004]
 source_entries:
   - zip_entry: "vmodel-docgen-clean/templates/04_基本設計書.yaml"
     sha256: "sha256:08e051b946f099feaf0aa2d83844a376478e7ba56f3362b00c2648f99da83873"
-disposition_target: "PLAN-L7-676 §3.5.3 (直接の source document が無く、04 基本設計書の画面節と diagrams.yaml の画面遷移図から構成)"
-construction_note: "本 slot は disposition catalog の直接対応が無い例外 (PLAN-L7-676 §3.5.3)。source は 04 基本設計書の画面一覧/画面遷移章と、diagrams.yaml `画面遷移図` (semantic item catalog `d_screen`) の組み合わせに限り、新規の書き起こしはしていない。"
+disposition_target: "対応 Issue #676 (直接の source document が無く、04 基本設計書の画面節と diagrams.yaml の画面遷移図から構成)"
+construction_note: "本 slot は disposition catalog の直接対応が無い例外 (対応 Issue #676)。source は 04 基本設計書の画面一覧/画面遷移章と、diagrams.yaml `画面遷移図` (semantic item catalog `d_screen`) の組み合わせに限り、新規の書き起こしはしていない。"
 pair_artifact: docs/test-design/harness/L7-release-consumer-dev-start-test-design.md
-plan: docs/plans/PLAN-<id>.md
+issue: <Issue 番号>
 ---
 
 # DOC-L2-SCREEN: 画面一覧・画面遷移
 
-本テンプレートは checked ZIP に L2 の直接 source document が無いため、PLAN-L7-676 §3.5.3 の指示どおり 04 基本設計書の画面節と `diagrams.yaml` の画面遷移図 (semantic item catalog `d_screen`) を組み合わせて構成した。新規の書き起こしは行っていない。
+本テンプレートは checked ZIP に L2 の直接 source document が無いため、対応 Issue #676 の方針どおり 04 基本設計書の画面節と `diagrams.yaml` の画面遷移図 (semantic item catalog `d_screen`) を組み合わせて構成した。新規の書き起こしは行っていない。
 
 ### 構成元: 04 基本設計書 第4章 画面一覧
 

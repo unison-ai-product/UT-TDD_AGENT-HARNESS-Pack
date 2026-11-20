@@ -33,11 +33,6 @@ import {
   proposalDocumentCoverageMessages,
 } from "../lint/proposal-document-coverage.ts";
 import {
-  analyzeRightArmGatePlanning,
-  loadRightArmGatePlanningInput,
-  rightArmGatePlanningMessages,
-} from "../lint/right-arm-gate-planning.ts";
-import {
   analyzeRightLungDocGovernance,
   canLoadRightLungDocGovernanceInput,
   loadRightLungDocGovernanceInput,
@@ -78,18 +73,6 @@ export function checkImprovementBacklog(repoRoot: string): { messages: string[];
   } catch {
     return {
       messages: ["improvement-backlog — violation: docs/improvement-backlog.md could not be read"],
-      ok: false,
-    };
-  }
-}
-
-export function checkRightArmGatePlanning(repoRoot: string): { messages: string[]; ok: boolean } {
-  try {
-    const r = analyzeRightArmGatePlanning(loadRightArmGatePlanningInput(repoRoot));
-    return { messages: rightArmGatePlanningMessages(r), ok: r.ok };
-  } catch {
-    return {
-      messages: ["right-arm-gate-planning - violation: G8-G14 carry docs could not be read"],
       ok: false,
     };
   }

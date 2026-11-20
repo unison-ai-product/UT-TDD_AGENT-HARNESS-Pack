@@ -58,7 +58,7 @@ describe("tracked checked V-model authoring loader", () => {
         "target_kind",
         "target_ref",
         "判断理由",
-        "plan_id",
+        "issue",
       ],
       163,
     );

@@ -14,21 +14,22 @@
  * 344 件は `ORACLE_TEST_TRACE_WIDENED_BASELINE` へ ratchet した (既存 89 とは別集合)。
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { ORACLE_ID_DUPLICATE_BASELINE } from "./oracle-id-duplicate-baseline.ts";
 import { collectOracleCitationSites, type OracleCitationSite } from "./oracle-test-citation.ts";
-import { ORACLE_TEST_CITATION_BASELINE } from "./oracle-test-citation-baseline.ts";
-import { ORACLE_TEST_TRACE_BASELINE } from "./oracle-test-trace-baseline.ts";
-import { ORACLE_TEST_TRACE_WIDENED_BASELINE } from "./oracle-test-trace-widened-baseline.ts";
+
+declare const __UT_TDD_BUNDLED__: boolean;
+
+const bundled = typeof __UT_TDD_BUNDLED__ !== "undefined" && __UT_TDD_BUNDLED__ === true;
+
+const EMBEDDED_ORACLE_BASELINE = bundled
+  ? (require("ut-tdd-oracle-test-trace-baseline") as string)
+  : null;
 
 export type { OracleCitationSite } from "./oracle-test-citation.ts";
-export {
-  collectOracleCitationSites,
-  ORACLE_ID_DUPLICATE_BASELINE,
-  ORACLE_TEST_CITATION_BASELINE,
-  ORACLE_TEST_TRACE_BASELINE,
-  ORACLE_TEST_TRACE_WIDENED_BASELINE,
-};
+export { collectOracleCitationSites, ORACLE_ID_DUPLICATE_BASELINE };
 
 /**
  * oracle ID パターン (`U-RELGRAPH-001` / `ST-DATA-01` / `U-RVGHA-D3C-001` 等)。
@@ -61,6 +62,333 @@ export interface OracleTestTraceInput {
   citationBaseline?: ReadonlySet<string>;
 }
 
+const BASELINE_JSON_PATH = "docs/governance/oracle-test-trace-baseline.json" as const;
+
+export type OracleTraceFailureReason =
+  | "authority_read_failed"
+  | "baseline_asset_missing"
+  | "baseline_json_malformed"
+  | "baseline_schema_invalid"
+  | "baseline_id_invalid"
+  | "baseline_id_duplicate"
+  | "baseline_sets_overlap";
+
+export class OracleTestTraceLoadError extends Error {
+  readonly reason: OracleTraceFailureReason;
+
+  constructor(reason: OracleTraceFailureReason) {
+    super(reason);
+    this.name = "OracleTestTraceLoadError";
+    this.reason = reason;
+  }
+}
+
+export type OracleTracePortResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: "authority_read_failed" };
+
+export interface OracleTraceAuthority {
+  readText(path: typeof BASELINE_JSON_PATH): OracleTracePortResult<string | null>;
+}
+
+export interface OracleTestTracePorts {
+  authority?: OracleTraceAuthority;
+}
+
+export type OracleTraceGitIoFailureReason =
+  | "git_first_parent_read_failed"
+  | "git_object_read_failed";
+
+export type OracleTraceGitPortResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: OracleTraceGitIoFailureReason };
+
+export type OracleTraceGitPath =
+  | typeof BASELINE_JSON_PATH
+  | "src/lint/oracle-test-trace-baseline.ts"
+  | "src/lint/oracle-test-trace-widened-baseline.ts"
+  | "src/lint/oracle-test-citation-baseline.ts";
+
+export type OracleBaselineRatchetFailureReason =
+  | "pr_context_invalid"
+  | "git_first_parent_missing"
+  | "git_first_parent_read_failed"
+  | "git_baseline_missing"
+  | "git_object_read_failed"
+  | "trusted_baseline_invalid"
+  | "baseline_growth"
+  | "bootstrap_base_invalid"
+  | "bootstrap_value_mismatch";
+
+export interface OracleBaselineRatchetInput {
+  /** Loader と同じ authority binding を composition で受け取る。 */
+  authority: OracleTraceAuthority;
+  ci: {
+    eventName: string;
+    mergeSha: string;
+    git: {
+      readTextAt(
+        commitSha: string,
+        path: OracleTraceGitPath,
+      ): OracleTraceGitPortResult<string | null>;
+      readFirstParent(mergeSha: string): OracleTraceGitPortResult<string | null>;
+    };
+  };
+}
+
+export type OracleBaselineRatchetResult =
+  | { ok: true }
+  | { ok: false; reason: OracleBaselineRatchetFailureReason };
+
+const BASELINE_ARRAY_KEYS = ["legacy", "widened", "citations"] as const;
+const ORACLE_ID_TOKEN = /^(?:U|IT|ST|P|M)-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{2,3}(?![\s\S])/u;
+const IMMUTABLE_SHA = /^[0-9a-f]{40}(?![\s\S])/iu;
+
+interface DecodedOracleBaseline {
+  legacy: Set<string>;
+  widened: Set<string>;
+  citations: Set<string>;
+}
+
+function decodeOracleBaseline(text: string): DecodedOracleBaseline {
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    throw new OracleTestTraceLoadError("baseline_json_malformed");
+  }
+
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new OracleTestTraceLoadError("baseline_schema_invalid");
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  const expectedKeys = ["citations", "legacy", "schemaVersion", "widened"];
+  if (
+    keys.length !== expectedKeys.length ||
+    keys.some((key, index) => key !== expectedKeys[index]) ||
+    record.schemaVersion !== 2
+  ) {
+    throw new OracleTestTraceLoadError("baseline_schema_invalid");
+  }
+
+  const sets = {} as DecodedOracleBaseline;
+  for (const key of BASELINE_ARRAY_KEYS) {
+    const ids = record[key];
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string"))
+      throw new OracleTestTraceLoadError("baseline_schema_invalid");
+    const strings = ids as string[];
+    if (strings.some((id) => !ORACLE_ID_TOKEN.test(id)))
+      throw new OracleTestTraceLoadError("baseline_id_invalid");
+    if (new Set(strings).size !== strings.length)
+      throw new OracleTestTraceLoadError("baseline_id_duplicate");
+    sets[key] = new Set(strings);
+  }
+  if ([...sets.legacy].some((id) => sets.widened.has(id)))
+    throw new OracleTestTraceLoadError("baseline_sets_overlap");
+  return sets;
+}
+
+function defaultOracleTraceAuthority(): OracleTraceAuthority {
+  return {
+    readText(path) {
+      if (bundled) {
+        if (EMBEDDED_ORACLE_BASELINE === null)
+          return { ok: false, reason: "authority_read_failed" };
+        return { ok: true, value: EMBEDDED_ORACLE_BASELINE };
+      }
+      const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+      try {
+        return { ok: true, value: readFileSync(resolve(sourceRoot, path), "utf8") };
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "ENOENT")
+          return { ok: true, value: null };
+        return { ok: false, reason: "authority_read_failed" };
+      }
+    },
+  };
+}
+
+function parseBootstrapSource(text: string, expectedName: string): Set<string> | null {
+  const transpiled = ts.transpileModule(text, {
+    fileName: expectedName,
+    reportDiagnostics: true,
+    compilerOptions: { target: ts.ScriptTarget.Latest },
+  });
+  if (
+    transpiled.diagnostics?.some(
+      (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+    )
+  )
+    return null;
+  const source = ts.createSourceFile(
+    expectedName,
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  if (source.statements.length !== 1) return null;
+  const statement = source.statements[0];
+  if (!statement) return null;
+  if (!ts.isVariableStatement(statement)) return null;
+  if (!statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword))
+    return null;
+  if (
+    !(statement.declarationList.flags & ts.NodeFlags.Const) ||
+    statement.declarationList.declarations.length !== 1
+  )
+    return null;
+  const declaration = statement.declarationList.declarations[0];
+  if (!declaration) return null;
+  if (!ts.isIdentifier(declaration.name) || declaration.name.text !== expectedName) return null;
+  const declarationType = declaration.type;
+  if (
+    !declarationType ||
+    !ts.isTypeReferenceNode(declarationType) ||
+    !ts.isIdentifier(declarationType.typeName) ||
+    declarationType.typeName.text !== "ReadonlySet"
+  ) {
+    return null;
+  }
+  const typeArguments = declarationType.typeArguments;
+  if (!typeArguments || typeArguments.length !== 1) return null;
+  const typeArgument = typeArguments[0];
+  if (!typeArgument || typeArgument.kind !== ts.SyntaxKind.StringKeyword) return null;
+  const initializer = declaration.initializer;
+  const setArgument =
+    initializer && ts.isNewExpression(initializer) ? initializer.arguments?.[0] : undefined;
+  if (
+    !initializer ||
+    !ts.isNewExpression(initializer) ||
+    !ts.isIdentifier(initializer.expression) ||
+    initializer.expression.text !== "Set" ||
+    (initializer.typeArguments?.length ?? 0) !== 0 ||
+    initializer.arguments?.length !== 1 ||
+    !setArgument ||
+    !ts.isArrayLiteralExpression(setArgument)
+  ) {
+    return null;
+  }
+  const ids: string[] = [];
+  for (const element of setArgument.elements) {
+    if (!ts.isStringLiteral(element) || !ORACLE_ID_TOKEN.test(element.text)) return null;
+    ids.push(element.text);
+  }
+  if (new Set(ids).size !== ids.length) return null;
+  return new Set(ids);
+}
+
+const BOOTSTRAP_SOURCES = [
+  {
+    path: "src/lint/oracle-test-trace-baseline.ts",
+    name: "ORACLE_TEST_TRACE_BASELINE",
+    key: "legacy",
+    count: 89,
+  },
+  {
+    path: "src/lint/oracle-test-trace-widened-baseline.ts",
+    name: "ORACLE_TEST_TRACE_WIDENED_BASELINE",
+    key: "widened",
+    count: 317,
+  },
+  {
+    path: "src/lint/oracle-test-citation-baseline.ts",
+    name: "ORACLE_TEST_CITATION_BASELINE",
+    key: "citations",
+    count: 582,
+  },
+] as const;
+
+function sameSet(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
+}
+
+function isPortFailure<T>(
+  result: OracleTraceGitPortResult<T>,
+): result is { ok: false; reason: OracleTraceGitIoFailureReason } {
+  return !result.ok;
+}
+
+function readFirstParentSafely(
+  git: OracleBaselineRatchetInput["ci"]["git"],
+  mergeSha: string,
+): OracleTraceGitPortResult<string | null> {
+  try {
+    return git.readFirstParent(mergeSha);
+  } catch {
+    return { ok: false, reason: "git_first_parent_read_failed" };
+  }
+}
+
+function readTextAtSafely(
+  git: OracleBaselineRatchetInput["ci"]["git"],
+  commitSha: string,
+  path: OracleTraceGitPath,
+): OracleTraceGitPortResult<string | null> {
+  try {
+    return git.readTextAt(commitSha, path);
+  } catch {
+    return { ok: false, reason: "git_object_read_failed" };
+  }
+}
+
+/** CI-only immutable Git-tree comparison; it never consults working files or authority.readText. */
+export function checkOracleBaselineRatchet(
+  input: OracleBaselineRatchetInput,
+): OracleBaselineRatchetResult {
+  const { eventName, mergeSha, git } = input.ci;
+  if (eventName !== "pull_request" || !IMMUTABLE_SHA.test(mergeSha))
+    return { ok: false, reason: "pr_context_invalid" };
+
+  const parentResult = readFirstParentSafely(git, mergeSha);
+  if (isPortFailure(parentResult)) return { ok: false, reason: "git_first_parent_read_failed" };
+  const baseSha = parentResult.value;
+  if (baseSha === null) return { ok: false, reason: "git_first_parent_missing" };
+  if (!IMMUTABLE_SHA.test(baseSha)) return { ok: false, reason: "git_first_parent_read_failed" };
+
+  const baseTextResult = readTextAtSafely(git, baseSha, BASELINE_JSON_PATH);
+  if (isPortFailure(baseTextResult)) return { ok: false, reason: "git_object_read_failed" };
+
+  let base: DecodedOracleBaseline | null = null;
+  if (baseTextResult.value !== null) {
+    try {
+      base = decodeOracleBaseline(baseTextResult.value);
+    } catch {
+      return { ok: false, reason: "trusted_baseline_invalid" };
+    }
+  }
+
+  const headTextResult = readTextAtSafely(git, mergeSha, BASELINE_JSON_PATH);
+  if (isPortFailure(headTextResult)) return { ok: false, reason: "git_object_read_failed" };
+  if (headTextResult.value === null) return { ok: false, reason: "git_baseline_missing" };
+  let head: DecodedOracleBaseline;
+  try {
+    head = decodeOracleBaseline(headTextResult.value);
+  } catch {
+    return { ok: false, reason: "trusted_baseline_invalid" };
+  }
+
+  if (base === null) {
+    const oldSets = {} as DecodedOracleBaseline;
+    for (const source of BOOTSTRAP_SOURCES) {
+      const result = readTextAtSafely(git, baseSha, source.path);
+      if (isPortFailure(result)) return { ok: false, reason: "git_object_read_failed" };
+      if (result.value === null) return { ok: false, reason: "bootstrap_base_invalid" };
+      const parsed = parseBootstrapSource(result.value, source.name);
+      if (parsed === null) return { ok: false, reason: "bootstrap_base_invalid" };
+      oldSets[source.key] = parsed;
+      if (parsed.size !== source.count) return { ok: false, reason: "bootstrap_value_mismatch" };
+    }
+    return BASELINE_ARRAY_KEYS.every((key) => sameSet(oldSets[key], head[key]))
+      ? { ok: true }
+      : { ok: false, reason: "bootstrap_value_mismatch" };
+  }
+
+  return BASELINE_ARRAY_KEYS.every((key) => [...head[key]].every((id) => base[key].has(id)))
+    ? { ok: true }
+    : { ok: false, reason: "baseline_growth" };
+}
+
 export interface OracleDeclarationSite {
   id: string;
   path: string;
@@ -74,7 +402,8 @@ export interface OracleDeclarationSite {
  */
 type DeclarationMirror =
   | { kind: "it-case"; role: "summary" | "canonical" }
-  | { kind: "resource-kernel"; role: "summary" | "canonical" };
+  | { kind: "resource-kernel"; role: "summary" | "canonical" }
+  | { kind: "system-oracle"; role: "canonical" };
 
 interface RawOracleDeclarationSite extends OracleDeclarationSite {
   mirror: DeclarationMirror | null;
@@ -259,6 +588,16 @@ function declarationMirror(headers: readonly string[]): DeclarationMirror | null
     return { kind: "it-case", role: "canonical" };
   }
 
+  // L9 system-oracle matrix pairs an ST oracle with its AC contract in one cell.
+  if (
+    has("st-id / ac") &&
+    has("system fixture / fault") &&
+    (has("positive expected") || hasContaining("正oracle")) &&
+    (has("negative expected") || hasContaining("負oracle"))
+  ) {
+    return { kind: "system-oracle", role: "canonical" };
+  }
+
   // Resource Kernel overview and its freeze-attribute table.
   if (has("id") && has("boundary / fault injection") && has("expected")) {
     return { kind: "resource-kernel", role: "summary" };
@@ -305,10 +644,17 @@ function collectDeclarationSitesFromFile(
       tableHeaders = cells;
       continue;
     }
+    const mirror = declarationMirror(tableHeaders ?? []);
     const idCells = cells.flatMap((cell, cellIndex) => {
       const matches = oracleMatches(cell);
       const normalized = cell.replace(/`/g, "").trim();
-      return matches.length === 1 && normalized === matches[0]
+      const systemOraclePair =
+        mirror?.kind === "system-oracle" && cellIndex === 0
+          ? normalized.match(
+              /^(ST-([A-Z0-9]+-[0-9]{2,3}))\s*\/\s*AC-\2(?:\s+\*\*DEFERRED\*\*)?$/u,
+            )?.[1]
+          : undefined;
+      return matches.length === 1 && (normalized === matches[0] || systemOraclePair === matches[0])
         ? [{ cellIndex, id: matches[0] }]
         : [];
     });
@@ -326,7 +672,7 @@ function collectDeclarationSitesFromFile(
         path: relativePath,
         line: index + 1,
         description,
-        mirror: declarationMirror(tableHeaders ?? []),
+        mirror,
       });
     }
   }
@@ -390,29 +736,37 @@ export function collectOracleIds(repoRoot: string): {
   declarationSites: OracleDeclarationSite[];
   citationSites: OracleCitationSite[];
 } {
-  const declared = new Set<string>();
-  collectIds(join(repoRoot, "docs", "test-design"), ".md", declared);
+  const declarationSites = collectOracleDeclarationSites(repoRoot);
+  const declared = new Set(declarationSites.map((site) => site.id));
   const referenced = new Set<string>();
   collectIds(join(repoRoot, "tests"), ".ts", referenced);
   return {
     declared,
     referenced,
-    declarationSites: collectOracleDeclarationSites(repoRoot),
+    declarationSites,
     citationSites: collectOracleCitationSites(repoRoot),
   };
 }
 
-export function loadOracleTestTraceInput(repoRoot: string): OracleTestTraceInput {
+export function loadOracleTestTraceInput(
+  repoRoot: string,
+  ports?: OracleTestTracePorts,
+): OracleTestTraceInput {
   const { declared, referenced, declarationSites, citationSites } = collectOracleIds(repoRoot);
+  const authority = ports?.authority ?? defaultOracleTraceAuthority();
+  const result = authority.readText(BASELINE_JSON_PATH);
+  if (!result.ok) throw new OracleTestTraceLoadError(result.reason);
+  if (result.value === null) throw new OracleTestTraceLoadError("baseline_asset_missing");
+  const baseline = decodeOracleBaseline(result.value);
   return {
     declared: [...declared],
     referenced,
-    baseline: ORACLE_TEST_TRACE_BASELINE,
-    widenedBaseline: ORACLE_TEST_TRACE_WIDENED_BASELINE,
+    baseline: baseline.legacy,
+    widenedBaseline: baseline.widened,
     declarationSites,
     duplicateBaseline: ORACLE_ID_DUPLICATE_BASELINE,
     citationSites,
-    citationBaseline: ORACLE_TEST_CITATION_BASELINE,
+    citationBaseline: baseline.citations,
   };
 }
 

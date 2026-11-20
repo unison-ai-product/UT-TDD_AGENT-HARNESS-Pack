@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseCommitFileSubjects, parseGitLogSubjects } from "../src/github/guard-commit-range.ts";
 import {
   buildReleasePublicationPlan,
   evaluateGithubOpsGuard,
@@ -81,6 +82,41 @@ describe("github ops guard", () => {
     expect(result.findings).toContainEqual(
       expect.objectContaining({ code: "commitlint-invalid", evidence: "bad commit message" }),
     );
+  });
+
+  it("does not treat an explicit subject file's final newline as an empty subject", () => {
+    const subjects = parseCommitFileSubjects("feat: add github guard\n");
+
+    expect(subjects).toEqual(["feat: add github guard"]);
+    expect(
+      evaluateGithubOpsGuard({
+        headRef: "feature/github-ops",
+        baseRef: "main",
+        commitSubjects: subjects,
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("rejects empty subjects in explicit files and git-log records", () => {
+    const fileSubjects = parseCommitFileSubjects("feat: add github guard\n\n");
+    const gitSubjects = parseGitLogSubjects("feat: add github guard\0\n\0\n");
+
+    expect(fileSubjects).toEqual(["feat: add github guard", "<empty commit subject>"]);
+    expect(gitSubjects).toEqual(["feat: add github guard", "<empty commit subject>"]);
+    for (const subjects of [fileSubjects, gitSubjects]) {
+      expect(
+        evaluateGithubOpsGuard({
+          headRef: "feature/github-ops",
+          baseRef: "main",
+          commitSubjects: subjects,
+        }).findings,
+      ).toContainEqual(
+        expect.objectContaining({
+          code: "commitlint-invalid",
+          evidence: "<empty commit subject>",
+        }),
+      );
+    }
   });
 
   it("renders a non-destructive release publication plan", () => {

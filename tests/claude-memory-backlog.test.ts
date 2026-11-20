@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,6 +29,7 @@ import { resolveProjectMemoryRoot } from "../src/runtime/project-memory-root.ts"
 import { openHarnessDb } from "../src/state-db/index.ts";
 import { migrate } from "../src/state-db/migration.ts";
 import { ensureTrackedProjectIdentity } from "./support/project-identity-fixture.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const projectMemoryRootResolution = vi.hoisted(() => ({ count: 0 }));
 const directoryReadObservations = vi.hoisted(() => ({ paths: [] as string[] }));
@@ -127,7 +127,7 @@ describe("Claude memory delivery backlog visibility", () => {
         workspaceId,
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -153,7 +153,7 @@ describe("Claude memory delivery backlog visibility", () => {
       );
       expect(directoryReadObservations.paths).not.toContain(inboxDirectory);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -193,7 +193,7 @@ describe("Claude memory delivery backlog visibility", () => {
       expect(readdirSync(runtimeRoot).some((name) => name.endsWith(".terminal.json"))).toBe(true);
       expect(existsSync(inboxPath)).toBe(true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -227,7 +227,7 @@ describe("Claude memory delivery backlog visibility", () => {
       expect(summary.targetMismatchOldestAgeMs).toBeGreaterThan(0);
       expect(summary.warningCodes).toContain("target_mismatch");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -295,10 +295,10 @@ describe("Claude memory delivery backlog visibility", () => {
         expect(legacy.activeSessionCount).toBe(0);
         expect(legacy.warningCodes).toContain("session_unknown");
       } finally {
-        rmSync(markerRoot, { recursive: true, force: true });
+        removeTestTree(markerRoot);
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -333,7 +333,7 @@ describe("Claude memory delivery backlog visibility", () => {
       );
       expect(inspectClaudeMemoryWakeHook(root)).toMatchObject({ configured: true });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -358,7 +358,7 @@ describe("Claude memory delivery backlog visibility", () => {
       expect(warning).toHaveBeenCalledWith(expect.stringContaining("delivery is unconfirmed"));
     } finally {
       warning.mockRestore();
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -388,7 +388,7 @@ describe("Claude memory delivery backlog visibility", () => {
         database.close();
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

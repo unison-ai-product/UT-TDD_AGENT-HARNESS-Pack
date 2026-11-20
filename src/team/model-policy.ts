@@ -14,8 +14,8 @@ const CODEX_WORKER_MODEL_ID = "gpt-6-luna";
  */
 export const MODEL_IDS = {
   claude: {
-    /** Claude 5.1 世代フロンティア (advisor 一次相談先、PO 2026-10 更新)。 */
-    fable: "claude-fable-5-1",
+    /** Claude 5.2 世代フロンティア (advisor 一次相談先、PO 2026-10 更新)。 */
+    fable: "claude-fable-5-2",
     opus: "claude-opus-5-5",
     sonnet: "claude-sonnet-5-5",
     haiku: "claude-haiku-5-5",
@@ -89,8 +89,7 @@ export function advisorHeavyUseRecommended(input: {
 /**
  * レビュー 3 面 (PO 2026-07-14): 設計レビュー / 実装レビュー / ブラインドレビュー。
  * いずれも frontier 帯 (Sol / Opus 以上) を floor とし、hybrid では非作成側 provider が担う。
- * blind-review は author の主張・意図を遮断した packet で実施 (.claude/agents/blind-reviewer.md /
- * `ut-tdd codex --role blind-reviewer`)。
+ * blind-review は author の主張・意図を遮断した packet で実施 (`ut-tdd claude|codex --role blind-reviewer`)。
  */
 export const REVIEW_LANES = ["design-review", "implementation-review", "blind-review"] as const;
 export type ReviewLane = (typeof REVIEW_LANES)[number];
@@ -100,6 +99,23 @@ export const REVIEW_LANE_MODELS: Record<ReviewLane, { claude: string; codex: str
   "implementation-review": { claude: MODEL_IDS.claude.opus, codex: MODEL_IDS.codex.frontier },
   "blind-review": { claude: MODEL_IDS.claude.opus, codex: MODEL_IDS.codex.frontier },
 };
+
+/**
+ * 判断ゲート role の model 下限 (L6 agent-guard-delegation-boundary §5.1)。
+ * provider ごとの下限は REVIEW_LANE_MODELS の各 lane の model の rank の最小値。
+ * rank 表に無い model、provider と異なる族の model は下限未満として扱う (未知を通さない)。
+ * delegation routing と review custody の入口が同じ関数を使う。
+ */
+export function isReviewFloorModel(provider: "claude" | "codex", model: string): boolean {
+  const ids: readonly string[] = Object.values(MODEL_IDS[provider]);
+  if (!ids.includes(model)) return false;
+  const rank = MODEL_CAPABILITY_RANK[model];
+  if (rank === undefined) return false;
+  const floor = Math.min(
+    ...REVIEW_LANES.map((lane) => MODEL_CAPABILITY_RANK[REVIEW_LANE_MODELS[lane][provider]]),
+  );
+  return rank >= floor;
+}
 
 /**
  * プランエージェント (PO 2026-07-14): 一次 = Fable、Fable 不在 (レート制限/エラー) 時は

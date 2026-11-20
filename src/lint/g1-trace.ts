@@ -1,43 +1,27 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { resolveAuthoringSourceAbsolutePath } from "../shared/design-root.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { resolveAuthoringSourceAbsolutePath, resolveDesignRoot } from "../shared/design-root.ts";
+import { analyzeConsumerG1Trace } from "./consumer-trace.ts";
+import type { LintResult } from "./lint-result.ts";
 
 export interface G1TraceDocs {
   business: string;
   functional: string;
   screen: string;
-  plans: { file: string; content: string }[];
 }
 
 export interface G1TraceResult {
   orphanBusiness: string[];
   orphanScreen: string[];
   orphanP0Fr: string[];
-  missingL3Requires: { file: string; missing: string[] }[];
   totals: {
     business: number;
     screen: number;
     p0Fr: number;
-    l3Plans: number;
   };
 }
 
-const REQUIRED_L3_REQUIRES = [
-  "PLAN-L1-01-business-requirements",
-  "PLAN-L1-02-functional-requirements",
-  "PLAN-L1-03-screen-requirements",
-] as const;
-
 export function loadG1TraceDocs(repoRoot: string = process.cwd()): G1TraceDocs {
-  const plansDir = resolve(repoRoot, "docs/plans");
-  const plans = existsSync(plansDir)
-    ? readdirSync(plansDir)
-        .filter((f) => /^PLAN-L3-\d+-.+\.md$/.test(f))
-        .map((f) => ({
-          file: join("docs", "plans", f),
-          content: readFileSync(resolve(plansDir, f), "utf8"),
-        }))
-    : [];
   const readRequired = (path: string): string => {
     const absolute = resolveAuthoringSourceAbsolutePath(repoRoot, path);
     if (!existsSync(absolute)) throw new Error(`required doc not created: ${path}`);
@@ -47,7 +31,6 @@ export function loadG1TraceDocs(repoRoot: string = process.cwd()): G1TraceDocs {
     business: readRequired("docs/design/harness/L1-requirements/business-requirements.md"),
     functional: readRequired("docs/design/harness/L1-requirements/functional-requirements.md"),
     screen: readRequired("docs/design/harness/L1-requirements/screen-requirements.md"),
-    plans,
   };
 }
 
@@ -143,28 +126,15 @@ export function analyzeG1Trace(docs: G1TraceDocs = loadG1TraceDocs()): G1TraceRe
   const orphanBusiness = [...business].filter((id) => (businessTrace.get(id)?.size ?? 0) === 0);
   const orphanScreen = [...screens].filter((id) => (screenTrace.get(id)?.size ?? 0) === 0);
   const orphanP0Fr = [...p0Fr].filter((id) => (p0FrTrace.get(id)?.size ?? 0) === 0);
-  const g1AwareL3Plans = docs.plans.filter(
-    (doc) =>
-      doc.content.includes("PLAN-L1-03-screen-requirements") ||
-      doc.content.includes("related_l1_screen"),
-  );
-  const missingL3Requires = g1AwareL3Plans
-    .map((doc) => ({
-      file: doc.file,
-      missing: REQUIRED_L3_REQUIRES.filter((id) => !doc.content.includes(id)),
-    }))
-    .filter((v) => v.missing.length > 0);
 
   return {
     orphanBusiness,
     orphanScreen,
     orphanP0Fr,
-    missingL3Requires,
     totals: {
       business: business.size,
       screen: screens.size,
       p0Fr: p0Fr.size,
-      l3Plans: g1AwareL3Plans.length,
     },
   };
 }
@@ -173,15 +143,14 @@ export function g1TraceOk(result: G1TraceResult): boolean {
   return (
     result.orphanBusiness.length === 0 &&
     result.orphanScreen.length === 0 &&
-    result.orphanP0Fr.length === 0 &&
-    result.missingL3Requires.length === 0
+    result.orphanP0Fr.length === 0
   );
 }
 
 export function g1TraceMessages(result: G1TraceResult): string[] {
   if (g1TraceOk(result)) {
     return [
-      `g1-trace - OK (business=${result.totals.business}, screens=${result.totals.screen}, p0Fr=${result.totals.p0Fr}, l3Plans=${result.totals.l3Plans})`,
+      `g1-trace - OK (business=${result.totals.business}, screens=${result.totals.screen}, p0Fr=${result.totals.p0Fr})`,
     ];
   }
   const parts: string[] = [];
@@ -189,8 +158,24 @@ export function g1TraceMessages(result: G1TraceResult): string[] {
     parts.push(`orphanBusiness=${result.orphanBusiness.join(",")}`);
   if (result.orphanScreen.length > 0) parts.push(`orphanScreen=${result.orphanScreen.join(",")}`);
   if (result.orphanP0Fr.length > 0) parts.push(`orphanP0Fr=${result.orphanP0Fr.join(",")}`);
-  for (const v of result.missingL3Requires) {
-    parts.push(`${v.file}:missingRequires=${v.missing.join(",")}`);
-  }
   return [`g1-trace - violation: ${parts.join("; ")}`];
+}
+
+export function lintG1Trace(repoRoot: string): LintResult {
+  if (resolveDesignRoot(repoRoot) !== "docs/design/harness") {
+    const { ok, messages } = analyzeConsumerG1Trace((relativePath) => {
+      const absolute = join(repoRoot, relativePath);
+      return existsSync(absolute) ? readFileSync(absolute, "utf8") : undefined;
+    });
+    return { ok, messages };
+  }
+  try {
+    const result = analyzeG1Trace(loadG1TraceDocs(repoRoot));
+    return { ok: g1TraceOk(result), messages: g1TraceMessages(result) };
+  } catch (e) {
+    return {
+      ok: false,
+      messages: [`g1-trace - violation: required docs could not be read (${String(e)})`],
+    };
+  }
 }

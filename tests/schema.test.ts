@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { planIdSchema } from "../src/schema/frontmatter.ts";
 import {
   kindSchema,
   recommendedCommandV1Schema,
@@ -9,25 +8,6 @@ import {
   VALID_LAYERS,
   VALID_ORCHESTRATION_MODES,
 } from "../src/schema/index.ts";
-
-describe("planIdSchema (§1.10 A、NN = d{2,} で 99 ceiling 解消)", () => {
-  it("2 桁 plan_id を受理", () => {
-    expect(planIdSchema.safeParse("PLAN-L7-99-sub-doc-catalog-drift-gate").success).toBe(true);
-    expect(planIdSchema.safeParse("PLAN-DISCOVERY-01-workflow").success).toBe(true);
-  });
-
-  it("3 桁 plan_id (99 到達後) を受理 (L7-100+)", () => {
-    expect(
-      planIdSchema.safeParse("PLAN-L7-100-standard-deliverable-section-structure").success,
-    ).toBe(true);
-    expect(planIdSchema.safeParse("PLAN-REVERSE-123-x").success).toBe(true);
-  });
-
-  it("1 桁 NN / 不正 token は棄却", () => {
-    expect(planIdSchema.safeParse("PLAN-L7-5-x").success).toBe(false);
-    expect(planIdSchema.safeParse("PLAN-FOO-01-x").success).toBe(false);
-  });
-});
 
 describe("schema (zod single source, ADR-001 / requirements_v1.2 §1)", () => {
   it("L0-L14 + cross = 16 layers", () => {

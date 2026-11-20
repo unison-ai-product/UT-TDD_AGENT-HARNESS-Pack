@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { LEGACY_SOURCE_REPO } from "./personal-path.ts";
 import { normalizePath } from "./shared.ts";
 
 export interface RuntimePortabilityDoc {
@@ -26,14 +27,14 @@ const ALLOWED_SCRIPT_WRAPPERS = new Set([
   "scripts/ut-tdd.ps1",
   "scripts/run-vitest-snapshot.ts",
 ]);
-// F0b の sealed Node generation は thin wrapper ではなく、レビュー済みの
-// Node-only build entrypoint として scripts/ に置く。その他の script は
-// 引き続き明示的に登録されない限り fail-close する。
-const ALLOWED_BUILD_SCRIPTS = new Set(["scripts/build-node.mjs"]);
-const ALLOWED_CI_SCRIPTS = new Set([
+const ALLOWED_NODE_SCRIPT_ENTRYPOINTS = new Set([
+  "scripts/build-node.mjs",
   "scripts/node-generation-ci.mjs",
   "scripts/node-generation-ci-aggregate.mjs",
   "scripts/pack-canary-acceptance.mjs",
+  "scripts/windows-ci-shard-aggregate.mjs",
+  "scripts/windows-ci-shard-evidence.mjs",
+  ...["partition", "measurement"].map((check) => `scripts/windows-ci-shard-${check}.mjs`),
 ]);
 const VITEST_ENTRYPOINT = /\b(?:vitest\s+run|scripts[\\/]run-vitest-snapshot\.ts)\b/;
 
@@ -63,8 +64,9 @@ const GIT_HOOK_DISPATCHER_PATH = "scripts/git-hooks/pre-push";
 const CORE_FILE_PATTERN = /\.(?:ts|gitkeep)$/;
 const HOOK_FILE_PATTERN = /\.ts$/;
 const DISALLOWED_RUNTIME_FILE_PATTERN = /\.(?:py|sh|bash|js|mjs|cjs)$/;
-const LOCAL_ABSOLUTE_PATH_PATTERN =
-  /(?:[A-Za-z]:\\Users\\|\/home\/|\/Users\/|~\/ai-dev-kit-vscode)/;
+const LOCAL_ABSOLUTE_PATH_PATTERN = new RegExp(
+  String.raw`(?:[A-Za-z]:\\Users\\|\/home\/|\/Users\/|~\/${LEGACY_SOURCE_REPO})`,
+);
 const SHELL_RUNTIME_PATTERN =
   /\b(?:spawn|spawnSync|exec|execSync|execFile|execFileSync)\s*\(\s*["'`](?:bash|sh|python|python3|powershell|pwsh|cmd(?:\.exe)?)(?:["'`]|\s)/;
 // PLAN-L7-462 step 3 (AC-3): bun 実発火 spawn 引数 / bun: import / Bun-global 参照の
@@ -264,7 +266,6 @@ function packageViolations(doc: RuntimePortabilityDoc | undefined): RuntimePorta
   if (
     !usesVitestEntrypoint(pkg.scripts?.["test:db"], pkg.scripts) ||
     !pkg.scripts?.["test:db"]?.includes("tests/db-projection-ingestion.test.ts") ||
-    !pkg.scripts?.["test:db"]?.includes("tests/drive-db-registration.test.ts") ||
     !pkg.scripts?.["test:db"]?.includes("tests/projection-writer.test.ts")
   ) {
     violations.push({
@@ -374,8 +375,7 @@ function analyzeRuntimeDoc(doc: RuntimePortabilityDoc): RuntimePortabilityViolat
   if (
     path.startsWith("scripts/") &&
     !ALLOWED_SCRIPT_WRAPPERS.has(path) &&
-    !ALLOWED_BUILD_SCRIPTS.has(path) &&
-    !ALLOWED_CI_SCRIPTS.has(path) &&
+    !ALLOWED_NODE_SCRIPT_ENTRYPOINTS.has(path) &&
     !ALLOWED_GIT_HOOK_ENTRYPOINTS.has(path)
   ) {
     violations.push({
@@ -383,7 +383,7 @@ function analyzeRuntimeDoc(doc: RuntimePortabilityDoc): RuntimePortabilityViolat
       line: 1,
       rule: "script-wrapper-unapproved",
       message:
-        "Only approved Node build entrypoints, thin ut-tdd POSIX/PowerShell wrappers, and tracked git-hooks entrypoints are allowed under scripts/.",
+        "Only approved Node build and CI entrypoints, thin ut-tdd POSIX/PowerShell wrappers, and tracked git-hooks entrypoints are allowed under scripts/.",
     });
   }
   if (path === GIT_HOOK_DISPATCHER_PATH) {

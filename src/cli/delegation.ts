@@ -20,7 +20,6 @@ import {
 } from "../feedback/review-verdict-custody.ts";
 import { loadUntrackedAddedFiles, loadWorkingTreeStatus } from "../lint/change-impact.ts";
 import {
-  type AdapterContextInjection,
   type AdapterPlan,
   type AdapterProvider,
   buildAdapterPlan,
@@ -34,9 +33,13 @@ import {
 } from "../runtime/review-guard.ts";
 import { dispatch, nodeDeps, type SessionHookInput } from "../runtime/session-log.ts";
 import { resolveDelegationRouting } from "../team/delegation-routing.ts";
+import {
+  reviewAdmissionDenial,
+  reviewIdentityDeclared,
+  reviewIdentityDenial,
+} from "./review-admission.ts";
 
 export interface AdapterExecutionDeps {
-  gitBranch: () => string | null;
   gitHead: () => string | null;
   runSessionStartSideEffects: (input: {
     repoRoot: string;
@@ -64,7 +67,6 @@ export interface AdapterSpawnResult {
 export interface AdapterExecutionInput {
   sessionPrefix: string;
   toolName: string;
-  planId?: string;
   jsonOut?: boolean;
   reviewRole?: string;
   review?: {
@@ -84,7 +86,6 @@ export interface AdapterExecutionResult {
 
 export interface DelegationCommandDeps extends AdapterExecutionDeps {
   resolveTaskText: (opts: { task?: string; taskFile?: string }) => string | null;
-  resolveSkillContextInjection: (planId: string | undefined) => AdapterContextInjection | undefined;
   taskFileOptionDescription: string;
 }
 
@@ -183,14 +184,13 @@ export function executeAdapterPlanForCli(
   const sessionId = `${input.sessionPrefix}-${Date.now()}`;
   const repoRoot = resolveRepositoryRoot(process.cwd());
   const now = depsInput.now ?? nowIso;
-  const deps = nodeDeps(repoRoot, depsInput.gitBranch, depsInput.gitHead);
+  const deps = nodeDeps(repoRoot, depsInput.gitHead);
   if (input.jsonOut) {
     deps.warn = (message) => process.stderr.write(`${message}\n`);
   }
   const startInput: SessionHookInput = {
     hook_event_name: "SessionStart",
     session_id: sessionId,
-    ...(input.planId ? { plan_id: input.planId } : {}),
   };
   depsInput.runSessionStartSideEffects({
     repoRoot,
@@ -272,7 +272,6 @@ export function executeAdapterPlanForCli(
     {
       hook_event_name: "PostToolUse",
       session_id: sessionId,
-      ...(input.planId ? { plan_id: input.planId } : {}),
       tool_name: input.toolName,
       tool_input: { command: `${plan.command} ${plan.args.join(" ")}` },
       tool_response: { outcome: child.status === 0 ? "ok" : "error" },
@@ -284,7 +283,6 @@ export function executeAdapterPlanForCli(
     {
       hook_event_name: "Stop",
       session_id: sessionId,
-      ...(input.planId ? { plan_id: input.planId } : {}),
     },
     deps,
     "Stop",
@@ -310,7 +308,6 @@ function runtimeCommand(
     .requiredOption("--role <role>", "delegation role")
     .option("--task <text>", "task text")
     .option("--task-file <path>", deps.taskFileOptionDescription)
-    .option("--plan <id>", "PLAN id")
     .option("--model <model>", "provider model override for this call")
     .option("--effort <level>", "provider reasoning effort override for this call")
     .option("--review-pr <number>", "reviewed pull request number")
@@ -321,21 +318,23 @@ function runtimeCommand(
     .option("--execute", "execute provider CLI instead of dry-run")
     .option("--json", "JSON output")
     .action(
-      (opts: {
-        role: string;
-        task?: string;
-        taskFile?: string;
-        plan?: string;
-        model?: string;
-        effort?: string;
-        reviewPr?: string;
-        reviewHead?: string;
-        reviewRevision?: string;
-        reviewAuthorFamily?: string;
-        reviewMemoryId?: string;
-        execute?: boolean;
-        json?: boolean;
-      }) => {
+      (
+        opts: {
+          role: string;
+          task?: string;
+          taskFile?: string;
+          model?: string;
+          effort?: string;
+          reviewPr?: string;
+          reviewHead?: string;
+          reviewRevision?: string;
+          reviewAuthorFamily?: string;
+          reviewMemoryId?: string;
+          execute?: boolean;
+          json?: boolean;
+        },
+        command: Command,
+      ) => {
         const task = deps.resolveTaskText(opts);
         if (!task) {
           process.stderr.write("adapter requires exactly one of --task or --task-file\n");
@@ -373,35 +372,11 @@ function runtimeCommand(
         // --review-author-family も宣言入力に含める。三識別子だけを宣言と数えると、
         // author-family 単独指定が「識別子なし委譲」として素通りし、値が黙って捨てられる
         // (silent discard、PR #214 precheck FLAG)。宣言 = 4 flag のいずれかを渡したこと。
-        const reviewIdentityRequested = Boolean(
-          opts.reviewPr ||
-            opts.reviewHead ||
-            opts.reviewRevision ||
-            opts.reviewAuthorFamily ||
-            opts.reviewMemoryId,
-        );
-        if (
-          reviewIdentityRequested &&
-          (!opts.reviewPr || !opts.reviewHead || !opts.reviewRevision)
-        ) {
-          process.stderr.write(
-            "review_head_required: review identity requires --review-pr, --review-head, and --review-revision together\n",
-          );
-          process.exitCode = 1;
-          return;
-        }
-        if (opts.reviewMemoryId !== undefined && !opts.reviewMemoryId.trim()) {
-          process.stderr.write("review_memory_id_required: --review-memory-id must not be blank\n");
-          process.exitCode = 1;
-          return;
-        }
-        // 識別子を渡した = receipt を作る宣言。review lane でない role では receipt を作れないので、
-        // 宣言済み入力を黙って捨てず fail-close する (silent undefined の禁止)。
-        if (reviewIdentityRequested && !routing.review_lane) {
-          process.stderr.write(
-            `review_identity_requires_review_lane: role=${opts.role} is not a review lane role; ` +
-              "review identity flags produce no receipt here\n",
-          );
+        const reviewIdentityRequested = reviewIdentityDeclared(opts);
+        const identityDenial = reviewIdentityDenial(opts, routing.review_lane);
+        if (identityDenial) {
+          process.stderr.write(`${identityDenial}
+`);
           process.exitCode = 1;
           return;
         }
@@ -416,7 +391,6 @@ function runtimeCommand(
           `effort=${routing.effort} (${routing.effort_source})` +
           (routing.review_lane ? ` lane=${routing.review_lane}` : "") +
           (routing.task_intent ? ` intent=${routing.task_intent}` : "");
-        const contextInjection = deps.resolveSkillContextInjection(opts.plan);
         // 著者族は provider から独立した事実 (委譲を実行している runtime) から取る。
         // provider の反対と定義すると D1 の同族レビュー検出が恒偽になり fail-open する
         // (`resolveReviewAuthorFamily` の doc を参照)。判別できなければ推測せず落とす。
@@ -452,6 +426,22 @@ function runtimeCommand(
           process.exitCode = 1;
           return;
         }
+        const admissionDenial =
+          reviewRequest && routing.review_lane
+            ? reviewAdmissionDenial({
+                revision: reviewRevision,
+                extraArgs: command.args,
+                authorFamily: reviewRequest.authorFamily,
+                provider,
+                model: routing.model,
+              })
+            : undefined;
+        if (admissionDenial) {
+          process.stderr.write(`${admissionDenial}
+`);
+          process.exitCode = 1;
+          return;
+        }
         let reviewAttempt = 1;
         let reviewVerdictFile =
           reviewRequest && routing.review_lane
@@ -480,11 +470,9 @@ function runtimeCommand(
               provider,
               role: opts.role,
               task: taskForAdapter,
-              planId: opts.plan,
               model: routing.model,
               effort: routing.effort,
               execute: Boolean(opts.execute),
-              contextInjection,
             },
             mode,
           );
@@ -553,7 +541,6 @@ function runtimeCommand(
           {
             sessionPrefix: provider,
             toolName: provider,
-            planId: opts.plan,
             jsonOut,
             reviewRole: opts.role,
             ...(reviewRequest && reviewVerdictFile

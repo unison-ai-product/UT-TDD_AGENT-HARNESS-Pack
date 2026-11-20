@@ -26,8 +26,6 @@ import { headSnapshotRoot } from "./workspace-roots.ts";
 
 /** producer が申告すべき root (CI の doctor step が回した面)。 */
 export const DOCTOR_RESULT_ROOT_ENV = "UT_TDD_DOCTOR_RESULT_ROOT";
-/** producer が strict green-command-digest 付きで回したか。 */
-export const DOCTOR_RESULT_STRICT_ENV = "UT_TDD_DOCTOR_RESULT_STRICT";
 
 export interface EnvelopeConsumption {
   result: DoctorResult | null;
@@ -66,7 +64,6 @@ export function consumeDoctorResultEnvelopeWithReason(
     expectedProducerRoot: canonicalRepoRoot(declaredRoot),
     expectedRefMap: defaultBranchRefMap(snapshotRoot),
     expectedOptions: {
-      strict_green_command_digest: env[DOCTOR_RESULT_STRICT_ENV] === "1",
       strict_telemetry_provenance: false,
       timing: false,
     },
