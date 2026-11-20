@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { analyzeWorktreeTopology } from "../src/runtime/worktree-topology.ts";
 import {
   collectWorktreeTopology,
@@ -10,6 +10,9 @@ import {
   type GitCommandResult,
   observeTopologyPath,
 } from "../src/runtime/worktree-topology-collector.ts";
+import { gitTextTrimmedWindowsHidden as git } from "./support/git.ts";
+import { heavyAfterEach } from "./support/hook-bounds.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const roots: string[] = [];
 const cleanups: Array<() => void> = [];
@@ -19,10 +22,6 @@ function tempRoot(): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "ut-tdd-wttopo-pf2-")));
   roots.push(root);
   return root;
-}
-
-function git(root: string, args: string[]): string {
-  return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", windowsHide: true }).trim();
 }
 
 function initRepository(): { root: string; merged: string; active: string; detached: string } {
@@ -57,9 +56,9 @@ function result(stdout: string, status = 0): GitCommandResult {
   return { status, stdout, stderr: status === 0 ? "" : "fatal: fixture failure" };
 }
 
-afterEach(() => {
+heavyAfterEach("teardown", () => {
   for (const cleanup of cleanups.splice(0)) cleanup();
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) removeTestTree(root);
 });
 
 describe("worktree topology PF2 OS collector", () => {

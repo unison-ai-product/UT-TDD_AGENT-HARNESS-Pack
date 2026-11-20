@@ -60,3 +60,20 @@ export function importedSourceModule(fromPath: string, specifier: string): strin
   if (resolvedParts.length === 2) return basename(resolvedParts[1], ".ts");
   return resolvedParts[1] ?? null;
 }
+
+/** L2 画面一覧表の必須列。G10 (right-arm-static) と consumer の G1-trace が共有する。 */
+export const REQUIRED_L2_SCREEN_COLUMNS = [
+  "画面ID",
+  "画面名称",
+  "概要",
+  "関連機能",
+  "ロール",
+] as const;
+
+/** markdown 表の 1 行をセルに分ける (太字記号は除く)。 */
+export function tableCells(line: string): string[] {
+  return line
+    .split("|")
+    .slice(1, -1)
+    .map((cell) => cell.trim().replace(/\*\*/g, ""));
+}

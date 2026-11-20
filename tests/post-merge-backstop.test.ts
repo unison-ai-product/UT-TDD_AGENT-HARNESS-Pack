@@ -1,5 +1,5 @@
 import type { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,6 +20,7 @@ import {
 } from "../src/handover/session-start-digest.ts";
 import { type HarnessDb, openHarnessDb } from "../src/state-db/index.ts";
 import { migrate } from "../src/state-db/migration.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const AFTER_CUTOFF = "2026-08-14T02:00:00.000Z";
 const NOW = "2026-08-14T03:00:00.000Z";
@@ -111,7 +112,7 @@ function memoryDb(): HarnessDb {
 
 afterEach(() => {
   for (const db of databases.splice(0)) db.close();
-  for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true });
+  for (const path of roots.splice(0)) removeTestTree(path);
 });
 
 describe("D2-D post-merge bypass backstop", () => {

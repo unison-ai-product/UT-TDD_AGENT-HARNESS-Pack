@@ -1,10 +1,6 @@
 export type ArtifactProgressColor = "red" | "yellow" | "green";
 
-export type ArtifactProgressState =
-  | "dependency_unchecked"
-  | "implemented_unverified"
-  | "recovering"
-  | "verified";
+export type ArtifactProgressState = "dependency_unchecked" | "implemented_unverified" | "verified";
 
 export interface ArtifactProgressDecisionInput {
   linkedTestCount: number;
@@ -13,7 +9,6 @@ export interface ArtifactProgressDecisionInput {
   dependencyCheckRunId?: string;
   dependencyCheckedAt?: string;
   openDependencyImpacts: number;
-  recoveryPlanIds?: string[];
 }
 
 export interface ArtifactProgressDecision {
@@ -25,14 +20,6 @@ export interface ArtifactProgressDecision {
 export function deriveArtifactProgressDecision(
   input: ArtifactProgressDecisionInput,
 ): ArtifactProgressDecision {
-  const recoveryPlanIds = input.recoveryPlanIds ?? [];
-  if (recoveryPlanIds.length > 0) {
-    return {
-      state: "recovering",
-      color: "yellow",
-      reason: `recovery in progress: ${recoveryPlanIds.join(",")}`,
-    };
-  }
   if (!input.dependencyChecked || input.openDependencyImpacts > 0) {
     return {
       state: "dependency_unchecked",

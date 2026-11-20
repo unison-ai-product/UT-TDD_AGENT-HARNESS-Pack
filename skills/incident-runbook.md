@@ -27,7 +27,7 @@ decision_points:
     over: "duplicate the threshold values inline in the runbook"
     because: "duplicated thresholds drift from the design doc and become silently wrong after the next observability change"
   - when: "root cause investigation after an incident reveals a code or design defect"
-    choose: "open a Recovery PLAN with a regression test that would have caught the defect"
+    choose: "open a Recovery Issue with a regression test that would have caught the defect"
     over: "close the incident once the immediate mitigation is applied"
     because: "a mitigation without a regression test leaves the same defect exploitable on the next occurrence"
   - when: "classifying incident severity during first response"
@@ -45,9 +45,9 @@ procedure for live production incidents (FR-L1-16).
 
 ## When to load this skill
 
-- A PLAN approaches the L11 gate (system test / ops readiness) and no runbook
+- A change approaches the L11 gate (system test / ops readiness) and no runbook
   exists for the service.
-- A PLAN with the Incident drive is opened from a production signal.
+- An Incident Issue is opened from a production signal.
 - `ut-tdd doctor` surfaces a production-incident / regression / hotfix signal.
 
 ## Part A: pre-release runbook (Forward / Add-feature)
@@ -63,24 +63,23 @@ Save runbooks to `docs/ops/<service-slug>-runbook.md`. Three required sections
    with the condition that triggers it.
 
 Thresholds are sourced from the observability design doc (single source of
-truth) — do not duplicate threshold values. Record the runbook in the PLAN
-`generates` list.
+truth) — do not duplicate threshold values. Link the runbook in the Incident Issue.
 
 ## Part B: Incident drive (live production)
 
-Entry conditions for an Incident-drive PLAN: the signal is a production
+Entry conditions for an Incident Issue: the signal is a production
 incident / regression / hotfix; the target is production; and human approval
 (on-call + TL + PM) is recorded before any production change.
 
 ```
-ut-tdd status        # confirm current mode / drive / active PLAN (read-only; registers nothing)
+ut-tdd status        # confirm current runtime mode (read-only; registers nothing)
 ```
 
 First response (first ~15 minutes): confirm the symptom and scope; classify
 severity (Sev1 primary-path-down or data-loss-risk; Sev2 major degradation;
 Sev3 minor); open the runbook and follow the matching alert procedure; apply the
 runbook's immediate mitigation if safe; record every action with a timestamp in
-`.ut-tdd/audit/<plan-id>-incident-timeline.md`.
+`.ut-tdd/audit/<issue-number>-incident-timeline.md`.
 
 If no runbook procedure covers the symptom: do not improvise in production —
 escalate to the TL, and add the new procedure to the runbook as a required
@@ -89,7 +88,7 @@ post-incident action.
 ## Post-incident
 
 1. Update the runbook with the procedure that was exercised.
-2. Open a Recovery PLAN (branch `hotfix/*`) if root cause needs a code/design
+2. Open a Recovery Issue (branch `hotfix/*`) if root cause needs a code/design
    fix; classify as `add-design` (design-level) or `add-impl` at L7
    (implementation-only); add a regression test that would have caught it.
 3. Run `ut-tdd handover` to record the resolution at the session boundary.
@@ -101,4 +100,4 @@ post-incident action.
 - [ ] Thresholds reference the observability design doc (no duplicate SSoT).
 - [ ] Incident timeline recorded in `.ut-tdd/audit/`.
 - [ ] Three-party approval recorded before any production change.
-- [ ] Recovery / add-design PLAN opened for root cause; `ut-tdd handover` run.
+- [ ] Recovery / Add-feature design Issue opened for root cause; `ut-tdd handover` run.

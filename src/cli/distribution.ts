@@ -18,11 +18,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Command } from "commander";
 import { parse as parseYaml } from "yaml";
 import { buildReleasePublicationPlan } from "../github/ops-guard.ts";
-import {
-  analyzeSecretScan,
-  loadSecretScanArtifactsForPaths,
-  secretScanMessages,
-} from "../lint/secret-scan.ts";
+import { secretScanMessages } from "../lint/secret-scan.ts";
 import { detectMode } from "../runtime/detect.ts";
 import {
   buildNodeGeneration,
@@ -42,10 +38,8 @@ import {
   DEFAULT_PACK_REPO,
   gitAddPathspecCommands,
   type PackAuthoringSmokeResult,
-  projectTrackedTeamBlob,
   releaseArtifactFileNames,
   runPackAuthoringSmoke,
-  type TrackedGitBlob,
   transformCleanDistributionArtifact,
   validateConsumerRuntimeRelease,
 } from "../setup/index.ts";
@@ -59,6 +53,8 @@ import {
 import { attestReleaseChannel } from "../setup/release-channel-adapter.ts";
 import { materializeReleaseArtifacts } from "../setup/release-materializer.ts";
 import { ensureDir } from "../shared/fs.ts";
+import * as privacy from "./distribution-privacy.ts";
+import { emitSyncPlan, type SyncPlanOptions } from "./distribution-sync-plan.ts";
 
 function gitHead(): string | null {
   // Distribution commands are intentionally valid in an unpacked clean artifact,
@@ -198,7 +194,7 @@ function copyCleanDistributionArtifact(input: {
     input.sourcePath === ".ut-tdd/teams/example-review-team.yaml" &&
     input.artifactPath === "docs/templates/team/example-review-team.yaml"
   ) {
-    const projection = readTrackedTeamBlob(input.sourceRoot);
+    const projection = privacy.readTrackedTeamBlob(input.sourceRoot);
     if (!projection.ok) throw new Error(`authoring projection denied: ${projection.error}`);
     const to = join(input.targetRoot, ...input.artifactPath.split("/"));
     ensureDir(dirname(to), { recursive: true });
@@ -217,83 +213,6 @@ function copyCleanDistributionArtifact(input: {
     return;
   }
   cpSync(from, to, { recursive: true });
-}
-
-function readTrackedTeamBlob(repoRoot: string) {
-  const tree = spawnSync(
-    "git",
-    ["ls-tree", "-r", "-z", "--full-tree", "HEAD", "--", ".ut-tdd/teams/example-review-team.yaml"],
-    { cwd: repoRoot, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] },
-  );
-  const records = Buffer.from(tree.stdout ?? new Uint8Array())
-    .toString("utf8")
-    .split("\0")
-    .filter(Boolean);
-  const blobs: TrackedGitBlob[] = [];
-  for (const record of records) {
-    const match = /^(\d{6}) blob ([a-f0-9]{40})\t(.+)$/.exec(record);
-    if (!match) continue;
-    const blob = spawnSync("git", ["cat-file", "blob", match[2]], {
-      cwd: repoRoot,
-      encoding: "buffer",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    if (blob.status !== 0) continue;
-    blobs.push({
-      path: match[3],
-      mode: match[1] === "100644" ? "100644" : match[1],
-      objectId: match[2],
-      bytes: new Uint8Array(blob.stdout ?? new Uint8Array()),
-    });
-  }
-  return projectTrackedTeamBlob({ blobs });
-}
-
-function runDistributionSecretScan(input: {
-  repoRoot: string;
-  sourcePaths: readonly string[];
-  artifactPaths: readonly string[];
-}): ReturnType<typeof analyzeSecretScan> {
-  const sourceArtifactPaths = input.artifactPaths.map((rel) =>
-    cleanDistributionSourcePath(rel, input.sourcePaths),
-  );
-  const artifacts = loadSecretScanArtifactsForPaths(input.repoRoot, sourceArtifactPaths).filter(
-    (artifact) => artifact.path !== ".ut-tdd/teams/example-review-team.yaml",
-  );
-  if (sourceArtifactPaths.includes(".ut-tdd/teams/example-review-team.yaml")) {
-    const projection = readTrackedTeamBlob(input.repoRoot);
-    if (!projection.ok)
-      return {
-        checked: artifacts.length,
-        violations: [
-          {
-            path: ".ut-tdd/teams/example-review-team.yaml",
-            line: 1,
-            marker: `authoring-projection-${projection.error}`,
-          },
-        ],
-        ok: false,
-      };
-    try {
-      artifacts.push({
-        path: ".ut-tdd/teams/example-review-team.yaml",
-        text: new TextDecoder("utf-8", { fatal: true }).decode(projection.bytes),
-      });
-    } catch {
-      return {
-        checked: artifacts.length,
-        violations: [
-          {
-            path: ".ut-tdd/teams/example-review-team.yaml",
-            line: 1,
-            marker: "authoring-projection-invalid-utf8",
-          },
-        ],
-        ok: false,
-      };
-    }
-  }
-  return analyzeSecretScan(artifacts);
 }
 
 function hexDigest(bytes: Uint8Array): string {
@@ -656,15 +575,13 @@ export async function packageConsumerRuntimeRelease(input: {
     const sourceRoot = createTaggedSourceSnapshot(input.repoRoot, sourceRevision, scratch);
     const sourcePaths = collectDistributionCandidatePaths(sourceRoot);
     const exportPlan = buildCleanDistributionPlan({ paths: sourcePaths, sourceTag: input.tag });
-    const secretScan = runDistributionSecretScan({
-      repoRoot: sourceRoot,
+    privacy.assertPreDistributionScans({
+      repoRoot: input.repoRoot,
+      sourceRoot,
       sourcePaths,
-      artifactPaths: exportPlan.artifactPaths,
+      exportPlan,
+      homeDirectory,
     });
-    if (!exportPlan.ok || !secretScan.ok)
-      throw new Error(
-        `distribution package source preflight failed: ${secretScanMessages(secretScan)[0] ?? "plan"}`,
-      );
     const tarRelease = resolveDistributionTarReleaseIdentity({
       repoRoot: input.repoRoot,
       releaseRevision: sourceBinding.releaseRevision,
@@ -919,56 +836,15 @@ export function registerDistributionCommands(program: Command): void {
     .option("--branch <name>", "Pack repository target branch", "main")
     .option("--staging-dir <path>", "local Pack staging clone path")
     .option("--json", "JSON output")
-    .action(
-      (opts: {
-        tag?: string;
-        cleanRepo?: string;
-        branch?: string;
-        stagingDir?: string;
-        json?: boolean;
-      }) => {
-        const repoRoot = process.cwd();
-        const tag = resolveDistributionTag(opts.tag);
-        const sourcePaths = collectDistributionCandidatePaths(repoRoot);
-        const exportPlan = buildCleanDistributionPlan({
-          paths: sourcePaths,
-          sourceTag: tag,
-          cleanRepo: opts.cleanRepo,
-        });
-        const stagingDir = opts.stagingDir
-          ? isAbsolute(opts.stagingDir)
-            ? opts.stagingDir
-            : join(repoRoot, opts.stagingDir)
-          : join(repoRoot, ".ut-tdd", "pack-sync", exportPlan.sourceTag);
-        const sync = buildPackSyncPlan({
-          exportPlan,
-          sourcePaths,
-          stagingDir,
-          branch: opts.branch,
-        });
-        const output = {
-          ok: sync.ok,
-          export: exportPlan,
-          sync,
-          actualRemoteMutationRequiresPoApproval: true,
-        };
-        if (opts.json) {
-          process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
-          process.exitCode = sync.ok ? 0 : 1;
-          return;
-        }
-        process.stdout.write(
-          `distribution sync-plan: ${sync.ok ? "ok" : "blocked"} tag=${sync.sourceTag}\n`,
-        );
-        process.stdout.write(`  clean-repo: ${sync.cleanRepo}\n`);
-        process.stdout.write(`  staging-dir: ${sync.stagingDir}\n`);
-        process.stdout.write(`  copy-plan: ${sync.copyPlan.length} files\n`);
-        process.stdout.write(
-          "  remote mutation: requires PO approval; commands were not executed\n",
-        );
-        process.exitCode = sync.ok ? 0 : 1;
-      },
-    );
+    .action((opts: SyncPlanOptions) => {
+      const repoRoot = process.cwd();
+      emitSyncPlan({
+        repoRoot,
+        tag: resolveDistributionTag(opts.tag),
+        sourcePaths: collectDistributionCandidatePaths(repoRoot),
+        opts,
+      });
+    });
 
   distribution
     .command("sync-stage")
@@ -996,7 +872,7 @@ export function registerDistributionCommands(program: Command): void {
           sourceTag: tag,
           cleanRepo: opts.cleanRepo,
         });
-        const secretScan = runDistributionSecretScan({
+        const secretScan = privacy.runDistributionSecretScan({
           repoRoot,
           sourcePaths,
           artifactPaths: exportPlan.artifactPaths,
@@ -1121,10 +997,14 @@ export function registerDistributionCommands(program: Command): void {
           sourceTag: tag,
           cleanRepo: opts.cleanRepo,
         });
-        const secretScan = runDistributionSecretScan({
+        const {
+          secretScan,
+          privacyScan,
+          ok: scansOk,
+        } = privacy.runPreDistributionScans({
           repoRoot,
           sourcePaths,
-          artifactPaths: exportPlan.artifactPaths,
+          exportPlan,
         });
         const sync = buildPackSyncPlan({
           exportPlan,
@@ -1132,6 +1012,7 @@ export function registerDistributionCommands(program: Command): void {
           stagingDir: repoDir,
           branch: opts.branch,
         });
+        const shown = privacy.reportedPack({ privacyScan, exportPlan, sourcePaths, sync });
         const plannedArtifacts = new Set(exportPlan.artifactPaths);
         const existingBefore = repoExists
           ? collectFilesystemCandidatePaths(repoDir).filter((path) => !plannedArtifacts.has(path))
@@ -1145,7 +1026,7 @@ export function registerDistributionCommands(program: Command): void {
           errors: ["not-run"],
         };
 
-        if (repoExists && opts.pruneLocal && exportPlan.ok && secretScan.ok) {
+        if (repoExists && opts.pruneLocal && exportPlan.ok && scansOk) {
           try {
             for (const rel of existingBefore) {
               rmSync(join(repoDir, ...rel.split("/")), { force: true });
@@ -1156,7 +1037,7 @@ export function registerDistributionCommands(program: Command): void {
           }
         }
 
-        if (repoExists && exportPlan.ok && secretScan.ok && pruneError === null) {
+        if (repoExists && exportPlan.ok && scansOk && pruneError === null) {
           try {
             for (const rel of exportPlan.artifactPaths) {
               const sourceRel = cleanDistributionSourcePath(rel, sourcePaths);
@@ -1183,29 +1064,25 @@ export function registerDistributionCommands(program: Command): void {
           manifestDir,
           `${exportPlan.sourceTag.replace(/[^A-Za-z0-9._-]+/g, "-")}.sync-pack.json`,
         );
-        const output = {
+        const raw = {
           ok:
             repoExists &&
             exportPlan.ok &&
-            secretScan.ok &&
+            scansOk &&
             pruneError === null &&
             copyError === null &&
             authoringSmoke.ok &&
             unmanagedExistingPaths.length === 0,
-          export: exportPlan,
-          secretScan: {
-            ok: secretScan.ok,
-            checked: secretScan.checked,
-            violations: secretScan.violations,
-          },
+          export: shown.plan,
+          secretScan: privacy.secretScanJson(secretScan, privacyScan),
           authoringSmoke,
-          sync,
+          sync: shown.sync,
           pack: {
             repoDir,
             repoExists,
             manifest,
             copiedArtifacts:
-              repoExists && exportPlan.ok && pruneError === null && copyError === null
+              repoExists && exportPlan.ok && scansOk && pruneError === null && copyError === null
                 ? exportPlan.artifactPaths.length
                 : 0,
             pruneLocal: Boolean(opts.pruneLocal),
@@ -1218,12 +1095,13 @@ export function registerDistributionCommands(program: Command): void {
             actualRemoteMutationRequiresPoApproval: true,
             nextCommands: [
               `git -C ${repoDir} status --short`,
-              ...gitAddPathspecCommands(repoDir, exportPlan.artifactPaths, existingBefore),
+              ...gitAddPathspecCommands(repoDir, shown.plan.artifactPaths, existingBefore),
               `git -C ${repoDir} commit -m "chore: sync clean pack ${exportPlan.sourceTag}"`,
               `git -C ${repoDir} push origin ${opts.branch ?? "main"}`,
             ],
           },
         };
+        const output = privacy.reportSyncPack(raw, privacyScan, exportPlan.artifactPaths);
         writeFileSync(manifest, `${JSON.stringify(output, null, 2)}\n`, "utf8");
         if (opts.json) {
           process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
@@ -1235,9 +1113,8 @@ export function registerDistributionCommands(program: Command): void {
         );
         process.stdout.write(`  repo-dir: ${repoDir}\n`);
         process.stdout.write(`  copied-artifacts: ${output.pack.copiedArtifacts}\n`);
-        if (!secretScan.ok) {
-          process.stdout.write(`  ${secretScanMessages(secretScan)[0]}\n`);
-        }
+        for (const line of privacy.scanFailureLines(secretScan, privacyScan))
+          process.stdout.write(`  ${line}\n`);
         process.stdout.write(`  unmanaged-existing: ${unmanagedExistingPaths.length}\n`);
         process.stdout.write(`  pruned-local: ${prunedPaths.length}\n`);
         process.stdout.write(
@@ -1299,7 +1176,7 @@ export function registerDistributionCommands(program: Command): void {
           process.stdout.write(`  sha256: ${name} ${digest}\n`);
         process.stdout.write(`  consumer-anchor: ${output.consumerAnchorDigest}\n`);
       } catch (error) {
-        const output = { ok: false, error: String(error) };
+        const output = { ok: false, error: String(error), ...privacy.privacyScanErrorJson(error) };
         if (opts.json) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
         else process.stdout.write(`distribution package: blocked ${output.error}\n`);
         process.exitCode = 1;

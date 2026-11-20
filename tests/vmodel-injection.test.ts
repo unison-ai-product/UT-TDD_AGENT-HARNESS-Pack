@@ -15,6 +15,15 @@ describe("vmodel layer-context injection", () => {
     expect(VALID_ORCHESTRATION_MODES).toContain(injection.orchestration_mode);
   });
 
+  it.each([
+    { layer: "L1", commands: ["ut-tdd gate G1", "ut-tdd skill suggest --text <task>"] },
+    { layer: "L3", commands: ["ut-tdd gate G3", "ut-tdd skill suggest --text <task>"] },
+    { layer: "L4", commands: ["ut-tdd vmodel lint"] },
+    { layer: "L5", commands: ["ut-tdd vmodel lint"] },
+  ])("recommends current commands for $layer", ({ layer, commands }) => {
+    expect(resolveVmodelInjection("db", layer).recommended_commands).toEqual(commands);
+  });
+
   it("keeps hybrid-only work explicit through orchestration_mode", () => {
     const injection = resolveVmodelInjection("agent", "L7");
 

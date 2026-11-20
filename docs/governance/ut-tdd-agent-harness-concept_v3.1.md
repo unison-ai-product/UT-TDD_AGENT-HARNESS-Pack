@@ -588,7 +588,7 @@ V2 source snapshot reference の業務要求 doc §10 を採用し、UT-TDD は 
 |---|---|---|
 | **SSoT 参照宣言ブロック** | `ユビキタス言語 = L0 §10 用語集 / 業界標準整合 = L0 §11 / Bounded Context = §2.5 9-mode。本 doc は L0 を parent_doc reference とし、用語独自定義は行わない (anti-corruption layer)` を明示 | `ut-tdd plan lint` (sub_doc 指定 PLAN 全件) |
 | **件数確定宣言** | 当該 sub-doc が確定する要求の件数 (例: business なら BR-NN 件、functional なら FR-L1-NN 件) + 確定根拠 (TL/PMO レビュー record) | doctor で要求 ID の連番性 + 件数整合検証 |
-| **L3 接続規約** | `next_pair_freeze:` フィールドが指す L3 doc + `dependencies.requires` で L3 PLAN が本 sub-doc 全件を列挙する接続条件 | L3 PLAN 起票時の機械検証 |
+| **L3 接続規約** | `next_pair_freeze:` フィールドが指す L3 doc + `dependencies.requires` で L3 PLAN が本 sub-doc 全件を列挙する接続条件 | L3 PLAN 起票時の機械検証 （撤去: PLAN 撤去（#1078）で退役。この規約の機械検証は無効。L1 → L3 の降下の確認は #1196 の降下検査へ移る） |
 | **pair / parent / related フィールド** | frontmatter に `pair_artifact:` (L14 運用テスト設計 path) / `related_l0:` (L0 概念層 path) / `related_br:` (NFR/技術要求 sub-doc のみ、業務要求への参照) を必須 | requirements §1.10.G.2 拡張 |
 
 ### 3.1.3 設計の 3 段分割 (L4 基本 / L5 詳細 / L6 機能)
@@ -697,7 +697,7 @@ G1 exit → L2 画面設計 (G2) へ進行
 | **R1** | BR-01〜08 + UX-01〜03 + BR-21 + BR-22 (計 13 件) が最低 1 画面に紐付く | block |
 | **R2** | 全 15 画面 (PM/HM/GD-NN) が最低 1 つの BR/UX/FR-L1 に紐付く | block |
 | **R3** | FR-L1 P0 19 件のみ最低 1 画面に紐付く (P1/P2 は warn、DD2=a) | block (P0) / warn (P1-P2) |
-| **R4** | screen 関連 PLAN `dependencies.requires` に business + functional を明示列挙 | warn |
+| **R4** | screen 関連 PLAN `dependencies.requires` に business + functional を明示列挙 （撤去: PLAN 撤去（#1078）で退役。この規約の機械検証は無効。L1 → L3 の降下の確認は #1196 の降下検査へ移る） | warn |
 
 SSoT: screen sub-doc §5 trace マトリクス (Step J で起票)。`ut-tdd plan lint --gate G1-trace` で machine 一次判定する。
 
@@ -1088,7 +1088,7 @@ CODEOWNERS で Layer 3 / Layer 4 が自動アサインされる (具体的 path 
 
 | 用語 | 定義 |
 |---|---|
-| **coding-rules SSoT** | TypeScript/Bun core の coding rule 正本。`docs/governance/coding-rules.md` を rule ID と workflow placement の SSoT とし、doctor `checkCodingRules` が hard gate として検証する (導入層 L6、PLAN-L6-23/L7-24/REVERSE-23) |
+| **coding-rules SSoT** | TypeScript/Node core の coding rule 正本。`docs/governance/coding-rules.md` を rule ID と workflow placement の SSoT とし、doctor `checkCodingRules` が hard gate として検証する (導入層 L6、PLAN-L6-23/L7-24/REVERSE-23) |
 | **CODING-RULE-WORKFLOW** | coding-rule 文書化が CI 後付けではなく Forward/Add-feature/mode workflow step であることを示す process doc anchor (導入層 L6、PLAN-L6-23) |
 | **coding-rules workflow analyzer** | `loadCodingWorkflowDocs` / `analyzeCodingRules` によって coding-rule SSoT と workflow anchor の欠落を検出する lint (導入層 L7、PLAN-L7-24) |
 | **coding-rules back-fill** | implemented coding-rule workflow を Reverse PLAN へ接続し、add-impl orphan を防ぐ back-fill 記録 (導入層 cross、PLAN-REVERSE-23) |
@@ -1212,10 +1212,10 @@ CODEOWNERS で Layer 3 / Layer 4 が自動アサインされる (具体的 path 
 | **handover stale** | `CURRENT.json` の `updated_at` が閾値 (既定 24h) を超えた状態 (`handoverStale`)。pre-push warn / plan-lint の機械基盤 (導入層 L6) |
 | **handover discipline (規律 surface)** | PLAN 活動 (active_plan + digest あり) があるのに `CURRENT.json` が未生成 / stale / 別 PLAN を指す (drift) 状態を機械が warn すること (`checkHandoverDiscipline`)。handover-on-completion を agent 記憶でなく Stop-hook + `ut-tdd doctor` で surface する (導入層 L6 更新、IMP-047) |
 | **plan family / dedup 正本化** | bare plan_id (`PLAN-L7-04`) と slug 付き (`PLAN-L7-04-handover-mechanism`) を同一 PLAN family と見なし (`sameFamilyPlan`、`-` 境界 prefix・対称・推移)、最長 (最具体) id を正本に digest を union 集約する (`dedupeDigests`)。handover prefill の `unknown` ゴーストを排除 (導入層 L6 更新、IMP-048) |
-| **agent-slot / slot lifecycle** | subagent / team member の fire→release を機械記録する Layer-2 オーケストレーション単位 (`Slot`、`.ut-tdd/state/agent-slots.json`、`slot_source` = agent_guard/team_runner/manual、gitignored)。source reference の agent slot lifecycle 挙動を UT-TDD TS/Bun 実装として再定義したもの = `src/runtime/agent-slots.ts` (fire/release/listActive/listStale/`recordGuardFire`、全 fail-open、導入層 L6、IMP-050) |
+| **agent-slot / slot lifecycle** | subagent / team member の fire→release を機械記録する Layer-2 オーケストレーション単位 (`Slot`、`.ut-tdd/state/agent-slots.json`、`slot_source` = agent_guard/team_runner/manual、gitignored)。source reference の agent slot lifecycle 挙動を UT-TDD TS/Node 実装として再定義したもの = `src/runtime/agent-slots.ts` (fire/release/listActive/listStale/`recordGuardFire`、全 fail-open、導入層 L6、IMP-050) |
 | **peak_parallel** | 与えた slot 群の同時実行ピーク数 (sweep-line、`peakParallel`)。`ut-tdd doctor` が stale slot (5 分超 release なし) と併せて surface (導入層 L6、IMP-050) |
 | **直列化 3 条件** | タスクを直列実行すべきかの機械判定キー: **file_conflict** (同一ファイルを書く) / **downstream_dependency** (前段成果物・判断に依存) / **shared_state** (DB / current-plan / handover 等の共有 state を変更)。いずれか true → 直列化必須 (`mustSerialize`)、すべて false → 並列可 (上限 8)。PLAN §工程表 の各 Step で `[並列]/[直列]` + 該当条件を明示 (要件 §G.4、導入層 L6、IMP-049) |
-| **team 定義 (strategy)** | `.ut-tdd/teams/*.yaml` (`teamDefinitionSchema`、`src/schema/team.ts`)。`strategy: sequential|parallel` + `max_parallel` + `serialization` 3 条件 + `members[].serialize_after` で直列/並列を宣言。source reference の team runner 挙動を UT-TDD TS/Bun 実装として再定義したもので、`ut-tdd team run` (hybrid) の入力 (導入層 L6、IMP-050) |
+| **team 定義 (strategy)** | `.ut-tdd/teams/*.yaml` (`teamDefinitionSchema`、`src/schema/team.ts`)。`strategy: sequential|parallel` + `max_parallel` + `serialization` 3 条件 + `members[].serialize_after` で直列/並列を宣言。source reference の team runner 挙動を UT-TDD TS/Node 実装として再定義したもので、`ut-tdd team run` (hybrid) の入力 (導入層 L6、IMP-050) |
 | **shared hook entrypoint** | Claude Code hook が個別 hook 実装ではなく package-local `src/cli.ts` の `session start` / `hook post-tool-use` / `session summary` を呼び、`src/runtime/session-log.ts` の shared core に dispatch する入口。`.claude/hooks/session-log.ts` は後方互換 shim (導入層 L6、PLAN-L6-20/L7-21) |
 | **adapter lifecycle wrapper** | `ut-tdd codex\|claude --execute` が provider CLI 実行を SessionStart / PostToolUse / Stop で包み、session-log PLAN digest と handover warning surface を記録する機構。raw guard 共存 env は wrapper が付与する (導入層 L6、PLAN-L6-20/L7-21) |
 | **plan metadata separation** | `ut-tdd codex\|claude --plan <id>` の PLAN は harness/session-log metadata として保持し、provider CLI 引数へ `--plan-id` を転送しない規約。provider 境界を汚さず digest plan_id だけに使う (導入層 L6、PLAN-L6-20/L7-21) |

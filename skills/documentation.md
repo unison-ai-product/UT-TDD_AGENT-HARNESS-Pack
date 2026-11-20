@@ -21,7 +21,7 @@ decision_points:
     choose: "route V-model design docs (`docs/design/`) and ADRs to `documentation-and-adrs`, and route README/onboarding/runbook prose here"
     over: "treating all Markdown authoring as one undifferentiated \"write docs\" task"
     because: "design docs and ADRs have freeze-gate contracts this skill does not cover; misrouting skips the readability check they require"
-  - when: "A `ut-tdd` command's flag or behavior changes during a PLAN"
+  - when: "A `ut-tdd` command's flag or behavior changes during a change"
     choose: "update every doc reference to it in the same commit as the implementation change"
     over: "shipping the code change and filing a follow-up doc task"
     because: "a doc describing a removed or changed flag is worse than no doc — it actively misleads the next reader"
@@ -52,7 +52,7 @@ as distinct from V-model design docs or ADRs (those are covered by
 - Authoring a runbook for a recurring operational procedure (e.g., PAT rotation,
   `harness.db` rebuild, doctor triage).
 - A new `ut-tdd` command needs a usage section in an existing doc.
-- Doc maintenance after a PLAN introduces new commands, flags, or state paths.
+- Doc maintenance after a change introduces new commands, flags, or state paths.
 
 ## Scope: what this skill covers
 
@@ -60,7 +60,7 @@ as distinct from V-model design docs or ADRs (those are covered by
 |---|---|
 | README / onboarding prose | V-model design docs (`docs/design/`) |
 | CLI usage references | ADR authoring (see `documentation-and-adrs`) |
-| Runbooks and operational procedures | PLAN files (`docs/plans/`) |
+| Runbooks and operational procedures | Operational design docs (`docs/design/`) |
 | doc-tree maintenance (dead links, stale paths) | L0 glossary back-merge (see `gate-planning`) |
 
 ## Writing standards
@@ -99,9 +99,9 @@ A UT-TDD README needs at minimum:
    `ut-tdd status`, or a targeted test).
 5. **Escalation** — when to stop and involve a human decision.
 
-## Doc maintenance after a PLAN ships
+## Doc maintenance after a change ships
 
-When a PLAN adds or changes a `ut-tdd` command, flag, or state path:
+When a change adds or changes a `ut-tdd` command, flag, or state path:
 
 1. Search existing docs for references to the old command / path using `grep`.
 2. Update each reference in the same commit as the implementation.

@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ReleaseIdentity } from "../src/schema/release-manifest.ts";
 import {
   createLocalGitObjectReader,
@@ -15,10 +15,12 @@ import type {
   ReleaseMaterializationResult,
   ReleaseSourceEntry,
 } from "../src/setup/release-materializer.ts";
+import { heavyAfterEach } from "./support/hook-bounds.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+heavyAfterEach("teardown", () => {
+  for (const root of roots.splice(0)) removeTestTree(root);
   vi.unstubAllEnvs();
 });
 

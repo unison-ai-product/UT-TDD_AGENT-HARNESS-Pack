@@ -23,20 +23,20 @@ decision_points:
     choose: "treat it as a design gap and route it back to the L5 spec, not accept it as a valid test"
     over: "keeping the test since it exercises real behaviour"
     because: "the file states a GWT block with no L5 line reference is a design gap, not a test — accepting it breaks the spec-to-test traceability the skill exists to enforce."
-  - when: "`ut-tdd doctor` and `ut-tdd plan lint` both exit 0 for a PLAN at pair-freeze."
+  - when: "The applicable `ut-tdd doctor` checks pass at pair-freeze."
     choose: "still verify spec substance (five required sections, no TBD) manually before treating pair-freeze as satisfied"
     over: "treating the green machine checks as sufficient evidence the spec is complete"
     because: "the anti-patterns section states doctor checks structural governance (link existence, schema), not spec substance — green machine gates are necessary but not sufficient."
   - when: "A spec section is labelled 'TBD' at pair-freeze."
-    choose: "treat it as an unresolved dependency and a PLAN blocker"
-    over: "letting the PLAN cross pair-freeze with the TBD section deferred to implementation time"
+    choose: "treat it as an unresolved dependency and an implementation blocker"
+    over: "letting the work cross pair-freeze with the TBD section deferred to implementation time"
     because: "the anti-patterns section names this explicitly; deferring spec decisions into implementation defeats the Red-first test discipline the pairing exists to protect."
   - when: "Choosing between writing a full L5 spec vs. a lightweight spec for Discovery/Scrum S2 PoC work."
     choose: "use the lightweight path (Objective + Spike question + Done condition) written as a failing scratch assertion before any PoC code"
     over: "writing a full five-section L5 spec for a PoC spike"
     because: "the file scopes the lightweight path specifically to Discovery/Scrum PoC; forcing a full spec on a spike adds process cost without matching the PoC's throwaway nature, while skipping the failing-assertion-first step would abandon spec-first discipline entirely."
   - when: "Implementation is already complete and a spec does not yet exist for it."
-    choose: "flag this as a violation and require the spec be authored to reflect the intended design before treating the PLAN as passing pair-freeze"
+    choose: "flag this as a violation and require the spec be authored to reflect the intended design before treating the design as passing pair-freeze"
     over: "writing the spec afterward to match what was built"
     because: "the anti-patterns section states writing a spec after implementation to retroactively justify it defeats the design-signal purpose of spec-first."
 ---
@@ -53,7 +53,7 @@ integration test discipline at L8.
 
 - Authoring a new L5 detailed design or L6 unit-test design doc before
   implementation starts.
-- A PLAN is at pair-freeze and the design doc does not yet exist or is not
+- A change is at pair-freeze and the design doc does not yet exist or is not
   readable.
 - Discovery or Scrum S2 PoC needs a lightweight spec that a test can be
   written against before coding begins.
@@ -72,10 +72,9 @@ L5 detailed design  <-->  L8 integration-test design (GWT)
 L6 unit-test design --> L7 implementation (tests must be Red-first)
 ```
 
-A PLAN cannot cross pair-freeze until the paired design doc and test design
+A change cannot cross pair-freeze until the paired design doc and test design
 doc both exist and pass the readability check (Objective, Scope, no mojibake).
-`ut-tdd plan lint` will reject a PLAN whose `requires` points to a non-existent
-design doc.
+Verify that the Issue links each required design revision.
 
 ## Authoring a usable spec (L5)
 
@@ -111,9 +110,9 @@ design gap, not a test.
 - [ ] L5 spec exists at `docs/design/L5-<module>.md` with all five sections.
 - [ ] L6 unit-test design exists at `docs/test-design/L6-<module>.md` with at
   least one test case per L5 output/error condition.
-- [ ] L8 integration-test design exists (if this PLAN touches inter-module
+- [ ] L8 integration-test design exists (if the change touches inter-module
   boundaries) with GWT blocks referencing L5 postconditions.
-- [ ] `ut-tdd plan lint` exits 0 (PLAN `requires` links resolve).
+- [ ] The prerequisite Issue and design links resolve.
 - [ ] `ut-tdd doctor` exits 0 (no orphaned design doc, no broken pair).
 - [ ] No new terms used in the spec without a glossary entry.
 
@@ -133,6 +132,6 @@ writing any PoC code. Delete or promote the scratch test at S4 decide.
 - Writing a spec after the implementation to retroactively justify what was
   built — this defeats the design signal purpose of spec-first.
 - A spec section labelled "TBD" at pair-freeze — this is an unresolved
-  dependency and must be treated as a PLAN blocker.
+  dependency and must be treated as an implementation blocker.
 - Using `ut-tdd doctor` green as evidence that the spec is complete — doctor
   checks structural governance (link existence, schema), not spec substance.

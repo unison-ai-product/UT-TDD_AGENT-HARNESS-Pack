@@ -48,7 +48,7 @@ Recovery は phase ではなく **二段構えの機構**で動作する:
 
 | 機構 | 検出・警告 |
 |------|-----------|
-| agent-guard hook (`PreToolUse(Agent)`) | 許可リスト外 subagent_type / model 無指定 / model override を block (fail-close) |
+| agent-guard hook (`PreToolUse(Agent)`) | model 無指定・正規化できない model・定義済み型の floor 未満・汎用型での fable を block (fail-close、#1002) |
 | gate (fail-close) | 危険操作を関所で停止 |
 | budget 上限 | トークン・操作の過剰消費を上限で警告 |
 | subagent guard | Codex 委譲経路外の直叩きを block |

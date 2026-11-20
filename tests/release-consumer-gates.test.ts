@@ -12,20 +12,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
 import { checkG9SystemWorkflow, checkG10UxWorkflow } from "../src/doctor/workflow-quality.ts";
 import {
   analyzeLayerPairGate,
   evaluateStaticGate,
   readCoverageSummary,
 } from "../src/gate/static.ts";
-import {
-  analyzeG1Trace,
-  g1TraceMessages,
-  g1TraceOk,
-  loadG1TraceDocs,
-} from "../src/lint/g1-trace.ts";
-import { analyzeG3Trace, g3TraceMessages, g3TraceOk, loadDocs } from "../src/lint/g3-trace.ts";
 import { loadGateConfirmDocs, parseGateStatuses } from "../src/lint/gate-confirm.ts";
 import { buildNodeGeneration } from "../src/runtime/node-bootstrap.ts";
 import type { PairDoc } from "../src/vmodel/lint.ts";
@@ -33,6 +25,7 @@ import {
   loadCompiledRightArmRegistry,
   VMODEL_CONTRACT_PATH,
 } from "../src/vmodel-contract/adapters/yaml-contract-loader.ts";
+import { describe, expect, heavyAfterAll, it } from "./support/hook-bounds.ts";
 
 const GATE_ASSETS = [
   "docs/governance/gate-design.md",
@@ -86,90 +79,81 @@ function writeFixtureDoc(root: string, path: string, content: string): void {
   writeFileSync(target, content, "utf8");
 }
 
+// consumer の core 文書の表 (consumer-trace-gates.md §5 / §6)。coreOnly の fixture は prefix 自由の ID だけを置く。
+const CORE_ROWS: Record<string, [heading: string, row: string]> = {
+  "docs/design/L1-requirements/functional-requirements.md": [
+    "#### 第4章 機能要求一覧",
+    "| REQ-001 | Consumer goal | Consumer function | P0 | SC-001, FN-001 |",
+  ],
+  "docs/design/L2-screen/screen-list.md": [
+    "#### 第4章 画面一覧",
+    "| SC-001 | Consumer screen | Consumer overview | REQ-001, FN-001 | user |",
+  ],
+  "docs/design/L3-functional/functional-requirements.md": [
+    "##### 3-1 機能一覧",
+    "| FN-001 | Consumer function | Consumer overview | user | REQ-001 |",
+  ],
+  "docs/test-design/L12-acceptance-test-design.md": [
+    "#### 第3章 テストケース一覧",
+    "| AT-001 | 受入 | Consumer acceptance | 手順 | 結果 | REQ-001, SC-001, FN-001 |",
+  ],
+};
+
+// coreOnly (U-RCDEV-027) は consumer の core 4 文書だけを置く。それ以外は G11 / G12 / G13 (U-RCDEV-032〜034) の
+// oracle が前提にする harness 形式の補助文書 (nfr-grade / business-detail など) も置く。
 function writeConsumerGateFixture(
   root: string,
-  options: { omitRequiredSlot?: boolean; omitWireframe?: boolean } = {},
+  options: { omitRequiredSlot?: boolean; omitWireframe?: boolean; coreOnly?: boolean } = {},
 ): void {
   const repositoryRoot = process.cwd();
+  const core = options.coreOnly === true;
+  const adapt = (path: string, pair: string, row?: [string, string]) => {
+    const text = readFileSync(join(repositoryRoot, path), "utf8")
+      .replace(/^status: .*$/m, "status: confirmed")
+      .replace(/^pair_artifact: .*$/m, `pair_artifact: ${pair}`)
+      .replace(/^plan: .*$/m, "plan: docs/plans/PLAN-CONSUMER-01.md");
+    const at = row ? text.indexOf(row[0]) : -1;
+    return core && row
+      ? text.slice(0, at) + text.slice(at).replace(/^\| <記入>.*$/m, row[1])
+      : text;
+  };
+  const unit = "docs/test-design/L7-unit-test-design.md";
   for (const [templatePath, targetPath] of CONSUMER_TEMPLATE_SLOTS) {
-    const template = readFileSync(join(repositoryRoot, templatePath), "utf8");
-    const testDesign = targetPath.startsWith("docs/test-design/");
-    const pairArtifact = testDesign ? "docs/design/" : "docs/test-design/L7-unit-test-design.md";
-    const adapted = template
-      .replace(/^status: .*$/m, "status: confirmed")
-      .replace(/^pair_artifact: .*$/m, `pair_artifact: ${pairArtifact}`)
-      .replace(/^plan: .*$/m, "plan: docs/plans/PLAN-CONSUMER-01.md");
-    writeFixtureDoc(root, targetPath, adapted);
+    if (options.omitRequiredSlot && targetPath.endsWith("/screen-list.md")) continue;
+    const pair = targetPath.startsWith("docs/test-design/") ? "docs/design/" : unit;
+    writeFixtureDoc(root, targetPath, adapt(templatePath, pair, CORE_ROWS[targetPath]));
   }
-
-  const l1Template = readFileSync(
-    join(repositoryRoot, "docs/templates/vmodel/L1-requirements.md"),
-    "utf8",
-  );
-  const l3Template = readFileSync(
-    join(repositoryRoot, "docs/templates/vmodel/L3-functional-requirements.md"),
-    "utf8",
-  );
-  const l1Adapt = () =>
-    l1Template
-      .replace(/^status: .*$/m, "status: confirmed")
-      .replace(/^pair_artifact: .*$/m, `pair_artifact: docs/test-design/L7-unit-test-design.md`)
-      .replace(/^plan: .*$/m, "plan: docs/plans/PLAN-CONSUMER-01.md");
-  const l3Adapt = () =>
-    l3Template
-      .replace(/^status: .*$/m, "status: confirmed")
-      .replace(/^pair_artifact: .*$/m, "pair_artifact: docs/test-design/L7-unit-test-design.md")
-      .replace(/^plan: .*$/m, "plan: docs/plans/PLAN-CONSUMER-01.md");
-  if (!options.omitRequiredSlot) {
-    writeFixtureDoc(
-      root,
-      "docs/design/L1-requirements/business-requirements.md",
-      `${l1Adapt()}\n| **BR-01** | Consumer goal |\n`,
-    );
+  if (!core) {
+    const l1 = adapt("docs/templates/vmodel/L1-requirements.md", unit);
+    const l3 = adapt("docs/templates/vmodel/L3-functional-requirements.md", unit);
+    const nfr = [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17]
+      .map((n) => `| **NFR-${String(n).padStart(2, "0")}** | covered |`)
+      .join("\n");
+    const docs: Record<string, string> = {
+      "docs/design/L1-requirements/business-requirements.md": `${l1}\n| **BR-01** | Consumer goal |\n`,
+      "docs/design/L1-requirements/functional-requirements.md": `${l1}\n| **FR-L1-01** | Consumer function | P0 |\n`,
+      "docs/design/L1-requirements/screen-requirements.md": `${l1}\n\n## §1 画面一覧\nPM-01\n## §2 次\n### §5.1 業務要求トレース\n| **BR-01** | PM-01 |\n### §5.3 機能要求トレース\n| **FR-L1-01** | PM-01 |\n### §5.4 次\n### §5.5 画面トレース\n| **PM-01** | BR-01 / FR-L1-01 |\n### §5.6 次\n`,
+      "docs/design/L3-functional/business-detail.md": `${l3}\n`,
+      "docs/design/L3-functional/nfr-grade.md": `${l3}\n${nfr}\n`,
+      "docs/design/L3-functional/functional-requirements.md": `${l3}\n### FR-01: Consumer function\n#### AC-FR-01-01\n`,
+    };
+    for (const [path, content] of Object.entries(docs)) writeFixtureDoc(root, path, content);
   }
   writeFixtureDoc(
     root,
-    "docs/design/L1-requirements/functional-requirements.md",
-    `${l1Adapt()}\n| **FR-L1-01** | Consumer function | P0 |\n`,
+    "docs/test-design/L10-ux-validation-test-design.md",
+    adapt("docs/templates/vmodel/L10-ux-validation.md", "docs/design/L2-screen/"),
+  );
+  const l12 = "docs/test-design/L12-acceptance-test-design.md";
+  const l12Doc = adapt(
+    "docs/templates/vmodel/L12-acceptance-test-design.md",
+    "docs/design/",
+    CORE_ROWS[l12],
   );
   writeFixtureDoc(
     root,
-    "docs/design/L1-requirements/screen-requirements.md",
-    `${l1Adapt()}\n\n## §1 画面一覧\nPM-01\n## §2 次\n### §5.1 業務要求トレース\n| **BR-01** | PM-01 |\n### §5.3 機能要求トレース\n| **FR-L1-01** | PM-01 |\n### §5.4 次\n### §5.5 画面トレース\n| **PM-01** | BR-01 / FR-L1-01 |\n### §5.6 次\n`,
-  );
-  for (const path of ["business-detail.md", "nfr-grade.md"]) {
-    let content = l3Adapt();
-    if (path === "business-detail.md") content += "\n";
-    else {
-      content += `\n${[1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17].map((n) => `| **NFR-${String(n).padStart(2, "0")}** | covered |`).join("\n")}\n`;
-    }
-    writeFixtureDoc(root, `docs/design/L3-functional/${path}`, content);
-  }
-  writeFixtureDoc(
-    root,
-    "docs/design/L3-functional/functional-requirements.md",
-    `${l3Adapt()}\n### FR-01: Consumer function\n#### AC-FR-01-01\n`,
-  );
-
-  const l10 = readFileSync(
-    join(repositoryRoot, "docs/templates/vmodel/L10-ux-validation.md"),
-    "utf8",
-  )
-    .replace(/^status: .*$/m, "status: confirmed")
-    .replace(/^pair_artifact: .*$/m, "pair_artifact: docs/design/L2-screen/")
-    .replace(/^plan: .*$/m, "plan: docs/plans/PLAN-CONSUMER-01.md");
-  writeFixtureDoc(root, "docs/test-design/L10-ux-validation-test-design.md", l10);
-  const l12 = readFileSync(
-    join(repositoryRoot, "docs/templates/vmodel/L12-acceptance-test-design.md"),
-    "utf8",
-  )
-    .replace(/^status: .*$/m, "status: confirmed")
-    .replace(/^pair_artifact: .*$/m, "pair_artifact: docs/design/")
-    .replace(/^plan: .*$/m, "plan: docs/plans/PLAN-CONSUMER-01.md");
-  writeFixtureDoc(
-    root,
-    "docs/test-design/L12-acceptance-test-design.md",
-    `${l12}\n| **AT-FR-01-01** | Consumer acceptance |\n`,
+    l12,
+    core ? l12Doc : `${l12Doc}\n| **AT-FR-01-01** | Consumer acceptance |\n`,
   );
   if (!options.omitWireframe) {
     writeFixtureDoc(
@@ -368,7 +352,7 @@ type ConsumerG9Manifest = {
     evidence_paths: string[];
     command_ids: string[];
   }[];
-  defer: { st_id: string; reason: string; plan_id: string }[];
+  defer: { st_id: string; reason: string; issue?: string }[];
   exit_criteria: {
     all_mandatory_passed: boolean;
     failed_mandatory_count: number;
@@ -1164,8 +1148,7 @@ function makeWritableTree(path: string): void {
     for (const entry of readdirSync(path)) makeWritableTree(join(path, entry));
   }
 }
-
-afterAll(() => {
+heavyAfterAll("teardown", () => {
   for (const root of roots) {
     makeWritableTree(root);
     rmSync(root, { recursive: true, force: true });
@@ -1298,55 +1281,54 @@ describe("PR-G0 release-consumer gates", () => {
     expect(bundledGateMessage()).toContain("G1=consumer override");
   });
 
-  it("U-RCDEV-027: evaluates consumer G1-G6 fixture with non-empty bidirectional traces", () => {
+  // U-RCDEV-027: G1 / G3 は consumer core 文書で動き、必須 slot の欠落は fail-close する。
+  // test-design の (v) を gate 別に分けたのは、G1 (#1314) と G3 の consumer 分岐が別 PR で入り、Red を個別に外すため。
+  const coreGate = (
+    gate: string,
+    options: { omitRequiredSlot?: boolean; omitWireframe?: boolean } = {},
+  ) => {
     const root = fixtureRoot();
-    writeConsumerGateFixture(root);
+    writeConsumerGateFixture(root, { ...options, coreOnly: true });
+    const result = evaluateStaticGate({ gate, repoRoot: root });
+    return { result, messages: result.messages.join("\n") };
+  };
 
-    const g1Trace = analyzeG1Trace(loadG1TraceDocs(root));
-    const g3Trace = analyzeG3Trace(loadDocs(root));
-    expect(g1TraceOk(g1Trace)).toBe(true);
-    expect(g1Trace.totals.business).toBeGreaterThan(0);
-    expect(g1Trace.totals.screen).toBeGreaterThan(0);
-    expect(g1Trace.totals.p0Fr).toBeGreaterThan(0);
-    expect(g3TraceOk(g3Trace)).toBe(true);
-    expect(g3Trace.totals).toMatchObject({ frL1: 1, l3Fr: 1, ac: 1, at: 1, l1Nfr: 15, l3Nfr: 15 });
+  it("U-RCDEV-027: G1 passes on the consumer core documents with a free-prefix ID", () => {
+    const { result, messages } = coreGate("G1");
+    expect(result).toMatchObject({ applicable: true, passed: true });
+    expect(messages).toContain(
+      "g1-trace - OK (consumer column trace: requirements=1, screens=1, functions=1)",
+    );
+    expect(messages).not.toMatch(/could not run|required doc not created/);
+  });
 
-    const results = ["G1", "G2", "G3", "G4", "G5", "G6"].map((gate) =>
-      evaluateStaticGate({ gate, repoRoot: root }),
+  it("U-RCDEV-027: G3 passes on the consumer core documents without harness-only docs", () => {
+    const { result, messages } = coreGate("G3");
+    expect(result).toMatchObject({ applicable: true, passed: true });
+    expect(messages).toContain(
+      "g3-trace - OK (consumer column trace: requirements=1, functions=1, tests=1)",
     );
-    expect(results.map(({ gate, applicable }) => [gate, applicable])).toEqual(
-      ["G1", "G2", "G3", "G4", "G5", "G6"].map((gate) => [gate, true]),
+    expect(messages).not.toMatch(/could not run|required doc not created/);
+  });
+
+  it("U-RCDEV-027: G2 and G4-G6 stay applicable and pass on the consumer fixture", () => {
+    const results = ["G2", "G4", "G5", "G6"].map((gate) => coreGate(gate).result);
+    expect(results.map(({ applicable, passed }) => [applicable, passed])).toEqual(
+      results.map(() => [true, true]),
     );
-    expect(results.every((result) => result.passed)).toBe(true);
     expect(results.flatMap((result) => result.messages).join("\n")).not.toContain("could not run");
-    expect(g1TraceMessages(g1Trace).join("\n")).toContain("business=1");
-    expect(g3TraceMessages(g3Trace).join("\n")).toContain("frL1=1, l3Fr=1, ac=1, at=1");
   });
 
   it("U-RCDEV-027: reports the missing required consumer slot, not could-not-run", () => {
-    const root = fixtureRoot();
-    writeConsumerGateFixture(root, { omitRequiredSlot: true });
-
-    const result = evaluateStaticGate({ gate: "G1", repoRoot: root });
-    const messages = result.messages.join("\n");
-
-    expect(result.applicable).toBe(true);
-    expect(result.passed).toBe(false);
-    expect(messages).toContain(
-      "required doc not created: docs/design/harness/L1-requirements/business-requirements.md",
-    );
-    expect(messages).not.toContain("could not run");
+    const { result, messages } = coreGate("G1", { omitRequiredSlot: true });
+    expect(result).toMatchObject({ applicable: true, passed: false });
+    expect(messages).toContain("missing_core_doc:DOC-L2-SCREEN");
+    expect(messages).not.toMatch(/business-requirements|could not run/);
   });
 
   it("U-RCDEV-027: rejects a consumer fixture without its L2-to-L10 wireframe pair", () => {
-    const root = fixtureRoot();
-    writeConsumerGateFixture(root, { omitWireframe: true });
-
-    const result = evaluateStaticGate({ gate: "G2", repoRoot: root });
-    const messages = result.messages.join("\n");
-
-    expect(result.applicable).toBe(true);
-    expect(result.passed).toBe(false);
+    const { result, messages } = coreGate("G2", { omitWireframe: true });
+    expect(result).toMatchObject({ applicable: true, passed: false });
     expect(messages).toContain("mock=missing");
     expect(messages).not.toContain("could not run");
   });
@@ -1430,8 +1412,7 @@ describe("PR-GR consumer G8 predicates", () => {
     const result = evaluateStaticGate({ gate: "G8", repoRoot: root });
     const messages = result.messages.join("\n");
 
-    expect(result.applicable).toBe(true);
-    expect(result.passed).toBe(true);
+    expect(result).toMatchObject({ applicable: true, passed: true });
     expect(messages).toContain("未判定 (review): QA/TL");
   });
 
@@ -1814,7 +1795,11 @@ describe("PR-G9 consumer G9 predicates", () => {
     expect(result.messages.join("\n")).toContain("untraced case ST-CONSUMER-01");
   });
 
-  it("U-RCDEV-030: rejects a defer to a missing PLAN (F)", () => {
+  it.each([
+    { kind: "missing", issue: undefined, legacy: false },
+    { kind: "invalid", issue: "PLAN-CONSUMER-LEGACY-01", legacy: false },
+    { kind: "legacy PLAN only", issue: undefined, legacy: true },
+  ])("U-RCDEV-030: rejects a $kind Issue URL on a defer (F)", ({ issue, legacy }) => {
     const root = fixtureRoot();
     writeConsumerG9Fixture(root);
     updateConsumerG9Manifest(root, (manifest) => {
@@ -1826,7 +1811,8 @@ describe("PR-G9 consumer G9 predicates", () => {
         {
           st_id: deferredId,
           reason: "Consumer fixture defer mutation",
-          plan_id: "PLAN-CONSUMER-MISSING-01",
+          ...(issue === undefined ? {} : { issue }),
+          ...(legacy ? { plan_id: "PLAN-CONSUMER-LEGACY-01" } : {}),
         },
       ];
     });
@@ -1838,21 +1824,16 @@ describe("PR-G9 consumer G9 predicates", () => {
     expect(result.messages.join("\n")).toContain("stale defer ST-CONSUMER-06");
   });
 
-  it("U-RCDEV-030: accepts a deferred ST row routed to an existing PLAN (F)", () => {
+  it("U-RCDEV-030: accepts a deferred ST row routed to a valid Issue URL (F)", () => {
     const root = fixtureRoot();
     writeConsumerG9Fixture(root);
-    writeFixtureDoc(root, "docs/plans/PLAN-CONSUMER-DEFER-01.md", "# Consumer defer plan\n");
     updateConsumerG9Manifest(root, (manifest) => {
       const deferredId = "ST-CONSUMER-06";
       manifest.mandatory_st_ids = manifest.mandatory_st_ids.filter((id) => id !== deferredId);
       manifest.deferred_st_ids = [deferredId];
       manifest.coverage = manifest.coverage.filter((entry) => entry.st_id !== deferredId);
       manifest.defer = [
-        {
-          st_id: deferredId,
-          reason: "Consumer fixture defers this row to its tracked plan",
-          plan_id: "PLAN-CONSUMER-DEFER-01",
-        },
+        { st_id: deferredId, reason: "Tracked issue", issue: "https://github.com/o/r/issues/1" },
       ];
     });
 

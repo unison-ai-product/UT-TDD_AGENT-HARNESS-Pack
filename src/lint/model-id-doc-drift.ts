@@ -2,7 +2,7 @@
  * model-id-ssot-drift gate 拡張 (PLAN-RECOVERY-12 / issue #85)。
  *
  * PLAN-L7-256 の model-id-ssot-drift gate (`tests/model-id-ssot-drift.test.ts`) は
- * `.claude/agents/*.md` frontmatter と setup adapter template だけを検査し、L6 設計 doc
+ * setup adapter template だけを検査し、L6 設計 doc
  * (`docs/design/harness/L6-function-design/function-spec.md`) の model ID 記述は対象外だった
  * (issue #85 で発見された `gpt-5.5` / `claude-sonnet-4-6` / `gpt-5.4` の stale literal 残留)。
  *

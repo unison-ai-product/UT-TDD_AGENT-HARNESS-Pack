@@ -3,7 +3,11 @@
  * L1 → L3 → AC → AT の双方向 trace 整合を機械検証 (孤児 = 0)。
  * PO 指摘「機能一覧やドメインチェックのテストが走るべき」反映の最小実装。
  */
-import { describe, expect, it } from "vitest";
+
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   analyzeG3Trace,
   extractAcIds,
@@ -12,8 +16,34 @@ import {
   extractL1NfrIds,
   extractL3FrIds,
   extractL3NfrIds,
+  g3TraceOk,
   loadDocs,
 } from "../src/lint/g3-trace.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
+
+const G3_FIXTURE_DOCS = [
+  ["l1Functional", "docs/design/harness/L1-requirements/functional-requirements.md"],
+  ["l3Functional", "docs/design/harness/L3-functional/functional-requirements.md"],
+  ["l3BusinessDetail", "docs/design/harness/L3-functional/business-detail.md"],
+  ["l3NfrGrade", "docs/design/harness/L3-functional/nfr-grade.md"],
+  ["l12AcceptanceTest", "docs/test-design/harness/L12-acceptance-test-design.md"],
+] as const;
+const temporaryRoots: string[] = [];
+
+function fixtureRoot(sourceDocs: ReturnType<typeof loadDocs>): string {
+  const root = mkdtempSync(join(tmpdir(), "ut-g3-trace-"));
+  temporaryRoots.push(root);
+  for (const [key, relativePath] of G3_FIXTURE_DOCS) {
+    const path = join(root, relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, sourceDocs[key], "utf8");
+  }
+  return root;
+}
+
+afterEach(() => {
+  for (const root of temporaryRoots.splice(0)) removeTestTree(root);
+});
 
 describe("G3-trace coverage (機能一覧 + ドメイン整合の機械検証)", () => {
   const docs = loadDocs();
@@ -65,6 +95,23 @@ describe("G3-trace coverage (機能一覧 + ドメイン整合の機械検証)",
     expect(result.orphanNfr).toEqual([]);
   });
 
+  it("U-CTRACE-001: L3 nfr-gradeからNFR-17を外すと単独でorphanNfrになる", () => {
+    const row = /^\|\s*\*\*NFR-17\*\*\s*\|[^\n]*(?:\n|$)/m;
+    expect(docs.l3NfrGrade).toMatch(row);
+    const brokenGrade = docs.l3NfrGrade.replace(row, "");
+    expect(brokenGrade).not.toBe(docs.l3NfrGrade);
+    const root = fixtureRoot({ ...docs, l3NfrGrade: brokenGrade });
+    const loaded = loadDocs(root);
+    const analyzed = analyzeG3Trace(loaded);
+
+    expect(analyzed.orphanFrL1).toEqual([]);
+    expect(analyzed.orphanL3Fr).toEqual([]);
+    expect(analyzed.orphanAc).toEqual([]);
+    expect(analyzed.orphanAt).toEqual([]);
+    expect(analyzed.orphanNfr).toEqual(["NFR-17"]);
+    expect(g3TraceOk(analyzed)).toBe(false);
+  });
+
   it("R1: L1 FR-L1 全件が L3 FR or L3 carry で被覆 (orphan = 0)", () => {
     // P0 18 件 → L3 FR-01〜18 直接 / P1+P2 23 件 → carry §3 + §3.1 明示
     expect(result.orphanFrL1).toEqual([]);
@@ -72,6 +119,24 @@ describe("G3-trace coverage (機能一覧 + ドメイン整合の機械検証)",
 
   it("R2: 全 L3 FR-* に AC 最低 1 件 (orphan = 0)", () => {
     expect(result.orphanL3Fr).toEqual([]);
+  });
+
+  it("U-CTRACE-001: ACを持たないL3 FR-99は単独でorphanL3Frになる", () => {
+    const l3Functional = `${docs.l3Functional}\n### FR-99: trace fixture without AC`;
+    expect(l3Functional).not.toBe(docs.l3Functional);
+    const root = fixtureRoot({
+      ...docs,
+      l3Functional,
+    });
+    const loaded = loadDocs(root);
+    const analyzed = analyzeG3Trace(loaded);
+
+    expect(analyzed.orphanFrL1).toEqual([]);
+    expect(analyzed.orphanL3Fr).toEqual(["FR-99"]);
+    expect(analyzed.orphanAc).toEqual([]);
+    expect(analyzed.orphanAt).toEqual([]);
+    expect(analyzed.orphanNfr).toEqual([]);
+    expect(g3TraceOk(analyzed)).toBe(false);
   });
 
   it("R3: 全 AC が AT で被覆 (orphan = 0、Phase B carry placeholder 含む)", () => {

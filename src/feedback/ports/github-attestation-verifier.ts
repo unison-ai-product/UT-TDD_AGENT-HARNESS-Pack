@@ -1,7 +1,7 @@
 /**
  * GitHub Artifact Attestation の検証 port (PLAN-L7-465 §D3c freeze「既存実装との所有境界」)。
  *
- * 既存 `src/plan-asset/ports/evidence-attestation.ts` は同期 boolean + `hmac-sha256` 固定であり、
+ * 既存 `src/forward/ports/evidence-attestation.ts` は同期 boolean + `hmac-sha256` 固定であり、
  * GitHub の信頼根にも provider family の証明にも使えない。あちらは変更せず、GitHub を
  * **唯一の artifact provenance verifier** として application port に隔離する。
  *

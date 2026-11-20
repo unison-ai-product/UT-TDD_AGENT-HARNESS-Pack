@@ -75,22 +75,6 @@ export const AUTOMATIC_DB_PROJECTION_REQUIREMENTS: DbProjectionIngestionRequirem
     reason: "spec relations are derived from PLAN dependencies and design/test pairs",
   },
   {
-    table: "schedule_entries",
-    reason: "schedule entries are derived from PLAN schedule/frontmatter state",
-  },
-  {
-    table: "execution_readiness_projection",
-    reason: "Forward readiness is derived from schedule predecessor state",
-  },
-  {
-    table: "activation_entries",
-    reason: "activation entries are derived from route mode and drive profile declarations",
-  },
-  {
-    table: "activation_schedule_reviews",
-    reason: "activation schedule reviews join activation profiles with V-model schedule state",
-  },
-  {
     table: "document_catalog_entries",
     reason:
       "document catalog entries are derived from the V-model document catalog authoring source",
@@ -128,7 +112,6 @@ export const EVIDENCE_GATED_DB_PROJECTION_TABLES = [
   "model_evaluations",
   "retry_events",
   "detector_route_candidates",
-  "github_review_lane_receipts",
   "github_project_item_projection",
   "github_object_bindings",
   "github_projection_outbox",

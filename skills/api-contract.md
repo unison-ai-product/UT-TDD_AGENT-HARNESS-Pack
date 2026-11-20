@@ -23,9 +23,9 @@ decision_points:
     over: "removing or renaming the field immediately once the replacement is ready"
     because: "stable contracts require a deprecation period — this is the compatibility-class guarantee callers depend on"
   - when: "a breaking change must be made to a stable contract"
-    choose: "bump the version in the PLAN's generates list and update every consumer reference before pair-freeze"
-    over: "shipping the breaking change and updating consumers in a follow-up PLAN"
-    because: "breaking changes to a stable contract must have all consumers updated in the same PLAN, not deferred"
+    choose: "bump the version in the contract and update every consumer reference before pair-freeze"
+    over: "shipping the breaking change and updating consumers in a follow-up Issue"
+    because: "breaking changes to a stable contract require all consumers to move together"
   - when: "choosing a compatibility class for a new contract (stable/beta/internal)"
     choose: "pick the class based on the actual change-without-notice policy the provider commits to"
     over: "defaulting every new contract to stable regardless of consumer guarantees"
@@ -45,10 +45,10 @@ skill governs the *binding agreement*, not the shape of individual routes.
 
 ## When to load this skill
 
-- A PLAN changes a shared API surface consumed by more than one module or agent.
+- An Issue changes a shared API surface consumed by more than one module or agent.
 - A Reverse R1 pass must formalise an implicit contract into a machine-checkable
   schema.
-- A Retrofit PLAN must assess backward-compatibility risk before modifying an
+- A Retrofit Issue must assess backward-compatibility risk before modifying an
   existing contract.
 - An L5 detailed-design doc defines serialisation, auth, or error-code guarantees
   that downstream callers depend on.
@@ -83,18 +83,18 @@ auth-token shape, and idempotency guarantees.
 
 - **Stable contracts** require a deprecation period (record sunset date in the L4
   doc) before removing or renaming fields.
-- **Breaking changes** to a stable contract must bump the version in the PLAN
-  `generates` list and update every consumer reference before pair-freeze.
+- **Breaking changes** to a stable contract must bump its version and update
+  every consumer reference before pair-freeze.
 - `ut-tdd doctor` must exit 0 after contract changes — governance checks that
   artifact_registry entries for the old and new contract versions are consistent.
 
-## Pair-freeze checklist for a contract PLAN
+## Pair-freeze checklist for a contract change
 
 - [ ] L4 contract doc exists with provider, consumer list, schema, error codes,
       and compatibility class.
 - [ ] All known consumers are listed; breaking changes are confirmed non-breaking
-      or consumers are updated in the same PLAN.
-- [ ] `ut-tdd plan lint` exits 0 (`generates` references the contract doc).
+      or consumers are updated in the same work item.
+- [ ] The Issue links the frozen contract and its paired test design.
 - [ ] `ut-tdd doctor` exits 0.
 - [ ] L6 unit-test design covers at least one invalid-input and one
       schema-mismatch error path.

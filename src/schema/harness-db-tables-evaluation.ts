@@ -28,9 +28,7 @@ export const HARNESS_DB_EVALUATION_TABLES: TableDef[] = [
   },
   // --- §9.10 model evaluation projection (FR-L1-38, PLAN-L7-53) ---
   // Opt-in: runs only when .ut-tdd/config/model-opt-in.yaml exists with enabled:true.
-  // Computes per-model success_rate by joining model_runs.plan_id -> plan_registry.status
-  // IN PLAN_SUCCESS_STATUSES. No token/cost columns — cost-efficiency is a declared
-  // follow-up (see function-spec.md FR-L1-38 invariant and PLAN-L7-53).
+  // Retained schema for the existing model evaluation data.
   {
     name: "model_evaluations",
     columns: [
@@ -48,39 +46,6 @@ export const HARNESS_DB_EVALUATION_TABLES: TableDef[] = [
       col("tokens_per_success", "REAL"),
       // cost_per_success = total_cost_usd / success_count ($ enrichment、cost 不明なら NULL)。
       col("cost_per_success", "REAL"),
-    ],
-  },
-  // --- roadmap / review evidence projection (cutover feedback loop) ---
-  {
-    name: "roadmap_rollups",
-    columns: [
-      pk("rollup_id"),
-      col("total_bands", "INTEGER"),
-      col("covered_bands", "INTEGER"),
-      col("parked_bands", "INTEGER"),
-      col("uncovered_bands", "INTEGER"),
-      col("total_gates", "INTEGER"),
-      col("reached_gates", "INTEGER"),
-      col("total_spans", "INTEGER"),
-      col("confirmed_spans", "INTEGER"),
-      col("frontier"),
-      col("computed_at"),
-    ],
-  },
-  {
-    name: "roadmap_band_coverage",
-    columns: [pk("band_id"), col("name"), col("status"), col("roadmap_ids"), col("computed_at")],
-  },
-  {
-    name: "roadmap_gate_progress",
-    columns: [
-      pk("roadmap_gate_id"),
-      col("plan_id"),
-      col("gate_id"),
-      col("total_spans", "INTEGER"),
-      col("confirmed_spans", "INTEGER"),
-      col("reached", "INTEGER"),
-      col("computed_at"),
     ],
   },
   {

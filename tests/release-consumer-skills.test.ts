@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { catalogAutomationAssets } from "../src/assets/catalog.ts";
 import { buildAdapterPlan } from "../src/runtime/adapter.ts";
 import { buildNodeGeneration } from "../src/runtime/node-bootstrap.ts";
@@ -26,6 +26,8 @@ import { buildSkillInjectionSet, recommendSkillsForText } from "../src/skill-eng
 import { openHarnessDb } from "../src/state-db/index.ts";
 import { migrate } from "../src/state-db/migration.ts";
 import { rebuildHarnessDb } from "../src/state-db/projection-writer.ts";
+import { heavyAfterAll } from "./support/hook-bounds.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const skill = (path: string, name = path.replace(/\.(md|ya?ml)$/i, "")): EmbeddedSkillAsset => ({
   path,
@@ -68,7 +70,7 @@ function rmTestDist(path: string): void {
     }
   };
   restoreWritable(path);
-  rmSync(path, { recursive: true, force: true });
+  removeTestTree(path);
 }
 
 function trackedSkillDigests(repoRoot: string): Array<{ path: string; sha256: string }> {
@@ -127,7 +129,7 @@ function runBundledCli(
 describe("PR-2a release consumer skills", () => {
   let buildRoot: string | undefined;
   let generation: Awaited<ReturnType<typeof buildNodeGeneration>> | undefined;
-  afterAll(() => {
+  heavyAfterAll("teardown", () => {
     if (buildRoot) rmTestDist(buildRoot);
   });
 
@@ -233,7 +235,7 @@ describe("PR-2a release consumer skills", () => {
         expect.objectContaining({ session_id: sessionId, event_type: "session_start" }),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -271,7 +273,7 @@ describe("PR-2a release consumer skills", () => {
         db.close();
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -315,7 +317,7 @@ describe("PR-2a release consumer skills", () => {
         db.close();
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -339,7 +341,7 @@ describe("PR-2a release consumer skills", () => {
       runBundledCli(generation, root, ["db", "rebuild"]);
       expectBundledSkillDigests(root, assets);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 

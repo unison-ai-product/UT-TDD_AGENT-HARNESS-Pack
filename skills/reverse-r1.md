@@ -11,7 +11,7 @@ applies_to:
     - Reverse
     - Retrofit
 decision_points:
-  - when: "The kind=reverse PLAN has reverse_type=design or reverse_type=normalization"
+  - when: "The Reverse type is design or normalization"
     choose: "Skip R1 entirely and move directly from R0 to R2"
     over: "Running contract extraction anyway"
     because: "R1 is explicitly skipped for design and normalization types per the reverse type table"
@@ -19,7 +19,7 @@ decision_points:
     choose: "Flag it implicit: true and treat it as a high-priority gap candidate"
     over: "Recording it as adequately documented because callers reveal its shape"
     because: "Implicit contracts are exactly the high-priority gaps that R3 must hypothesize about"
-  - when: "Contract extraction requires reading a file outside the PLAN's declared scope"
+  - when: "Contract extraction requires reading a file outside the scope in the Reverse Issue"
     choose: "Note the scope expansion explicitly in r1_notes"
     over: "Silently reading the extra file without recording the expansion"
     because: "The gate to R2 requires that no contract extraction happened outside declared scope without a note"
@@ -44,7 +44,7 @@ R0 to R2.
 
 ## When to load this skill
 
-- The `kind=reverse` PLAN has `workflow_phase: R1`.
+- The Reverse Issue has reached R1.
 - The `reverse_type` is `code`, `upgrade`, or `fullback`.
 
 ## Inputs
@@ -69,10 +69,9 @@ R0 to R2.
 
 ## Output artifact: observed-contracts
 
-Write to `.ut-tdd/reverse/<plan_id>/R1-observed-contracts.yaml`:
+Record R1-observed-contracts.yaml as Reverse evidence and link it in the Issue:
 
 ```yaml
-plan_id: <PLAN-REVERSE-NN>
 contracts:
   - id: <unique short id>
     surface: <http|db|event|type|function>
@@ -96,7 +95,6 @@ Before advancing `workflow_phase` to `R2`, verify:
   (they will become gap candidates in R3).
 - [ ] No contract extraction required reading files outside the declared scope
   without noting the expansion in `r1_notes`.
-- [ ] `ut-tdd plan lint` exits 0 with `workflow_phase: R2`.
 - [ ] `ut-tdd doctor` exits 0.
 
 Do not proceed to R2 if contract extraction is incomplete for in-scope surfaces.

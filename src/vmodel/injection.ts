@@ -40,10 +40,10 @@ const DRIVE_SKILLS: Record<Drive, string[]> = {
 };
 
 const LAYER_COMMANDS: Partial<Record<Layer, string[]>> = {
-  L1: ["ut-tdd plan lint --gate G1-trace", "ut-tdd skill suggest --plan <path>"],
-  L3: ["ut-tdd plan lint --gate G3-trace", "ut-tdd skill suggest --plan <path>"],
-  L4: ["ut-tdd plan lint --gate governance", "ut-tdd vmodel lint"],
-  L5: ["ut-tdd plan lint --gate governance", "ut-tdd vmodel lint"],
+  L1: ["ut-tdd gate G1", "ut-tdd skill suggest --text <task>"],
+  L3: ["ut-tdd gate G3", "ut-tdd skill suggest --text <task>"],
+  L4: ["ut-tdd vmodel lint"],
+  L5: ["ut-tdd vmodel lint"],
   L6: ["ut-tdd doctor", "ut-tdd verify recommend"],
   L7: ["ut-tdd doctor", "ut-tdd verify recommend", "ut-tdd review --uncommitted"],
 };
@@ -58,8 +58,8 @@ function orchestrationFor(drive: Drive, layer: Layer): OrchestrationMode {
 }
 
 function mandatoryAgentsFor(drive: Drive, layer: Layer): string[] {
-  const agents = new Set<string>(["code-reviewer"]);
-  if (layer === "L1" || layer === "L3") agents.add("pmo-sonnet");
+  const agents = new Set<string>(["reviewer"]);
+  if (layer === "L1" || layer === "L3") agents.add("docs");
   if (drive === "fe") agents.add("uiux");
   if (drive === "db") agents.add("dba-reviewer");
   if (drive === "agent") agents.add("frontier-reviewer");

@@ -22,7 +22,7 @@ function wrapperParityFiles(root: string, overrides: Record<string, string> = {}
                   type: "command",
                   command: "node",
                   args: [`\${CLAUDE_PROJECT_DIR}/.claude/hooks/agent-guard.ts`],
-                  blockOnFailure: true,
+                  onFailure: "block",
                 },
               ],
             },
@@ -33,7 +33,7 @@ function wrapperParityFiles(root: string, overrides: Record<string, string> = {}
                   type: "command",
                   command: "node",
                   args: [`\${CLAUDE_PROJECT_DIR}/.claude/hooks/work-guard.ts`],
-                  blockOnFailure: true,
+                  onFailure: "block",
                 },
               ],
             },
@@ -101,7 +101,7 @@ function wrapperParityFiles(root: string, overrides: Record<string, string> = {}
       "tests/runtime-hook-entrypoints.test.ts": [
         "ut-tdd codex --execute records the same session lifecycle through the adapter wrapper",
         "ut-tdd codex --task-file feeds file content through the same adapter wrapper",
-        "ut-tdd codex --plan records wrapper lifecycle without forwarding plan flags to Codex",
+        "ut-tdd codex records wrapper lifecycle without resolving a current PLAN",
       ].join("\n"),
       "tests/runtime-adapter.test.ts": "U-ADAPTER-007\nU-ADAPTER-008",
       "docs/test-design/harness/L7-unit-test-design.md": "U-ADAPTER-009",
@@ -117,9 +117,24 @@ function deps(root: string, files = wrapperParityFiles(root)): RuntimeSurfaceDep
   };
 }
 
+function sourceRepoRoot(): string {
+  return process.cwd();
+}
+
 describe("doctor runtime surface checks", () => {
+  it("U-PLANRET-014: runtime-surface wrapper check does not require PLAN metadata", () => {
+    const root = sourceRepoRoot();
+    const files = wrapperParityFiles(root, {
+      "src/runtime/adapter.ts": "const args = CODEX_STDIN_ARGS; return { stdin: intent.task };",
+    });
+
+    const result = checkCodexWrapperParity(deps(root, files));
+    expect(result.ok).toBe(true);
+    expect(result.messages[0]).toContain("codex-wrapper-parity - OK");
+  });
+
   it("keeps wrapper parity independent from DoctorDeps shape", () => {
-    const root = process.cwd();
+    const root = sourceRepoRoot();
 
     const result = checkCodexWrapperParity(deps(root));
 

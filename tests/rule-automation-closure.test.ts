@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeRuleAutomationClosure,
-  loadRuleAutomationClosureDocs,
   ruleAutomationClosureMessages,
 } from "../src/lint/rule-automation-closure.ts";
 
@@ -43,15 +42,5 @@ describe("rule automation closure lint", () => {
 
     expect(r.checked).toBe(0);
     expect(ruleAutomationClosureMessages(r)[0]).toContain("violation");
-  });
-
-  it("U-RAC-003: current reconciliation PLAN has no text-only or scheduled rule closures", () => {
-    const docs = loadRuleAutomationClosureDocs(process.cwd());
-    const r = analyzeRuleAutomationClosure(docs);
-
-    expect(docs.length).toBeGreaterThan(0);
-    expect(r.ok).toBe(true);
-    expect(r.openRows).toEqual([]);
-    expect(ruleAutomationClosureMessages(r)[0]).toContain("OK");
   });
 });

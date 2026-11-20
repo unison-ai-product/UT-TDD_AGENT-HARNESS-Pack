@@ -119,7 +119,7 @@ describe("github issue forms (PLAN-L7-451 W5)", () => {
     // (recovery だけを見る退化 oracle にしない)。
     const perFormRequired: Record<string, string[]> = {
       "recovery.yml": [
-        "origin_plan",
+        "origin_issue",
         "observed_state",
         "reason_code",
         "observed_head",
@@ -128,7 +128,7 @@ describe("github issue forms (PLAN-L7-451 W5)", () => {
         "reentry_target",
       ],
       "reverse.yml": [
-        "origin_plan",
+        "origin_issue",
         "observed_state",
         "observed_head",
         "reason_code",
@@ -137,7 +137,7 @@ describe("github issue forms (PLAN-L7-451 W5)", () => {
         "reentry_target",
       ],
       "redesign.yml": [
-        "origin_plan",
+        "origin_issue",
         "observed_state",
         "reason_code",
         "observed_head",

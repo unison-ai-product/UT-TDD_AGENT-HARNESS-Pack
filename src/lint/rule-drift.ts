@@ -38,12 +38,6 @@ const SHARED_MARKERS = [
   "claude-only",
   "codex-only",
   "hybrid",
-  // PLAN filing discipline lived only in .claude/CLAUDE.md until 2026-07-28, so the
-  // Codex adapter never received it (route_signal / generates / plan_id: 0 hits in
-  // AGENTS.md, measured). Filing rules are shared workflow, and an adapter that
-  // silently drops them produces PLANs that trip the governance gates on push.
-  "route_signal",
-  "generates",
 ] as const;
 
 const ADAPTER_MARKERS = {

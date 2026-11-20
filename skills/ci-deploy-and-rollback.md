@@ -37,9 +37,9 @@ decision_points:
     over: "Applying the rename or constraint in a single deploy."
     because: "The skill classifies rename/NOT-NULL-add as staged, multi-deploy operations (add -> dual-write -> read-new -> drop-old); doing them in one deploy risks a lock or a window of write failures on live data."
   - when: "A rollback has completed and the system is stable again."
-    choose: "Open a Recovery PLAN with root cause, fix classification, and a regression test before considering the incident closed."
+    choose: "Open a Recovery Issue with root cause, fix classification, and a regression test before considering the incident closed."
     over: "Treating the successful rollback itself as the resolution."
-    because: "The skill states a rollback is not a resolution; without the follow-up PLAN and regression test, the same failure can redeploy unnoticed."
+    because: "The skill states a rollback is not a resolution; without the follow-up Issue and regression test, the same failure can redeploy unnoticed."
 ---
 
 # ci deploy and rollback
@@ -51,7 +51,7 @@ not after a problem appears.
 
 ## When to load this skill
 
-- A PLAN reaches L12 (deploy + acceptance) in the Forward cycle.
+- A change reaches L12 (deploy + acceptance) in the Forward cycle.
 - An Add-feature increment is ready to ship behind a flag.
 - A Recovery rollback or an Incident hotfix path is needed.
 
@@ -63,15 +63,14 @@ All must be green; a failure blocks the deploy.
 npm run lint          # Biome check (full output — do not pipe to tail)
 npm run test          # Vitest
 npm run typecheck     # tsc --noEmit
-ut-tdd doctor         # harness structural health + plan governance
-ut-tdd plan lint      # PLAN schema, steps, dependency existence
+ut-tdd doctor         # harness structural health
 ut-tdd review --uncommitted
 ```
 
 Never bypass with `--no-verify`. The list above is the local pre-flight; the
 authoritative CI gate set is `.github/workflows/harness-check.yml` 全体 (jobs: `harness-check-linux` / `harness-check-windows` / `node-generation-linux` / `node-generation-windows` / 集約 `harness-check`). A push that is local-green but
-fails CI usually tripped a CI-only step (e.g. branch-type guard, plan
-admission-check, db rebuild, audit quality, Windows verification, Node
+fails CI may have tripped a CI-only step (e.g. branch-type guard,
+DB rebuild, audit quality, Windows verification, Node
 generation; not exhaustive), not a skipped local command.
 
 ## Strategy selection
@@ -92,7 +91,7 @@ generation; not exhaustive), not a skipped local command.
 
 Record results in `.ut-tdd/audit/`.
 
-## Rollback criteria (defined in the PLAN before deploy)
+## Rollback criteria (defined in the release design before deploy)
 
 Typical triggers: error rate above baseline by a set margin, p95 latency
 degradation beyond a set threshold, a primary path returning non-2xx/3xx, or a
@@ -110,11 +109,11 @@ opinion — rollback is safer than extended downtime.
 
 ## After rollback
 
-A rollback is not a resolution. Once stable, open a Recovery PLAN (branch
+A rollback is not a resolution. Once stable, open a Recovery Issue (branch
 `hotfix/*`), record the root cause, classify the fix as design-level
 (`add-design`) or implementation-only (`add-impl` at L7), and add a regression
 test that would have caught the failure before re-deploy. Run `ut-tdd handover`
-at the PLAN boundary.
+at the work or release boundary.
 
 ## DB migration safety
 
@@ -128,8 +127,8 @@ at the PLAN boundary.
 
 ## Completion checklist
 
-- [ ] Pre-deploy gates green (lint / test / typecheck / doctor / plan lint).
-- [ ] Strategy + rollback thresholds documented in the PLAN before cutover.
+- [ ] Pre-deploy gates green (lint / test / typecheck / doctor).
+- [ ] Strategy + rollback thresholds documented in the release design before cutover.
 - [ ] Smoke test passes; monitoring window clean.
-- [ ] Evidence in `.ut-tdd/audit/`; PLAN advanced via `ut-tdd plan use`.
-- [ ] If rolled back: Recovery PLAN opened with root cause + regression test.
+- [ ] Evidence in `.ut-tdd/audit/` and linked to the Issue.
+- [ ] If rolled back: Recovery Issue opened with root cause + regression test.

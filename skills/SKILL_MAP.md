@@ -23,17 +23,17 @@ intentionally not listed in the trigger table below (PLAN-REVERSE-280 item 3).
 
 ## How recommendation works
 
-`ut-tdd skill suggest --plan <plan-id>` scores every pack against the plan's `layer`
-and drive model (the recommender reads each pack's `applies_to.layers` /
-`applies_to.drive_models` frontmatter, not its body). Load only the top-scoring
+`ut-tdd skill suggest --text "..." --buckets` classifies the task description
+and ranks packs using each pack's `applies_to.layers` /
+`applies_to.drive_models` frontmatter. Load only the top-scoring
 packs for the current task.
 
 ## Discovery protocol (session start / task arrival)
 
-1. `ut-tdd status` — current layer, drive model, active PLAN.
-2. `ut-tdd skill suggest --plan <active-plan-id>` — ranked packs.
+1. `ut-tdd status` — current runtime mode. Read the Issue and design to identify the task and layer.
+2. `ut-tdd skill suggest --text "..." --buckets` — ranked packs for the task description.
 3. Read the top-scoring pack(s) before starting work.
-4. With no PLAN yet (Discovery S0 / cold start), pick from the trigger table.
+4. In Discovery S0 or at cold start, pick from the trigger table.
 5. Skip packs that do not match the current layer/drive — they only cost context.
 
 ## Trigger table
@@ -55,7 +55,7 @@ packs for the current task.
 | Refactor (behaviour-invariant) | refactoring |
 | Debugging / error fix / recovery | debugging-and-error-recovery, error-fix |
 | Reverse R0–R4 / RGC | reverse-analysis, reverse-r0 … reverse-r4, reverse-rgc |
-| PLAN authoring / WBS / schedule steps | planning-and-task-breakdown, gate-planning |
+| Issue decomposition / WBS / schedule steps | planning-and-task-breakdown, gate-planning |
 | Program / portfolio view, milestones | project-management |
 | Estimation / effort | estimation |
 | Discovery / PoC | poc |
@@ -71,6 +71,7 @@ packs for the current task.
 | Deprecation / cutover | deprecation-cutover |
 | Browser / screen (L10) verification | browser-testing-and-screen-verification |
 | Git / Conventional Commits / CI | git |
+| PR を出す直前の自己検査 (merge 条件 / blocker / 偽の Red / 旧記述の残り。#1037 までの一時規律) | pr-preflight |
 | Doc maintenance (README / runbook prose) | documentation |
 | Before writing any code (delete/absorb/reuse/config first) | code-minimalism |
 | Test-case ideation quality / oracle / when to stop testing | test-breakage-thinking |
@@ -145,12 +146,10 @@ the generator self-lints that the result is indexable-by-something before writin
 
 ## Core operating rules (apply to every pack)
 
-- Surface assumptions before non-trivial work; stop on a PLAN↔doc↔code
-  inconsistency rather than guessing.
+- Surface assumptions before non-trivial work. Resolve inconsistencies among the Issue, design, and code before continuing.
 - Verify, do not assume completion: `ut-tdd doctor` exits 0, `ut-tdd review
   --uncommitted` has no blocking findings, tests are green.
-- Stay within the active PLAN scope; do not refactor adjacent code as a
-  side-effect.
+- Keep changes within the scope of the Issue and frozen design.
 - Record handover/evidence in `.ut-tdd/handover/` or `.ut-tdd/audit/` when a task
   crosses a session or runtime boundary.
 

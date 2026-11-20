@@ -25,7 +25,7 @@ IPA 共通フレーム 2013 (SLCP-JCF) では次が**同義**として扱われ�
 
 > **重要 (5) — 右腕 = データ実在性エスカレーション (正規式 V-model、PLAN-RECOVERY-02 2026-06-04 PO 確定、非破壊)**: 右腕の検証本質は使うデータ・環境の実在性が段階的に上がる: 合成/テストデータ (L6 単体 / L5 結合→L8 / L4 総合→L9) → 本番実データ (**L2 実データ検証=画面→L10** が先、**L3 本番受入=要件→L12** が後。右腕工程順) → L1 運用→L14 (実データ×時間) → L0 価値 (実成果)。**L0 企画にも検証ペア (価値検証 = L14→L0 feedback) を与え V の頂点を閉じる** (従来 L0 はペア無しだった穴埋め)。**L2 画面 = L1 のフェーズ分離** (画面要求→要求/要件、画面詳細→L5)。番号・既存ペアは据え置き (追加・明確化のみ)。
 
-> **設計系 PLAN の本文**: 新規の `kind: design` / `add-design` PLAN は本文を 4 項目 (上流の設計 revision digest / 引き渡し物 / 検証の対 / 完了条件) に絞り、設計の契約本文は本マップの各 `docs/design/` 文書に置く。正本は `CLAUDE.md` §設計系 PLAN の本文 4 項目 (issue #648)。
+> **設計と作業の正本**。設計の契約本文は `docs/design/` と `docs/test-design/` に置く。GitHub Issue は対象の設計 revision と検証の対を参照する (`CLAUDE.md` §設計と作業の正本)。
 
 ## §1 工程 × 成果物 × 標準 マスター表 (L0-L14)
 
@@ -70,7 +70,7 @@ IPA 共通フレーム 2013 (SLCP-JCF) では次が**同義**として扱われ�
 
 > **必須 § 構造 (外部設計内容)**: 4 型 (`report`/`batch`/`notification`/`code-value`) 各々の必須 § は
 > 要件 [§1.10.G.6.1](./ut-tdd-agent-harness-requirements_v1.2.md) で IPA 共通フレーム外部設計に grounding して
-> 確定し、`ut-tdd plan lint` (`sub-doc-section-structure` gate) が design PLAN に対し fail-close 検証する。
+> 確定する。設計文書の節構造は `ut-tdd doctor` の `sub-doc-section-structure` で検査する。
 > 例: 帳票 = §1 帳票一覧 / §2 レイアウト / §3 出力項目定義 / §4 出力条件・タイミング / §5 関連 doc。
 
 ### §1b-1 L6 機能設計 sub_doc の粒度 (artifact 種別 bucket、PLAN-L7-245)
@@ -137,11 +137,7 @@ free-form メタデータ) が担う。
 >
 > **2026-06-30 update (PLAN-L3-06 / PLAN-L5-09 / PLAN-L6-36)**: harness central UI の L3/L5/L6 FE bodies は現時点で存在する。`frontend-design-coverage` は body present 6 / pending 0 を報告し、上記の実 file path を検査する。
 >
-> **残り = body 起票→作成 (作成段階)**: L3 `screen-functional` / L5 `ui-detail` / L6 `screen-spec` の本文は
-> per-layer design PLAN (`kind=design`) で起票し、起票時に各型の必須 § 構造を定義する (`report`/`batch` を
-> vocabulary 先行登録した PLAN-L7-97 §4 と同方針 — speculative な § 定義を先にしない)。draft body を frozen
-> 層 dir に置くと層完了ゲートが落ちるため、body は owning PLAN を confirmed にして起票する (L4 `ui-standard`
-> が踏んだ手順)。L8/L9 の FE 観点充足は右腕 test-design 側。
+> **設計文書の追加**。L3 `screen-functional`、L5 `ui-detail`、L6 `screen-spec` の追加は、対象の設計 revision と対になるテスト設計を Issue に記録する。L8/L9 の FE 観点は対応するテスト設計で扱う。
 >
 > ⚠ **slot 登録は body 完成を意味しない (coverage ≠ substance)**。slug が `VALID_SUB_DOCS` にある = 起票に
 > 使用可、という意味のみ。FE 設計の substance は body 起票時に確定する。本 §1c の左腕カバレッジは

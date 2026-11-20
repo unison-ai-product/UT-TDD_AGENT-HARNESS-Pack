@@ -2,7 +2,7 @@ import type { CheckExpression, TableDef } from "./harness-db.ts";
 import { col, enumCheck, foreignKey, pk, requiredCol } from "./harness-db-table-builders.ts";
 
 const dispositions = ["adopt", "merge", "reference", "defer", "not_applicable", "reject"];
-const targetKinds = ["plan_alias", "artifact_family", "artifact_path", "target_slot"];
+const targetKinds = ["artifact_family", "artifact_path", "target_slot"];
 const itemStatuses = ["pending_review", ...dispositions];
 
 const isNull = (column: string, negate = false): CheckExpression => ({
@@ -105,14 +105,13 @@ export const HARNESS_DB_VMODEL_TABLES: TableDef[] = [
       requiredCol("target_status"),
       col("target_kind"),
       col("target_ref"),
-      col("plan_id"),
+      col("issue"),
       requiredCol("reason"),
       requiredCol("source_digest"),
     ],
     unique: [["item_id"]],
     foreignKeys: [
       foreignKey(["item_id"], { table: "vmodel_semantic_items", columns: ["item_id"] }),
-      foreignKey(["plan_id"], { table: "plan_registry", columns: ["plan_id"] }),
     ],
     checks: [
       enumCheck("target_status", itemStatuses),
@@ -126,7 +125,7 @@ export const HARNESS_DB_VMODEL_TABLES: TableDef[] = [
         ),
         enumCheck("target_status", ["not_applicable", "reject"]),
       ),
-      any({ kind: "not", expression: equals("target_status", "defer") }, isNull("plan_id", true)),
+      any({ kind: "not", expression: equals("target_status", "defer") }, isNull("issue", true)),
     ],
   },
   {

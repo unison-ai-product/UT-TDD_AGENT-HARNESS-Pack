@@ -3,15 +3,16 @@
  * (要件 §1.10.G.6.1、document-system-map §1b grounding)。
  *
  * SI 標準成果物カタログ 4 型 (`report`/`batch`/`notification`/`code-value`) は ② プロダクト選択ゆえ
- * harness 自身 (CLI、帳票なし) は産出せず現状 subject 0 だが、downstream 製品 PLAN が起票したとき
+ * harness 自身 (CLI、帳票なし) は産出せず現状 subject 0 だが、downstream 製品の設計文書が作られたとき
  * IPA 共通フレーム外部設計の標準成果物内容 (必須 §) を満たすことを機械強制する。L1 sub-doc §G.6 が
  * 未だ宣言止まりなのに対し、本 gate は L4 標準成果物カタログの substance (必須 §) を実体で担保する。
  *
  * 純関数 (analyzeSubDocSectionStructure) + I/O loader (loadSubDocSectionStructureInput) を分離。
  */
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { type Dirent, readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { resolveVModelRoots } from "../shared/design-root.ts";
 
 /**
  * 要件 §G.6.1 の L4 標準成果物 必須 § (h2 の §名称)。document-system-map §1b の IPA grounding と対。
@@ -32,10 +33,11 @@ export const STANDARD_DELIVERABLE_SECTIONS: Record<string, string[]> = {
 };
 
 export interface SubDocSectionPlan {
+  /** Compatibility name: repository-relative document path, not a PLAN identifier. */
   planId: string;
   subDoc: string;
   status: string;
-  /** PLAN 本文の h2 header 行 (`## ...`、`###` 以降は除外)。 */
+  /** 設計文書本文の h2 header 行 (`## ...`、`###` 以降は除外)。 */
   h2: string[];
 }
 
@@ -56,7 +58,7 @@ export interface SubDocSectionStructureResult {
   ok: boolean;
 }
 
-/** 標準成果物 sub_doc の design PLAN が必須 § を h2 として持つか fail-close 判定する。 */
+/** 標準成果物 sub_doc の設計文書が必須 § を h2 として持つか fail-close 判定する。 */
 export function analyzeSubDocSectionStructure(
   input: SubDocSectionStructureInput,
 ): SubDocSectionStructureResult {
@@ -74,23 +76,22 @@ export function analyzeSubDocSectionStructure(
   return { checked, violations, ok: violations.length === 0 };
 }
 
-interface PlanFrontmatter {
-  plan_id?: string;
+interface DesignFrontmatter {
   sub_doc?: string;
   status?: string;
 }
 
-/** PLAN md を frontmatter + body に分割し、body の h2 header 行を返す。CRLF 両対応。 */
+/** Markdown を frontmatter + body に分割し、body の h2 header 行を返す。CRLF 両対応。 */
 export function extractPlanSections(content: string): {
-  fm: PlanFrontmatter;
+  fm: DesignFrontmatter;
   h2: string[];
 } {
   const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  let fm: PlanFrontmatter = {};
+  let fm: DesignFrontmatter = {};
   let body = content;
   if (m) {
     try {
-      fm = (parseYaml(m[1]) as PlanFrontmatter) ?? {};
+      fm = (parseYaml(m[1]) as DesignFrontmatter) ?? {};
     } catch {
       fm = {};
     }
@@ -105,25 +106,15 @@ export function extractPlanSections(content: string): {
 
 export function loadSubDocSectionStructureInput(repoRoot: string): SubDocSectionStructureInput {
   const plans: SubDocSectionPlan[] = [];
-  const plansDir = join(repoRoot, "docs", "plans");
-  let files: string[] = [];
-  try {
-    files = readdirSync(plansDir).filter((f) => f.endsWith(".md"));
-  } catch {
-    return { plans: [], requiredSections: STANDARD_DELIVERABLE_SECTIONS };
-  }
-  for (const file of files) {
-    let content = "";
-    try {
-      content = readFileSync(join(plansDir, file), "utf8");
-    } catch {
-      continue;
-    }
+  const designRoot = join(repoRoot, resolveVModelRoots(repoRoot).designRoot);
+  const files = markdownFiles(designRoot);
+  for (const path of files) {
+    const content = readFileSync(path, "utf8");
     const { fm, h2 } = extractPlanSections(content);
     const subDoc = typeof fm.sub_doc === "string" ? fm.sub_doc : "";
     if (!Object.hasOwn(STANDARD_DELIVERABLE_SECTIONS, subDoc)) continue;
     plans.push({
-      planId: typeof fm.plan_id === "string" ? fm.plan_id : file,
+      planId: relative(repoRoot, path).replaceAll("\\", "/"),
       subDoc,
       status: typeof fm.status === "string" ? fm.status : "draft",
       h2,
@@ -132,10 +123,29 @@ export function loadSubDocSectionStructureInput(repoRoot: string): SubDocSection
   return { plans, requiredSections: STANDARD_DELIVERABLE_SECTIONS };
 }
 
+function markdownFiles(root: string): string[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch (error) {
+    if (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+  return entries
+    .flatMap((entry) => {
+      const path = join(root, entry.name);
+      if (entry.isDirectory()) return markdownFiles(path);
+      return entry.isFile() && entry.name.endsWith(".md") ? [path] : [];
+    })
+    .sort();
+}
+
 export function subDocSectionStructureMessages(r: SubDocSectionStructureResult): string[] {
   if (r.ok) {
     return [
-      `sub-doc-section-structure — OK (L4 標準成果物 design PLAN checked=${r.checked}, 必須 § 欠落 0)`,
+      `sub-doc-section-structure — OK (L4 標準成果物 design docs checked=${r.checked}, 必須 § 欠落 0)`,
     ];
   }
   const sample = r.violations

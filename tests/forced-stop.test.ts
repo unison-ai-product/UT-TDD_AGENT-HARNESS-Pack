@@ -24,8 +24,6 @@ function mockDeps(
     now: () => "2026-06-02T00:00:00.000Z",
     appendLine: (p, l) => files.set(p, `${files.get(p) ?? ""}${l}\n`),
     readText: (p) => files.get(p) ?? null,
-    writeText: (p, c) => files.set(p, c),
-    currentBranch: () => null,
     listDir: (dir) =>
       [...files.keys()]
         .filter((k) => k.startsWith(dir) && k.length > dir.length)
@@ -83,12 +81,17 @@ describe("forced-stop (PLAN-L7-02 add-impl / U-FSF)", () => {
     const line = deps.files.get(sessionPath("s1")) as string;
     const parsed = JSON.parse(line.trim());
     expect(parsed.event_type).toBe("forced_stop");
+    expect(parsed.plan_id).toBe("PLAN-A");
     expect(parsed.next_message_ref).toBe("s1.jsonl#3");
     expect(typeof parsed.next_message_ref).toBe("string");
     // 本文フィールドを持たない (秘匿)
     expect(parsed.message).toBeUndefined();
     expect(parsed.text).toBeUndefined();
     expect(parsed.content).toBeUndefined();
+
+    const unresolved = mockDeps();
+    recordForcedStop({ session_id: "s2", dangling_from: "T2" }, unresolved);
+    expect(JSON.parse((unresolved.files.get(sessionPath("s2")) ?? "{}").trim()).plan_id).toBeNull();
 
     // fail-open
     const throwing = mockDeps({
@@ -208,9 +211,9 @@ describe("forced-stop (PLAN-L7-02 add-impl / U-FSF)", () => {
     expect(pendingRecoveryProposals(mockDeps())).toEqual([]);
   });
 
-  it("U-FSF-006: emitClassifyRequest は pmo-haiku 契約 (role/text/output_schema) を含む", () => {
+  it("U-FSF-006: emitClassifyRequest は docs role の分類リクエスト契約 (role/text/output_schema) を含む", () => {
     const req = JSON.parse(emitClassifyRequest("やめろ"));
-    expect(req.role).toBe("pmo-haiku");
+    expect(req.role).toBe("docs");
     expect(req.text).toBe("やめろ");
     expect(req.output_schema.category).toContain("mistake");
     expect(req.output_schema.attention).toContain("high");

@@ -5,6 +5,7 @@ import {
   parseCodexCommandString,
   parseHookInvocation,
 } from "../lint/hook-invocation.ts";
+import { guardBootstrapHookArgs } from "../lint/project-hook.ts";
 
 export interface SetupSmokeDeps {
   repoRoot: string;
@@ -39,7 +40,15 @@ const SETUP_SMOKE_SHARED_INVOCATIONS = [
   nativeInvocation("session", "summary"),
 ] as const;
 const SETUP_SMOKE_CLAUDE_INVOCATIONS = [
-  ...SETUP_SMOKE_SHARED_INVOCATIONS,
+  {
+    executable: "node",
+    args: guardBootstrapHookArgs("agent-guard"),
+  },
+  {
+    executable: "node",
+    args: guardBootstrapHookArgs("work-guard"),
+  },
+  ...SETUP_SMOKE_SHARED_INVOCATIONS.slice(2),
   nativeInvocation("hook", "subagent-stop"),
 ] as const;
 

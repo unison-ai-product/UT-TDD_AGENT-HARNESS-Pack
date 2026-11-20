@@ -16,7 +16,7 @@ triggers: "システムの構造: 方式・構成・ドメイン境界・配置�
 # vmodel-role-architecture
 
 > 移植元: zip `build/agent/architecture.md` (Apache-2.0、PLAN-L7-676 PR-T3、
-> docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1)。
+> plans-archive-20261102:docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1)。
 >
 > **これは一般的な行動規約ではなく、サンプル製品「TeamFlow」の設計書 (zip 同梱の
 > `docs/*.yaml`) から `python tools/build.py agentdocs` (移植元 `vmodel-docgen` の

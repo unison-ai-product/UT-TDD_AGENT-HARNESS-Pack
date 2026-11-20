@@ -12,6 +12,7 @@ import {
 import { resolveRepositoryRoot } from "../feedback/repository-root.ts";
 import type { ReviewVerdictProjectionResult } from "../feedback/review-attestation.ts";
 import { issueReviewRequest } from "../feedback/review-attestation.ts";
+import { GH_COMMAND_TIMEOUT_MS, ghCommandEnv } from "../github/gh-command.ts";
 import {
   canonicalAuthoredMemoryPath,
   readCanonicalMemoryByIdentity,
@@ -121,6 +122,9 @@ export function validateLiveReviewSubject(input: {
         cwd,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
+        ...(command === "gh"
+          ? { timeout: GH_COMMAND_TIMEOUT_MS, env: ghCommandEnv(process.env) }
+          : {}),
       });
       return { status: result.status, stdout: result.stdout ?? "" };
     });
@@ -261,6 +265,8 @@ function publishLiveReviewReceipt(
   execFileSync("gh", ["pr", "comment", String(receipt.pr), "--body", body], {
     cwd: repoRoot,
     stdio: ["ignore", "ignore", "pipe"],
+    timeout: GH_COMMAND_TIMEOUT_MS,
+    env: ghCommandEnv(process.env),
   });
 }
 

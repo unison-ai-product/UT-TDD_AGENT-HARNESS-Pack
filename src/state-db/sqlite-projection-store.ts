@@ -6,8 +6,6 @@ import type {
 } from "../projection/contracts/projection-store.ts";
 import type { ModelEvaluationFacts } from "../projection/domain/model-evaluations.ts";
 import type { OperationalMetricFacts } from "../projection/domain/operational-metrics.ts";
-import { PLAN_SUCCESS_STATUSES } from "../projection/domain/plan-status.ts";
-import type { PocDecisionCount } from "../projection/domain/poc-evaluations.ts";
 import { HARNESS_DB_TABLE_BY_NAME, primaryKeyOf, type TableDef } from "../schema/harness-db.ts";
 import { stableId } from "../stable-id.ts";
 import { type HarnessDb, SECRET_PATTERN, upsertRow } from "./index.ts";
@@ -53,7 +51,6 @@ export class SqliteProjectionStore
     const table = tableDef(event.table);
     const row = normalizeRow(table, event);
     upsertRow(this.#db, { table: table.name, primaryKey: primaryKeyOf(table), row });
-    checkResolvablePlanJoin(this, table.name, row);
   }
 
   private recordFindingInSession(input: ProjectionFindingInput): void {
@@ -74,41 +71,19 @@ export class SqliteProjectionStore
     });
   }
 
-  planExists(planId: string): boolean {
-    return (
-      this.#db.prepare("SELECT plan_id FROM plan_registry WHERE plan_id = ?").get(planId) !==
-      undefined
-    );
-  }
-
-  readPocDecisionCounts(): readonly PocDecisionCount[] {
-    return this.#db
-      .prepare(
-        `SELECT decision_outcome, COUNT(*) AS cnt
-         FROM plan_registry
-         WHERE kind = 'poc'
-           AND decision_outcome IN ('confirmed', 'rejected', 'pivot')
-         GROUP BY decision_outcome`,
-      )
-      .all() as unknown as PocDecisionCount[];
-  }
-
   readModelEvaluationFacts(): readonly ModelEvaluationFacts[] {
-    const placeholders = PLAN_SUCCESS_STATUSES.map(() => "?").join(", ");
     return this.#db
       .prepare(
-        `SELECT mr.model,
+        `SELECT model,
                 COUNT(*) AS run_count,
-                SUM(CASE WHEN pr.status IN (${placeholders}) THEN 1 ELSE 0 END) AS success_count,
-                COALESCE(SUM(mr.input_tokens), 0) AS total_input_tokens,
-                COALESCE(SUM(mr.output_tokens), 0) AS total_output_tokens,
-                SUM(mr.cost_usd) AS total_cost_usd
-           FROM model_runs mr
-           LEFT JOIN plan_registry pr ON mr.plan_id = pr.plan_id
-          GROUP BY mr.model
-          ORDER BY mr.model`,
+                COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
+                SUM(cost_usd) AS total_cost_usd
+           FROM model_runs
+          GROUP BY model
+          ORDER BY model`,
       )
-      .all(...PLAN_SUCCESS_STATUSES)
+      .all()
       .map(modelEvaluationFacts);
   }
 
@@ -145,6 +120,7 @@ export class SqliteProjectionStore
                 (SELECT COUNT(*) FROM (
                   SELECT plan_id, workflow, phase
                     FROM workflow_runs
+                   WHERE COALESCE(workflow, '') <> 'routine-gate'
                    GROUP BY plan_id, workflow, phase
                   HAVING COUNT(*) > 1
                 )) AS retry_groups
@@ -162,21 +138,12 @@ export class SqliteProjectionStore
       },
     };
   }
-
-  uniqueShortPlanExists(planId: string): boolean {
-    if (!isBareNumericPlanContext(planId)) return false;
-    const row = this.#db
-      .prepare("SELECT COUNT(*) AS count FROM plan_registry WHERE plan_id LIKE ?")
-      .get(`${planId}-%`) as { count: number } | undefined;
-    return (row?.count ?? 0) === 1;
-  }
 }
 
 function modelEvaluationFacts(row: Record<string, unknown>): ModelEvaluationFacts {
   return {
     model: String(row.model ?? ""),
     runCount: Number(row.run_count ?? 0),
-    successCount: Number(row.success_count ?? 0),
     totalInputTokens: Number(row.total_input_tokens ?? 0),
     totalOutputTokens: Number(row.total_output_tokens ?? 0),
     totalCostUsd: row.total_cost_usd == null ? null : Number(row.total_cost_usd),
@@ -225,41 +192,4 @@ function assertNoSecretLikeString(value: unknown, scope: string, field: string):
   if (typeof value === "string" && SECRET_PATTERN.test(value)) {
     throw new Error(`secret-like value is not allowed in harness.db ${scope}: ${field}`);
   }
-}
-
-function checkResolvablePlanJoin(
-  store: SqliteProjectionStore,
-  table: string,
-  row: Record<string, unknown>,
-): void {
-  if (table === "plan_registry" || table === "feedback_events") return;
-  const planId = asString(row.plan_id);
-  if (!planId || store.planExists(planId) || store.uniqueShortPlanExists(planId)) return;
-  if (/^A-\d/.test(planId) || planId.includes("+")) return;
-  const subjectId = `${table}:${String(row[primaryKeyOf(tableDef(table))] ?? "")}`;
-  const staleRuntime =
-    isBareNumericPlanContext(planId) &&
-    (isRuntimeStateEvidencePath(asString(row.evidence_path)) || isRuntimeContextTable(table));
-  store.recordFinding({
-    kind: staleRuntime ? "stale-runtime-plan-context" : "unresolved-join",
-    subjectId,
-    source: "projection-writer",
-    ...(asString(row.evidence_path) ? { evidencePath: asString(row.evidence_path) as string } : {}),
-  });
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function isBareNumericPlanContext(planId: string): boolean {
-  return /^PLAN-L\d+-\d+$/.test(planId);
-}
-
-function isRuntimeStateEvidencePath(path: string | undefined): boolean {
-  return Boolean(path?.startsWith(".ut-tdd/logs/") || path?.startsWith(".ut-tdd/handover/"));
-}
-
-function isRuntimeContextTable(table: string): boolean {
-  return ["hook_events", "test_runs", "trouble_events", "guardrail_decisions"].includes(table);
 }

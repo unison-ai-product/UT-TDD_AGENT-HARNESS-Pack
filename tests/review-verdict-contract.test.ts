@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "commander";
@@ -12,6 +12,7 @@ import {
   reviewOutputContractExample,
   type VerdictExtraction,
 } from "../src/feedback/review-verdict-contract.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 // 期待値ビルダのみを共通化し、`expect` は各 test body に残す。
 // `ddd-tdd-rules` の `test-oracle-strength` は AST で body 内の literal expect/assert を要求するため、
@@ -51,7 +52,7 @@ beforeAll(() => {
 afterAll(() => {
   if (originalCodexBin === undefined) delete process.env.UT_TDD_CODEX_BIN;
   else process.env.UT_TDD_CODEX_BIN = originalCodexBin;
-  if (stubBinDir) rmSync(stubBinDir, { recursive: true, force: true });
+  if (stubBinDir) removeTestTree(stubBinDir);
 });
 
 function verdictReceipt(extraction: VerdictExtraction): ReviewReceipt {
@@ -89,10 +90,8 @@ function analyze(extraction: VerdictExtraction) {
 async function dryRunTask(provider: "claude" | "codex", role: string): Promise<string> {
   const program = new Command();
   registerDelegationCommands(program, {
-    gitBranch: () => "work/d3-verdict-receipt",
     gitHead: () => "a".repeat(40),
     resolveTaskText: (opts) => opts.task ?? null,
-    resolveSkillContextInjection: () => undefined,
     runSessionStartSideEffects: () => {},
     taskFileOptionDescription: "read task text from file",
     writeHandoverWarnings: () => {},
@@ -296,5 +295,85 @@ describe("review verdict contract (U-RVCON)", () => {
     expect(lines.filter((line) => /^FINDING:/.test(line))).toEqual([]);
     // それでも dedent 後は parser が受理する = round-trip は維持されている。
     expect(extractVerdict(reviewOutputContractExample()).ok).toBe(true);
+  });
+});
+
+describe("refactor judgement extraction candidates", () => {
+  it.fails("CANDIDATE-U-REFACTORGATE-048: PASS の次行から commit-ok を抽出する", () => {
+    expect(extractVerdict("VERDICT: PASS\nREFACTOR: commit-ok")).toEqual({
+      ok: true,
+      value: { verdict: "PASS", blockingFindings: [], refactorJudgement: "commit-ok" },
+    });
+  });
+
+  it.fails.each([
+    ["none-ok", "VERDICT: PASS\nREFACTOR: none-ok"],
+    ["not-applicable", "VERDICT: PASS\nREFACTOR: not-applicable"],
+    ["commit-tests-changed", "VERDICT: PASS\nREFACTOR: commit-tests-changed"],
+    ["none-rejected", "VERDICT: FLAG\nFINDING: unresolved\nREFACTOR: none-rejected"],
+  ])("CANDIDATE-U-REFACTORGATE-049: %s を抽出する", (judgement, log) => {
+    expect(extractVerdict(log)).toMatchObject({
+      ok: true,
+      value: { refactorJudgement: judgement },
+    });
+  });
+
+  it("CANDIDATE-U-REFACTORGATE-050: REFACTOR 行なしは既存 verdict を保ち key を持たない", () => {
+    const result = extractVerdict("VERDICT: PASS");
+    expect(result).toEqual({ ok: true, value: { verdict: "PASS", blockingFindings: [] } });
+    expect(result.ok && Object.hasOwn(result.value, "refactorJudgement")).toBe(false);
+  });
+
+  it.fails.each([
+    "ok",
+    "Commit-OK",
+    "",
+  ])("CANDIDATE-U-REFACTORGATE-051: 不正な値 %j は unknown として拒否する", (judgement) => {
+    expect(extractVerdict(`VERDICT: PASS\nREFACTOR: ${judgement}`)).toEqual(
+      failure("refactor_judgement_unknown"),
+    );
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-052: 異なる判定値の重複は ambiguous", () => {
+    expect(extractVerdict("VERDICT: PASS\nREFACTOR: commit-ok\nREFACTOR: none-ok")).toEqual(
+      failure("refactor_judgement_ambiguous"),
+    );
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-052: 同じ判定値の再掲は冪等", () => {
+    expect(extractVerdict("VERDICT: PASS\nREFACTOR: none-ok\nREFACTOR: none-ok")).toEqual({
+      ok: true,
+      value: { verdict: "PASS", blockingFindings: [], refactorJudgement: "none-ok" },
+    });
+  });
+
+  it("CANDIDATE-U-REFACTORGATE-053: 最後の VERDICT より前の echo は無視する", () => {
+    const result = extractVerdict("REFACTOR: none-rejected\nVERDICT: PASS");
+    expect(result).toEqual({ ok: true, value: { verdict: "PASS", blockingFindings: [] } });
+    expect(result.ok && Object.hasOwn(result.value, "refactorJudgement")).toBe(false);
+  });
+
+  it("CANDIDATE-U-REFACTORGATE-054: 字下げされた REFACTOR 行は候補にしない", () => {
+    const result = extractVerdict("VERDICT: PASS\n    REFACTOR: none-ok");
+    expect(result).toEqual({ ok: true, value: { verdict: "PASS", blockingFindings: [] } });
+    expect(result.ok && Object.hasOwn(result.value, "refactorJudgement")).toBe(false);
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-055: 出力契約は判定欄を指示し、既存 example round-trip を保つ", () => {
+    expect(REVIEW_OUTPUT_CONTRACT).toContain("REFACTOR:");
+    for (const judgement of [
+      "commit-ok",
+      "none-ok",
+      "not-applicable",
+      "commit-tests-changed",
+      "none-rejected",
+    ]) {
+      expect(REVIEW_OUTPUT_CONTRACT).toContain(judgement);
+    }
+    expect(REVIEW_OUTPUT_CONTRACT).toContain("docs/governance/coding-rules.md");
+    expect(extractVerdict(reviewOutputContractExample())).toMatchObject({
+      ok: true,
+      value: { verdict: "FLAG", blockingFindings: ["blocking finding summary"] },
+    });
   });
 });

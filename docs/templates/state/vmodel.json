@@ -1,16 +1,15 @@
 {
   "_meta": {
-    "purpose": "UT-TDD V-model 4 artifact + 8 directed edge runtime state template (PLAN-002 W2).",
+    "purpose": "UT-TDD V-model 4 artifact + 8 directed edge runtime state template.",
     "spec_ref": "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md §2.1-2.7 / §7.3",
     "_superseded": "ADR-001 (2026-05-27): 旧 L1-L4 + L3.5/L3.8/L6 層・G1-G4/G3.8 は requirements_v1.2 で L0-L14 + W-model (pair=G1/G3/G4/G5/G6, trace=G7) に再定義。Python (coverage.py/pytest) も TS (vitest) へ。本 template は TS vmodel 実装時に L0-L14 で再生成する。",
-    "note": "JSON does not support comments. Underscore-prefixed top-level keys are metadata; consumers must read 'plan_id' / 'layers' / 'freeze_status' / 'edges' / 'pair_freezes' / 'l6_qa' / 'inverted_pyramid'.",
+    "note": "JSON does not support comments. Underscore-prefixed top-level keys are metadata; consumers must read 'layers' / 'freeze_status' / 'edges' / 'pair_freezes' / 'l6_qa' / 'inverted_pyramid'.",
     "ut_tdd_adapt": [
       "旧来の planning/architecture/detailed/functional/impl 5 layer + 30 D-* deliverable を捨て、",
       "UT-TDD §2.1 の 4 artifact (design/impl/test_design/test_code) と §2.2 の 3 段階 freeze (Pair / Red / Trace) に再構築。",
       "旧来の score_formula は §2.7 受入条件 (4 artifact 揃い + 8 edge pass + coverage >=80%) に置換。"
     ]
   },
-  "plan_id": "PLAN-NNN",
   "schema_version": 1,
   "layers": {
     "L1": { "artifact": "requirements", "test_design": "acceptance-test-design", "pair_status": "pending", "freeze_gate": "G1" },
@@ -51,10 +50,10 @@
   "coverage": {
     "threshold": 80,
     "current": null,
-    "_carry": "TS vmodel 実装で coverage (vitest c8/istanbul) integration を実装 (旧 PLAN-002-b は superseded)"
+    "_carry": "TS vmodel 実装で coverage (vitest c8/istanbul) integration を実装"
   },
   "g3_8_red_freeze": {
-    "_carry": "TS vmodel 実装で vitest collection + 失敗理由分類 (未実装 vs 構文エラー) を実装 (旧 PLAN-002-c は superseded)",
+    "_carry": "TS vmodel 実装で vitest collection + 失敗理由分類 (未実装 vs 構文エラー) を実装",
     "collection_ok": null,
     "failures_classified_as_unimplemented": null
   }

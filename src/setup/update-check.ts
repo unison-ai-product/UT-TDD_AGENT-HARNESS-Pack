@@ -14,6 +14,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compare } from "semver";
 import { ensureDir } from "../shared/fs.ts";
 
 export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
@@ -179,12 +180,19 @@ export function comparePackageSemver(a: PackageSemver, b: PackageSemver): number
   return 0;
 }
 
-/** Semver compare. Numeric comparison keeps 0.1.10 > 0.1.9. */
+/**
+ * Semver compare. Numeric comparison keeps 0.1.10 > 0.1.9.
+ * All-safe-integer cores go through `semver.compare`; out-of-range numbers keep
+ * the plain numeric comparison (no clamping, which would break ordering).
+ */
 export function compareSemver(a: [number, number, number], b: [number, number, number]): number {
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== b[i]) return a[i] - b[i];
+  if (![...a, ...b].every(Number.isSafeInteger)) {
+    for (let i = 0; i < 3; i++) {
+      if (a[i] !== b[i]) return a[i] - b[i];
+    }
+    return 0;
   }
-  return 0;
+  return compare(a.join("."), b.join("."));
 }
 
 /** Select the largest release tag from a tag list. */
@@ -295,6 +303,9 @@ export function checkForUpdate(deps: UpdateCheckDeps): UpdateCheckResult {
         "no canonical remote (package.json repository missing and harness root has no .git)",
       );
     }
+
+    // option injection 防止 (#1280): git に渡す前、cache 参照より前に拒否する。
+    if (remote.startsWith("-")) return failOpen(localVersion, 'remote rejected: starts with "-"');
 
     const cache = readCache(deps);
     let latestVersion: string | null;

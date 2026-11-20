@@ -2,14 +2,35 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const ORACLE_ID = /(?<![A-Z0-9-])(?:U|IT|ST|P|M)-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{2,3}(?![A-Z0-9-])/g;
+const CANDIDATE_ORACLE_ID =
+  /(?<![A-Z0-9-])CANDIDATE-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}(?![A-Z0-9-])/g;
 const TEST_CALLS = new Set(["describe", "it", "test"]);
 const LABEL_MODIFIERS = new Set(["only", "skip", "todo"]);
+const CANDIDATE_LABEL_MODIFIERS = new Set([...LABEL_MODIFIERS, "fails"]);
 
 export interface OracleCitationSite {
   id: string;
   path: string;
   line: number;
   kind: "static-test-label";
+}
+
+export interface CandidateOracleCitationSite {
+  id: string;
+  path: string;
+  line: number;
+  kind: "candidate-static-test-label";
+}
+
+interface StaticTestLabelSite {
+  id: string;
+  path: string;
+  line: number;
+}
+
+interface ScanTestLabelsOptions {
+  idPattern?: RegExp;
+  modifiers?: ReadonlySet<string>;
 }
 
 function skipString(text: string, start: number, quote: string): number {
@@ -113,7 +134,11 @@ function readLiteral(text: string, start: number): { value: string; index: numbe
 }
 
 /** test call の chain を辿り、実行 label の最初の静的文字列だけを返す。 */
-function readTestLabel(text: string, start: number): { value: string; index: number } | null {
+function readTestLabel(
+  text: string,
+  start: number,
+  modifiers: ReadonlySet<string> = LABEL_MODIFIERS,
+): { value: string; index: number } | null {
   let cursor = skipWhitespace(text, start);
   for (;;) {
     if (text[cursor] === ".") {
@@ -122,7 +147,7 @@ function readTestLabel(text: string, start: number): { value: string; index: num
       if (!method) return null;
       cursor = skipWhitespace(text, cursor + method[0].length);
       if (text[cursor] !== "(") return null;
-      if (LABEL_MODIFIERS.has(method[0])) {
+      if (modifiers.has(method[0])) {
         return readLiteral(text, skipWhitespace(text, cursor + 1));
       }
       cursor = balancedEnd(text, cursor);
@@ -143,8 +168,14 @@ function lineAt(text: string, index: number): number {
   return text.slice(0, index).split(/\r?\n/u).length;
 }
 
-function scanTestLabels(text: string, relativePath: string): OracleCitationSite[] {
-  const sites: OracleCitationSite[] = [];
+function scanTestLabels(
+  text: string,
+  relativePath: string,
+  options: ScanTestLabelsOptions = {},
+): StaticTestLabelSite[] {
+  const idPattern = options.idPattern ?? ORACLE_ID;
+  const modifiers = options.modifiers ?? LABEL_MODIFIERS;
+  const sites: StaticTestLabelSite[] = [];
   let index = 0;
   while (index < text.length) {
     const char = text[index];
@@ -164,15 +195,14 @@ function scanTestLabels(text: string, relativePath: string): OracleCitationSite[
       const match = /^[A-Za-z_$][\w$]*/u.exec(text.slice(index));
       const name = match?.[0] ?? "";
       if (TEST_CALLS.has(name) && (index === 0 || !/[\w$.]/u.test(text[index - 1] ?? ""))) {
-        const label = readTestLabel(text, index + name.length);
+        const label = readTestLabel(text, index + name.length, modifiers);
         if (label) {
-          ORACLE_ID.lastIndex = 0;
-          for (const match of label.value.matchAll(ORACLE_ID)) {
+          idPattern.lastIndex = 0;
+          for (const match of label.value.matchAll(idPattern)) {
             sites.push({
               id: match[0],
               path: relativePath,
               line: lineAt(text, label.index),
-              kind: "static-test-label",
             });
           }
         }
@@ -186,8 +216,12 @@ function scanTestLabels(text: string, relativePath: string): OracleCitationSite[
 }
 
 /** tests の実行 label に限定した oracle citation を provenance 付きで収集する。 */
-export function collectOracleCitationSites(repoRoot: string): OracleCitationSite[] {
-  const sites: OracleCitationSite[] = [];
+function collectCitationSites(
+  repoRoot: string,
+  idPattern: RegExp,
+  modifiers: ReadonlySet<string>,
+): StaticTestLabelSite[] {
+  const sites: StaticTestLabelSite[] = [];
   const walk = (dir: string): void => {
     let entries: string[];
     try {
@@ -201,10 +235,29 @@ export function collectOracleCitationSites(repoRoot: string): OracleCitationSite
         walk(full);
       } else if (entry.endsWith(".ts")) {
         const relativePath = full.slice(repoRoot.length + 1).replaceAll("\\", "/");
-        sites.push(...scanTestLabels(readFileSync(full, "utf8"), relativePath));
+        sites.push(
+          ...scanTestLabels(readFileSync(full, "utf8"), relativePath, { idPattern, modifiers }),
+        );
       }
     }
   };
   walk(join(repoRoot, "tests"));
   return sites;
+}
+
+/** tests の実行 label に限定した formal oracle citation を provenance 付きで収集する。 */
+export function collectOracleCitationSites(repoRoot: string): OracleCitationSite[] {
+  return collectCitationSites(repoRoot, ORACLE_ID, LABEL_MODIFIERS).map((site) => ({
+    ...site,
+    kind: "static-test-label",
+  }));
+}
+
+/** deliverable ownership 用の候補 citation。formal oracle collection には混ぜない。 */
+export function collectCandidateOracleCitationSites(
+  repoRoot: string,
+): CandidateOracleCitationSite[] {
+  return collectCitationSites(repoRoot, CANDIDATE_ORACLE_ID, CANDIDATE_LABEL_MODIFIERS).map(
+    (site) => ({ ...site, kind: "candidate-static-test-label" }),
+  );
 }

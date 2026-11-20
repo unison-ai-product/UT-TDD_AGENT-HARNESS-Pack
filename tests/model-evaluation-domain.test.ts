@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -8,36 +8,28 @@ import {
   buildModelEvaluationEvent,
   type ModelEvaluationFacts,
 } from "../src/projection/domain/model-evaluations.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const facts: ModelEvaluationFacts = {
   model: "model-A",
   runCount: 3,
-  successCount: 2,
   totalInputTokens: 30,
   totalOutputTokens: 10,
   totalCostUsd: 0.000003,
 };
 
 describe("U-DOMAIN-005: model evaluation domain/application", () => {
-  it("rounds rates and efficiency without changing the asymmetric populations", () => {
-    expect(buildModelEvaluationEvent(facts, "2026-07-13T00:00:00.000Z").row).toMatchObject({
-      success_rate: 0.6667,
-      tokens_per_success: 5,
-      cost_per_success: 0.000002,
+  it("keeps token totals and leaves PLAN-derived values unset", () => {
+    const row = buildModelEvaluationEvent(facts, "2026-07-13T00:00:00.000Z").row;
+    expect(row).toMatchObject({
+      run_count: 3,
       total_input_tokens: 30,
       total_output_tokens: 10,
+      total_cost_usd: 0.000003,
     });
-  });
-
-  it.each([
-    [
-      { ...facts, successCount: 0 },
-      { tokens_per_success: null, cost_per_success: null },
-    ],
-    [{ ...facts, totalOutputTokens: 0 }, { tokens_per_success: null }],
-    [{ ...facts, totalCostUsd: null }, { cost_per_success: null }],
-  ])("does not fabricate unavailable efficiency", (input, expected) => {
-    expect(buildModelEvaluationEvent(input, "fixed").row).toMatchObject(expected);
+    for (const key of ["success_rate", "success_count", "tokens_per_success", "cost_per_success"]) {
+      expect(row).not.toHaveProperty(key);
+    }
   });
 
   it("does not read or store when disabled", () => {
@@ -76,7 +68,7 @@ describe("U-DOMAIN-005: model evaluation domain/application", () => {
       writeFileSync(join(root, ".ut-tdd", "config", "model-opt-in.yaml"), yaml);
       expect(new RepositoryModelEvaluationConfig(root).isEnabled()).toBe(expected);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

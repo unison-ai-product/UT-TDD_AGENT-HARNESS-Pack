@@ -23,7 +23,7 @@ decision_points:
     because: "Normalization drift does not change observable contracts, so R1 work would be redundant"
   - when: "A Scrum increment completes and needs to be promoted to V-model artifacts"
     choose: "Classify the cycle as reverse_type=fullback and route through R0-R4"
-    over: "Starting a fresh Forward PLAN without a Reverse evidence trail"
+    over: "Starting a fresh Forward Issue without a Reverse evidence trail"
     because: "fullback is the type designed to promote Discovery/Scrum closure into formally anchored Forward artifacts"
   - when: "A dependency version bump has unknown downstream impact"
     choose: "Classify the cycle as reverse_type=upgrade (R1 not skipped, RGC not used)"
@@ -34,7 +34,7 @@ decision_points:
     over: "Starting downstream implementation immediately after R4 completes"
     because: "ut-tdd vmodel lint will surface missing pair artifacts if implementation starts before the gate is crossed"
   - when: "R0 found has_existing_tests=false for the subject scope"
-    choose: "Record missing_pair_artifacts at R4 and require a test-design PLAN at the routing destination before G3/G4/G5"
+    choose: "Record missing_pair_artifacts at R4 and require a test-design Issue at the routing destination before G3/G4/G5"
     over: "Having Reverse itself generate the missing test code"
     because: "Reverse only observes and records the test-design state; it does not generate test code"
 ---
@@ -79,18 +79,9 @@ After R4, the routing destination's Pair freeze gate (G1/G3/G4/G5) must be
 passed before any downstream L7 work begins. `ut-tdd vmodel lint` will surface
 missing pair artifacts.
 
-## PLAN frontmatter for a Reverse cycle
+## Reverse Issue
 
-```yaml
-kind: reverse
-drive: <be|fe|fullstack|db|agent>   # specialist for the subject work
-layer: cross
-workflow_phase: R0                  # update as phases advance
-reverse_type: <code|design|upgrade|normalization|fullback>
-```
-
-Validate with `ut-tdd plan lint` (schema) and `ut-tdd doctor` (governance) at
-every phase boundary.
+Record the Reverse type, scope, current phase, and evidence links in the Issue. Use the Reverse process and its phase conditions in `docs/process/modes/reverse.md`.
 
 ## Test-design symmetry rule (reverse.md §2.1)
 
@@ -98,7 +89,7 @@ Reverse is responsible for the V-model test-design pairing state:
 
 - Tests exist (`has_existing_tests=true`): R2 reconstructs `as-is-test-design`.
 - Tests absent: R4 records `missing_pair_artifacts`; routing destination must
-  include a test-design PLAN before G3/G4/G5 gate can be crossed.
+  include a test-design Issue before G3/G4/G5 gate can be crossed.
 
 Reverse itself does not generate test code. It observes and records the
 test-design state so Forward can freeze the pair correctly.
@@ -107,5 +98,4 @@ test-design state so Forward can freeze the pair correctly.
 
 - [ ] Identify the reverse_type from the table above.
 - [ ] Confirm `ut-tdd status` shows no blocking handover or open doctor violation.
-- [ ] Create a `kind=reverse` PLAN in `docs/plans/` with correct frontmatter.
-- [ ] Run `ut-tdd plan lint` -- exits 0 before proceeding.
+- [ ] Find or file the Reverse Issue with the observed scope and expected outcome.

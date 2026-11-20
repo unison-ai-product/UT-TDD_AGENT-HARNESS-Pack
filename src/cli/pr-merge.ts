@@ -28,6 +28,11 @@ export function registerPrMergeCommands(
           `pr merge — ${result.ok ? "MERGED" : "DENY"} pr=#${result.pr} head=${result.headSha ?? "unknown"} reason=${result.reason}\n`,
         );
       }
+      if (!options.json && /^baseline_conflict(?!_unknown)/.test(result.reason)) {
+        process.stdout.write(
+          "baseline を持つ gate の対象を並行 PR が変更しています。git merge origin/main で main を取り込み、CI が緑になってから再実行してください (新しい head には新しい review が必要です)。\n",
+        );
+      }
       if (!result.ok) process.exitCode = 1;
     });
 }

@@ -26,7 +26,7 @@ function fixture(): CatalogInput {
         ordinal: 1,
         sourceTitle: "企画書",
         disposition: "merge",
-        targetRef: "PLAN-L0-01",
+        targetRef: "docs/design/harness/L5-detailed-design/physical-data.md",
         reason: "上流企画へ統合",
         rowDigest: digest("source"),
         manifestDigest: digest("manifest"),
@@ -59,8 +59,8 @@ function fixture(): CatalogInput {
       {
         edgeId: "SOURCE-TARGET-001",
         sourceId: "ZIP-DOC-001",
-        targetType: "plan_alias",
-        targetRef: "PLAN-L0-01",
+        targetType: "artifact_path",
+        targetRef: "docs/design/harness/L5-detailed-design/physical-data.md",
         disposition: "merge",
         rowDigest: digest("source-target"),
       },
@@ -72,10 +72,16 @@ function fixture(): CatalogInput {
         targetStatus: "pending_review",
         reason: "PO/TL review待ち",
         sourceDigest: digest("item-target"),
-        planId: "PLAN-L7-417-source-disposition-profile-projection",
       },
     ],
   };
+}
+
+function supportedSourceTargetFixture(): CatalogInput {
+  const input = fixture();
+  input.sourceTargetEdges[0].targetType = "artifact_path";
+  input.sourceTargetEdges[0].targetRef = "docs/design/harness/L5-detailed-design/physical-data.md";
+  return input;
 }
 
 function rules(input: CatalogInput): string[] {
@@ -164,11 +170,40 @@ describe("DocumentDispositionCatalog", () => {
     expect(rules(disposition)).toContain("catalog-source-target-mismatch");
   });
 
+  it("U-DISPPTR-002 precondition: supported source-target kind creates a catalog", () => {
+    expect(DocumentDispositionCatalog.create(supportedSourceTargetFixture()).ok).toBe(true);
+  });
+
+  it("U-DISPPTR-002: rejects plan_alias in source-target catalog input", () => {
+    const input = supportedSourceTargetFixture();
+    input.sourceTargetEdges[0].targetType =
+      "plan_alias" as unknown as CatalogInput["sourceTargetEdges"][number]["targetType"];
+    expect(DocumentDispositionCatalog.create(input).ok).toBe(false);
+  });
+
   it("U-DISP-004: item ledger row欠落をsource-targetから補完しない", () => {
     const input = fixture();
     input.itemTargetEdges = [];
     input.declaredCounts.itemTargetEdges = 0;
     expect(rules(input)).toContain("catalog-item-target-incomplete");
+  });
+
+  it("U-DISP-004: defer requires an Issue instead of a legacy plan_id", () => {
+    const input = fixture();
+    input.sourceTargetEdges[0].targetType = "artifact_path";
+    input.sourceTargetEdges[0].targetRef =
+      "docs/design/harness/L5-detailed-design/physical-data.md";
+    const target = input.itemTargetEdges[0] as (typeof input.itemTargetEdges)[number] & {
+      issue?: string;
+      planId?: string;
+    };
+    target.targetStatus = "defer";
+    target.targetKind = "artifact_path";
+    target.targetRef = "docs/design/harness/L5-detailed-design/physical-data.md";
+    target.planId = "PLAN-L6-01";
+    delete target.issue;
+
+    expect(DocumentDispositionCatalog.create(input).ok).toBe(false);
   });
 
   it("U-DISP-004: source dispositionの理由欠落を拒否する", () => {
@@ -182,7 +217,8 @@ describe("DocumentDispositionCatalog", () => {
     input.sources[0].disposition = "unknown" as "merge";
     input.sources[0].ordinal = 999;
     input.items[0].rowDigest = "not-a-digest";
-    input.sourceTargetEdges[0].targetType = "unknown" as "plan_alias";
+    input.sourceTargetEdges[0].targetType =
+      "unknown" as unknown as CatalogInput["sourceTargetEdges"][number]["targetType"];
     input.itemTargetEdges[0].targetStatus = "unknown" as "pending_review";
     expect(rules(input)).toEqual(
       expect.arrayContaining([

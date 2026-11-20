@@ -1,6 +1,5 @@
-import { EvidencePolicy } from "../../plan-asset/domain/evidence-policy.ts";
-import type { EvidenceRecord } from "../../plan-asset/domain/evidence-record.ts";
-import type { EvidenceAttestationVerifierPort } from "../../plan-asset/ports/evidence-attestation.ts";
+import { EvidencePolicy } from "../domain/evidence-policy.ts";
+import type { EvidenceRecord } from "../domain/evidence-record.ts";
 import type { EvidenceRequirementSpec } from "../domain/transition-policy.ts";
 import type {
   ForwardEvidenceContext,
@@ -9,6 +8,7 @@ import type {
   ForwardEvidenceResult,
   ForwardSubject,
 } from "../domain/types.ts";
+import type { EvidenceAttestationVerifierPort } from "../ports/evidence-attestation.ts";
 
 export class ForwardEvidencePolicy implements ForwardEvidenceEvaluator {
   private readonly verifier: EvidenceAttestationVerifierPort;

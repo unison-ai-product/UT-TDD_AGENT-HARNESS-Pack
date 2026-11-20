@@ -42,7 +42,7 @@ decision_points:
     choose: "explicitly state which of the 9 states were checked and which were not"
     over: "issuing an unqualified 'looks fine' verdict covering the whole screen"
     because: "silently letting unchecked states fall inside an implicit 'no problem' is the same confirmation-bias failure the harness names elsewhere as the 'confirmation-test trap' — an unstated state is not a verified state."
-  - when: "Writing or reviewing an E2E test for a screen-facing PLAN."
+  - when: "Writing or reviewing an E2E test for a screen-facing change."
     choose: "select elements by semantic identity (data-testid or accessible role+label) and wait on explicit state conditions"
     over: "selecting by CSS class/DOM-hierarchy path and waiting on a fixed sleep"
     because: "class/hierarchy selectors break on any styling change unrelated to behaviour, and fixed sleeps either fail under slow environments or waste time under fast ones — both are named root causes of E2E flakiness that erode trust in the suite."

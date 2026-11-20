@@ -32,7 +32,7 @@ decision_points:
   - when: "An ADR reaches the point of setting Status"
     choose: "leave Status at `Proposed` until `ut-tdd review --uncommitted` is clean and `ut-tdd doctor` exits 0"
     over: "setting Status to `Accepted` as soon as the Decision text is written"
-    because: "PLAN `dependencies` reference ADRs by Status; a prematurely Accepted ADR with unresolved review findings misleads downstream readers (operational rule; no lint checks ADR Status)"
+    because: "Issues link to ADRs by ID and revision; a prematurely Accepted ADR with unresolved review findings misleads downstream readers (operational rule; no lint checks ADR Status)"
   - when: "A new term is introduced in a design doc or ADR"
     choose: "match the existing L0 glossary spelling, or add the term to the glossary in the same change"
     over: "using a near-synonym that reads naturally in context"
@@ -56,7 +56,7 @@ or when a freeze needs the manual readability checklist below.
 
 Every UT-TDD design doc needs: **Objective/TL;DR** (2–3 sentences: what changes,
 why, which layer), **Scope / Non-goals**, **Prerequisites** (upstream layer docs,
-PLAN/ADR IDs), **main content** at V-model granularity (designed at the level a
+Issue and ADR references), **main content** at V-model granularity (designed at the level a
 unit test can be written against it), **verification / acceptance criteria**, and
 **terminology** (new terms added to the L0 glossary). ADRs additionally need
 Context, Decision, Consequences, and Status.
@@ -84,20 +84,20 @@ Scope/Non-goals.
    mojibake-corrupted save; do not freeze a corrupted doc (doctor-enforced).
 2. Objective/TL;DR present and ≤ 5 sentences (manual).
 3. Every introduced term matches the L0 glossary spelling (manual).
-4. Scope and Non-goals present; no bare `TODO` without a PLAN cross-reference (manual).
-5. Run `ut-tdd plan lint` for schema-level issues and `ut-tdd review
+4. Scope and Non-goals present; no bare `TODO` without an Issue reference (manual).
+5. Run the applicable doctor checks for structural issues and `ut-tdd review
    --uncommitted` for review findings before peer review.
 
 ## ADR procedure
 
 1. Copy the closest existing ADR as a structural template.
 2. Fill Context first — the observed facts forcing the decision (cite Discovery
-   PLAN / Scrum S2 PoC evidence in `.ut-tdd/`).
+   Issue / Scrum S2 PoC evidence in `.ut-tdd/`).
 3. State the Decision in one active-voice sentence.
 4. List Consequences: positive, negative, risks-to-monitor.
 5. Set Status `Proposed`; move to `Accepted` only after `ut-tdd review
    --uncommitted` is clean and `ut-tdd doctor` exits 0. ADRs are referenced by
-   PLAN `dependencies`; keep the ADR title and ID accurate (manual; no lint checks ADR Status or title).
+   the Issue; keep the ADR title and ID accurate (manual; no lint checks ADR Status or title).
 
 ## Reverse back-fill (R2–R4)
 
@@ -114,4 +114,4 @@ plus the manual items) before trace-freeze.
 - [ ] Terms match / extend the L0 glossary.
 - [ ] No mojibake markers (half-width kana, U+FFFD).
 - [ ] ADR Status set.
-- [ ] `ut-tdd plan lint` and `ut-tdd doctor` exit 0.
+- [ ] Applicable `ut-tdd doctor` checks exit 0.

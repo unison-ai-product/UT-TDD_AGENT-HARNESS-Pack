@@ -14,20 +14,16 @@ applies_to:
     - Discovery
     - Refactor
 decision_points:
-  - when: "defining a new .claude/agents/<name>.md and choosing whether model can be left blank"
+  - when: "a subagent is needed for a role that has no harness definition"
+    choose: "use a generic subagent_type (general-purpose / Explore / Plan / claude) with an explicit, recognised, non-fable model, and keep closing review on the ut-tdd claude|codex --role path"
+    over: "adding a new .claude/agents definition or a new allowlist entry"
+    because: "#1002 retired the hand-written definitions; the generic route passes with an explicit model and has no closing authority"
+  - when: "choosing the model for a generic subagent"
     choose: "set model explicitly, even if it would match the parent"
     over: "omitting model and relying on inheritance"
-    because: "the guard blocks omitted model — it does NOT silently inherit the parent, so an omission is a hard failure, not a convenience"
-  - when: "a subagent_type is needed but does not appear in the current guard allowlist"
-    choose: "update agent-guard.ts allowlist and document the capability class before using it"
-    over: "invoking the role anyway or approximating with a similar allowlisted name"
-    because: "any role outside the list is blocked fail-close; there is no fuzzy match"
-  - when: "assigning a model tier to a new agent's capability class"
-    choose: "assign the minimum capable tier for that class (e.g., fast/cheap for research, primary-equivalent for adversarial review)"
-    over: "defaulting every new agent to the primary model for safety"
-    because: "the taxonomy exists precisely to avoid over-provisioning cost to roles that don't need primary-tier judgement"
+    because: "the guard blocks omitted model - it does NOT silently inherit the parent, so an omission is a hard failure, not a convenience"
   - when: "the guard rejects an Agent call and the cause is unclear"
-    choose: "check subagent_type match, model presence, and allowlist membership in that order before assuming a bug"
+    choose: "check, in order, subagent_type is one of the four generic types (exact, case-sensitive), model presence, model normalization (recognised family), and not fable"
     over: "reaching for UT_TDD_ALLOW_RAW_AGENT=1 as the first fix"
     because: "bypass is for a diagnosed emergency only, not a default troubleshooting step"
   - when: "UT_TDD_ALLOW_RAW_AGENT=1 is used to unblock a spawn"
@@ -38,60 +34,38 @@ decision_points:
 
 # agent design
 
-How to define a single subagent in UT-TDD: capability class, model-family
-assignment, and guard-allowlist registration (FR-L1-46 subagent roster). Apply
-when introducing a new agent role, changing a model family, or auditing whether
-an existing agent definition matches its actual use.
+How to spawn a subagent through the Agent tool in UT-TDD. The harness keeps no
+subagent definition files (#1002): expertise is passed per task as skills, decision
+packs, and design excerpts, not by subagent name. Apply when a PreToolUse(Agent)
+guard rejection must be diagnosed, or when a task needs parallel work inside a lane.
 
 ## When to load this skill
 
-- Authoring or editing a `.claude/agents/<name>.md` frontmatter definition.
 - A `PreToolUse(Agent)` guard rejection requires diagnosing which rule failed.
-- A Discovery or Add-feature PLAN needs a new specialist role not yet in the
-  allowlist.
-- Refactoring an existing agent definition to correct a model-family mismatch.
+- A Discovery or Add-feature PLAN needs a specialist role (use a generic type and
+  pass the specialty in the task text; do not add a definition).
 
-## Anatomy of a subagent definition
+## Generic route
 
-Every `.claude/agents/<name>.md` must carry:
-
-| Field | Purpose | Enforcement |
-|---|---|---|
-| `name` (frontmatter) | Must match the kebab filename | `agent-guard.ts` key lookup |
-| `model` | Explicit model string (no omission) | Guard blocks omitted model (`src/runtime/agent-guard.ts:137`) |
-| `description` | One-line capability summary | Used by `ut-tdd skill suggest` |
-| `tools` | Declared tool list | (operational; not guard-checked) |
-
-The `subagent_type` must be in `SUBAGENT_ALLOWLIST`
-(`src/runtime/agent-guard-policy.ts:2`; the list is not copied here — it drifts);
-unlisted roles are blocked fail-close. To add a role, update that list with a
-test (`tests/agent-guard.test.ts`) and document the capability class here.
-
-## Capability class taxonomy
-
-| Class | Typical roles | Right model tier |
-|---|---|---|
-| Research / summarisation | `pmo-haiku`, `pmo-tech-news` | Fast / cheap |
-| Repo-state judgement | `pmo-project-explorer`, `pmo-sonnet` | Mid-tier |
-| Design review / adversarial | `code-reviewer`, `security-audit` | Primary / equivalent |
-| QA / trace verification | `qa-test` | Mid-tier |
-| Innovation / market analysis | `pdm-*` | Mid-tier |
-
-Assign the minimum capable tier (an omitted `model` is rejected, see above).
+The guard allows only `GENERIC_SUBAGENT_TYPES` (`src/runtime/agent-guard-policy.ts`;
+the list is not copied here - it drifts): `general-purpose`, `Explore`, `Plan`, `claude`.
+Matching is exact. The call must carry an explicit, recognised model; `fable` is not
+allowed in the Agent tool. The guard has no model floor. A subagent has no closing
+authority: its output is a draft or investigation material, never a verdict. Closing
+review goes through `ut-tdd claude|codex --role <role>` and review custody.
 
 ## Guard bypass
 
-`UT_TDD_ALLOW_RAW_AGENT=1` bypasses the guard (`src/runtime/agent-guard.ts:100`).
-Use only in a diagnosed emergency. Bypassing must leave an audit entry in `.ut-tdd/audit/` recording:
-who set the flag, which agent call was made, and why the normal path was
-unsuitable.
+`UT_TDD_ALLOW_RAW_AGENT=1` bypasses the type, model, and fable checks (not the
+missing-tool_name check). Use only in a diagnosed emergency. Bypassing must leave an
+audit entry in `.ut-tdd/audit/` recording: who set the flag, which agent call was
+made, and why the normal path was unsuitable.
 
 ## Self-review checklist
 
-- [ ] `name` in frontmatter matches the filename (kebab-case, no spaces).
-- [ ] `model` field is explicit — no blank, no placeholder.
-- [ ] `subagent_type` in the spawn call matches an allowlist entry exactly.
-- [ ] Capability class justified: the chosen model tier is the minimum needed.
-- [ ] If the role is new: allowlist in `agent-guard.ts` updated and tested.
+- [ ] `subagent_type` is one of the four generic types, spelled exactly.
+- [ ] `model` is explicit, recognised, and not fable.
+- [ ] No new definition or allowlist entry is added (#1002); specialty goes in the task.
+- [ ] Anything that closes a review or gate goes through `ut-tdd claude|codex --role`.
 - [ ] Bypass evidence written to `.ut-tdd/audit/` when `UT_TDD_ALLOW_RAW_AGENT=1`
       was set.

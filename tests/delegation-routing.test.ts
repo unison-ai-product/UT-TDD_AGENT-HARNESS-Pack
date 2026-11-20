@@ -35,7 +35,7 @@ describe("delegation routing (PLAN-L7-255)", () => {
     });
     const claude = resolveDelegationRouting({
       provider: "claude",
-      role: "code-reviewer",
+      role: "reviewer",
       task: "review the diff",
     });
     expect(claude).toMatchObject({
@@ -103,12 +103,12 @@ describe("delegation routing (PLAN-L7-255)", () => {
       provider: "codex",
       role: "blind-reviewer",
       task: "review",
-      model: "gpt-5.3-codex-spark",
+      model: MODEL_IDS.codex.frontier,
       effort: "xhigh",
     });
     expect(r).toMatchObject({
       ok: true,
-      model: "gpt-5.3-codex-spark",
+      model: MODEL_IDS.codex.frontier,
       effort: "xhigh",
       model_source: "explicit",
       effort_source: "explicit",
@@ -159,11 +159,214 @@ describe("delegation routing (PLAN-L7-255)", () => {
       "tl-advisor",
       "se",
       "reviewer",
-      "code-reviewer",
-      "pmo-haiku",
-      "pmo-tech-docs",
+      "ut-tdd-tl",
+      "qa-test",
+      "security-audit",
+      "be-api",
     ]) {
       expect(DELEGATION_ROLE_ALLOWLIST.has(role)).toBe(true);
     }
+    for (const role of ["code-reviewer", "pmo-haiku", "pmo-tech-docs", "refactor-scout"]) {
+      expect(DELEGATION_ROLE_ALLOWLIST.has(role)).toBe(false);
+    }
+  });
+
+  it("U-CMDINPUT-001: reviewer routing rejects an invalid model override", () => {
+    const result = resolveDelegationRouting({
+      provider: "codex",
+      role: "blind-reviewer",
+      task: "review the diff",
+      model: "gpt-6.1-sol%",
+    });
+    expect(result).toEqual({ ok: false, message: "provider_model_invalid" });
+  });
+
+  it("U-CMDINPUT-001: worker routing rejects an invalid model override", () => {
+    const result = resolveDelegationRouting({
+      provider: "codex",
+      role: "se",
+      task: "implement the parser module",
+      model: "gpt-6.1-sol%",
+    });
+    expect(result).toEqual({ ok: false, message: "provider_model_invalid" });
+  });
+
+  it("U-CMDINPUT-001: reviewer routing reports invalid model before invalid effort", () => {
+    const result = resolveDelegationRouting({
+      provider: "codex",
+      role: "blind-reviewer",
+      task: "review the diff",
+      model: "gpt-6.1-sol%",
+      effort: "ultra",
+    });
+    expect(result).toEqual({ ok: false, message: "provider_model_invalid" });
+  });
+
+  it("U-CMDINPUT-001: worker routing reports invalid model before invalid effort", () => {
+    const result = resolveDelegationRouting({
+      provider: "codex",
+      role: "se",
+      task: "implement the parser module",
+      model: "gpt-6.1-sol%",
+      effort: "ultra",
+    });
+    expect(result).toEqual({ ok: false, message: "provider_model_invalid" });
+  });
+
+  for (const [index, effort] of ["ultra", ""].entries()) {
+    describe(`M1 reviewer effort fixture ${index}`, () => {
+      it("U-CMDINPUT-002: reviewer invalid effort", () => {
+        const result = resolveDelegationRouting({
+          provider: "claude",
+          role: "reviewer",
+          task: "review the diff",
+          effort,
+        });
+        expect(result).toEqual({ ok: false, message: "provider_effort_invalid" });
+      });
+    });
+  }
+
+  for (const [index, effort] of ["ultra", ""].entries()) {
+    describe(`M1 worker effort fixture ${index}`, () => {
+      it("U-CMDINPUT-002: worker invalid effort", () => {
+        const result = resolveDelegationRouting({
+          provider: "codex",
+          role: "se",
+          task: "implement the parser module",
+          effort,
+        });
+        expect(result).toEqual({ ok: false, message: "provider_effort_invalid" });
+      });
+    });
+  }
+
+  it("U-CMDINPUT-003: valid model IDs, aliases, and omitted overrides route normally", () => {
+    const reviewerDefault = resolveDelegationRouting({
+      provider: "codex",
+      role: "blind-reviewer",
+      task: "review the diff",
+    });
+    expect(reviewerDefault).toMatchObject({
+      ok: true,
+      model: MODEL_IDS.codex.frontier,
+      model_source: "review-lane",
+    });
+
+    const reviewerModel = resolveDelegationRouting({
+      provider: "claude",
+      role: "reviewer",
+      task: "review the diff",
+      model: MODEL_IDS.claude.opus,
+    });
+    expect(reviewerModel).toMatchObject({
+      ok: true,
+      model: MODEL_IDS.claude.opus,
+      model_source: "explicit",
+    });
+
+    const workerDefault = resolveDelegationRouting({
+      provider: "codex",
+      role: "se",
+      task: "implement the parser module",
+    });
+    expect(workerDefault.ok).toBe(true);
+
+    const workerModel = resolveDelegationRouting({
+      provider: "claude",
+      role: "se",
+      task: "implement the parser module",
+      model: MODEL_IDS.claude.sonnet,
+    });
+    expect(workerModel).toMatchObject({
+      ok: true,
+      model: MODEL_IDS.claude.sonnet,
+      model_source: "explicit",
+    });
+
+    const workerAlias = resolveDelegationRouting({
+      provider: "codex",
+      role: "se",
+      task: "implement the parser module",
+      model: "sonnet",
+    });
+    expect(workerAlias).toMatchObject({ ok: true, model: "sonnet", model_source: "explicit" });
+  });
+
+  for (const [index, model] of [
+    "gpt-6.1-sol%",
+    "gpt-6.1-sol'",
+    "gpt 6.1 sol",
+    "",
+    "claude-opus-5-5[1m]",
+  ].entries()) {
+    describe(`M1 reviewer model fixture ${index}`, () => {
+      it("U-CMDINPUT-003: reviewer invalid model syntax", () => {
+        const result = resolveDelegationRouting({
+          provider: "claude",
+          role: "reviewer",
+          task: "review the diff",
+          model,
+        });
+        expect(result).toEqual({ ok: false, message: "provider_model_invalid" });
+      });
+    });
+  }
+
+  for (const [index, model] of [
+    "gpt-6.1-sol%",
+    "gpt-6.1-sol'",
+    "gpt 6.1 sol",
+    "",
+    "claude-opus-5-5[1m]",
+  ].entries()) {
+    describe(`M1 worker model fixture ${index}`, () => {
+      it("U-CMDINPUT-003: worker invalid model syntax", () => {
+        const result = resolveDelegationRouting({
+          provider: "codex",
+          role: "se",
+          task: "implement the parser module",
+          model,
+        });
+        expect(result).toEqual({ ok: false, message: "provider_model_invalid" });
+      });
+    });
+  }
+
+  it("U-CMDINPUT-004: reviewer and worker routing accept each declared effort enum", () => {
+    const efforts = ["low", "medium", "middle", "high", "xhigh"];
+    for (const effort of efforts) {
+      const reviewer = resolveDelegationRouting({
+        provider: "codex",
+        role: "blind-reviewer",
+        task: "review the diff",
+        effort,
+      });
+      expect(reviewer).toMatchObject({ ok: true, effort, effort_source: "explicit" });
+
+      const worker = resolveDelegationRouting({
+        provider: "claude",
+        role: "se",
+        task: "implement the parser module",
+        effort,
+      });
+      expect(worker).toMatchObject({ ok: true, effort, effort_source: "explicit" });
+    }
+  });
+
+  it("U-CMDINPUT-004: omitted effort keeps reviewer and worker defaults", () => {
+    const reviewer = resolveDelegationRouting({
+      provider: "codex",
+      role: "blind-reviewer",
+      task: "review the diff",
+    });
+    expect(reviewer).toMatchObject({ ok: true, effort: "low", effort_source: "ladder" });
+
+    const worker = resolveDelegationRouting({
+      provider: "codex",
+      role: "se",
+      task: "implement the parser module",
+    });
+    expect(worker).toMatchObject({ ok: true, effort: "high", effort_source: "policy" });
   });
 });

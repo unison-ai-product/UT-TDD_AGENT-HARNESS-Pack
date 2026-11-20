@@ -118,7 +118,8 @@ return instead. Cap branch/loop nesting at 2-3 levels. Positive conditions
 over double negatives. Fail fast on an invalid state.
 
 **Methods**: single responsibility, one abstraction level; ~20-30 lines
-before extraction; cap arguments at ~3 (collapse into a value/parameter
+before extraction (a target, not an upper limit; the limits live in the
+"量・分割・Refactor の目安" section of `docs/governance/coding-rules.md`); cap arguments at ~3 (collapse into a value/parameter
 object beyond that); no boolean flag arguments (split the method, or use an
 enum/strategy); command-query separation; prefer purity, push I/O to the
 boundary.

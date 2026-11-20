@@ -58,7 +58,7 @@ function attestation(overrides: Partial<ReviewAttestation> = {}): ReviewAttestat
   return {
     provider: "claude",
     role: "blind-reviewer",
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
     pr: 328,
     head,
     reviewRevision: request().reviewRevision,
@@ -78,7 +78,7 @@ function envelope(input: {
   model?: string;
   nonce?: string;
 }): string {
-  const { request: value, attempt, provider = "claude", model = "claude-opus-5", nonce } = input;
+  const { request: value, attempt, provider = "claude", model = "claude-opus-5-5", nonce } = input;
   return [
     "schema_version: ut-tdd.review-verdict/v1",
     `request_digest: ${reviewIdentityDigest(value)}`,
@@ -123,7 +123,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         repoRoot: root,
         request: issued.request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!attempt.ok) throw new Error(attempt.reason);
       writeFileSync(
@@ -236,7 +236,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         recordedAt: "2026-08-19T00:06:00.000Z",
         reason: "review_completed",
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         exitCode: 0,
         receiptFileDigest: createHash("sha256").update(receiptBytes).digest("hex"),
         verdictDigest: "1".repeat(64),
@@ -268,7 +268,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         repoRoot: root,
         request: issued.request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       appendReviewCustodyAudit(root, {
@@ -280,7 +280,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         recordedAt: "2026-08-19T00:06:00.000Z",
         reason: "review_completed",
         provider,
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         exitCode: 0,
         receiptFileDigest: "1".repeat(64),
         verdictDigest: "2".repeat(64),
@@ -290,7 +290,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         repoRoot: root,
         request: issued.request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (retryable) {
         expect(second).toMatchObject({ ok: true, attempt: 2 });
@@ -372,7 +372,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         repoRoot: root,
         request: issued.request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       expect(attempt).toMatchObject({ ok: true, attempt: 1 });
       if (!attempt.ok) return;
@@ -399,7 +399,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         repoRoot: root,
         request: issued.request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!attempt.ok) throw new Error(attempt.reason);
       const cases = [
@@ -473,7 +473,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
           repoRoot: root,
           request: issued.request,
           provider: "claude",
-          model: "claude-opus-5",
+          model: "claude-opus-5-5",
         });
         if (!attempt.ok) throw new Error(attempt.reason);
         const validEnvelope = envelope({ request: issued.request, attempt: 1 });
@@ -502,7 +502,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         repoRoot: root,
         request: issued.request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!attempt.ok) throw new Error(attempt.reason);
       writeFileSync(attempt.path, envelope({ request: issued.request, attempt: 1 }), "utf8");
@@ -535,7 +535,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         repoRoot: root,
         request: issued.request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       expect(
@@ -544,7 +544,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
           request: issued.request,
           attempt: first.attempt,
           provider: "claude",
-          model: "claude-opus-5",
+          model: "claude-opus-5-5",
           exitCode: 7,
           verdictPath: first.path,
         }),
@@ -553,7 +553,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         repoRoot: root,
         request: issued.request,
         provider: "claude",
-        model: "claude-sonnet-5",
+        model: "claude-opus-5-5",
       });
       expect(first).toMatchObject({ ok: true, attempt: 1 });
       expect(second).toMatchObject({ ok: true, attempt: 2 });
@@ -565,13 +565,13 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
       if (!second.ok) return;
       writeFileSync(
         second.path,
-        envelope({ request: issued.request, attempt: 2, model: "claude-sonnet-5" }),
+        envelope({ request: issued.request, attempt: 2, model: "claude-opus-5-5" }),
         "utf8",
       );
       const projected = projectReviewVerdict({
         repoRoot: root,
         request: issued.request,
-        attestation: attestation({ attempt: 2, model: "claude-sonnet-5" }),
+        attestation: attestation({ attempt: 2, model: "claude-opus-5-5" }),
         verdictFile: second.path,
       });
       expect(projected).toMatchObject({ ok: true });
@@ -579,7 +579,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         repoRoot: root,
         request: issued.request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       expect(blocked).toEqual({ ok: false, reason: "review_receipt_already_exists" });
     } finally {
@@ -595,7 +595,7 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
         repoRoot: root,
         request: issued.request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!attempt.ok) throw new Error(attempt.reason);
       writeFileSync(attempt.path, envelope({ request: issued.request, attempt: 1 }), "utf8");
@@ -660,16 +660,16 @@ describe("repo-local review verdict custody (U-RVATT-030..035)", () => {
 const fault = vi.hoisted(() => ({ path: "", mode: "none", parsed: false }));
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
-  const read: typeof actual.readFileSync = ((path, options) => {
-    if (String(path) === fault.path && !fault.parsed && fault.mode === "initial-unreadable") {
+  const read: typeof actual.readFileSync = ((...a: Parameters<typeof actual.readFileSync>) => {
+    if (String(a[0]) === fault.path && !fault.parsed && fault.mode === "initial-unreadable") {
       fault.parsed = true;
       throw Object.assign(new Error("injected first-read failure"), { code: "EACCES" });
     }
-    if (String(path) === fault.path && fault.parsed && fault.mode === "unreadable") {
+    if (String(a[0]) === fault.path && fault.parsed && fault.mode === "unreadable") {
       throw Object.assign(new Error("injected second-read failure"), { code: "EACCES" });
     }
-    const result = actual.readFileSync(path, options);
-    if (String(path) === fault.path && !fault.parsed) {
+    const result = actual.readFileSync(...a);
+    if (String(a[0]) === fault.path && !fault.parsed) {
       fault.parsed = true;
       if (fault.mode === "delete") actual.unlinkSync(fault.path);
       if (fault.mode === "replace") {
@@ -709,7 +709,7 @@ function fixture() {
     repoRoot: root,
     request,
     provider: "claude",
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
   });
   if (!attempt.ok) throw new Error(attempt.reason);
   writeFileSync(
@@ -722,7 +722,7 @@ function fixture() {
       `exact_head: ${request.exactHead}`,
       `review_revision: ${request.reviewRevision}`,
       "reviewer_provider: claude",
-      "reviewer_model: claude-opus-5",
+      "reviewer_model: claude-opus-5-5",
       `invocation_nonce: ${request.invocationNonce}`,
       "VERDICT: PASS",
     ].join("\n"),
@@ -731,7 +731,7 @@ function fixture() {
   const attestation: ReviewAttestation = {
     provider: "claude",
     role: "blind-reviewer",
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
     pr: request.pr,
     head: request.exactHead,
     reviewRevision: request.reviewRevision,
@@ -758,9 +758,8 @@ function measureMerge(root: string, head: string) {
         state: "OPEN",
         checksGreen: true,
       }),
-      mergePullRequest: () => {
-        mutations += 1;
-      },
+      mergePullRequest: () => void mutations++,
+      checkBaselineConflict: () => null,
     },
   });
   return { result, mutations };

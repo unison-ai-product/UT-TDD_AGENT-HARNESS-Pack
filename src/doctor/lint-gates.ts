@@ -30,7 +30,6 @@ import {
   loadVerificationRecommendation,
   verificationProfileGateMessages,
 } from "../lint/verification-profile.ts";
-import { SUBAGENT_ALLOWLIST } from "../runtime/agent-guard.ts";
 
 /**
  * architecture §3.1 設計 module 集合 ⊇ src/ 実在 module を検査 (IMP-075、hard)。
@@ -57,7 +56,6 @@ export function checkAssetDrift(repoRoot: string): { messages: string[]; ok: boo
   }
   try {
     const input = loadAssetDriftInput(repoRoot);
-    input.allowlist = [...SUBAGENT_ALLOWLIST].sort();
     const r = analyzeAssetDrift(input);
     return { messages: assetDriftMessages(r), ok: r.ok };
   } catch {

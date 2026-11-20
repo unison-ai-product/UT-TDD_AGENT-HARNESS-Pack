@@ -2,14 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   reconcileDispositionTarget,
   resolveCanonicalTarget,
+  type TargetKind,
   type TargetRegistry,
 } from "../../src/disposition/domain/target-resolver.ts";
 
 const registry: TargetRegistry = {
-  aliases: {
-    "PLAN-L0-01": ["PLAN-L0-01-vmodel-harness-upgrade-charter"],
-    "PLAN-L0-01-vmodel-harness-upgrade-charter": ["PLAN-L0-01-vmodel-harness-upgrade-charter"],
-  },
   pathAliases: { "a.md": ["docs/a.md"] },
   trackedPaths: new Set(["docs/a.md", "docs/family/a.md", "docs/family/b.md"]),
   familyMembers: {
@@ -19,14 +16,7 @@ const registry: TargetRegistry = {
 };
 
 describe("canonical target resolver", () => {
-  it("U-TARGET-001: resolves all typed target kinds without filesystem inference", () => {
-    expect(resolveCanonicalTarget({ kind: "plan_alias", ref: "PLAN-L0-01" }, registry)).toEqual({
-      ok: true,
-      value: {
-        kind: "plan_alias",
-        canonicalRefs: ["PLAN-L0-01-vmodel-harness-upgrade-charter"],
-      },
-    });
+  it("U-TARGET-001: resolves all three typed target kinds without filesystem inference", () => {
     expect(
       resolveCanonicalTarget({ kind: "artifact_path", ref: "docs/a.md" }, registry),
     ).toMatchObject({
@@ -49,34 +39,40 @@ describe("canonical target resolver", () => {
     });
   });
 
-  it("U-TARGET-002: accepts a source disposition display alias that differs from the edge alias", () => {
+  it("U-TARGET-002: accepts a unique source disposition basename alias for a tracked path", () => {
     expect(
       reconcileDispositionTarget(
         {
-          displayRef: "PLAN-L0-01",
-          edge: { kind: "plan_alias", ref: "PLAN-L0-01-vmodel-harness-upgrade-charter" },
+          displayRef: "a.md",
+          edge: { kind: "artifact_path", ref: "docs/a.md" },
         },
         registry,
       ),
     ).toEqual({
       ok: true,
-      value: ["PLAN-L0-01-vmodel-harness-upgrade-charter"],
+      value: ["docs/a.md"],
     });
+  });
+
+  it("U-DISPPTR-002: rejects retired plan_alias as an unknown target kind", () => {
+    const result = resolveCanonicalTarget(
+      { kind: "plan_alias" as unknown as TargetKind, ref: "PLAN-L0-01" },
+      registry,
+    );
+    expect(result.ok).toBe(false);
   });
 
   it("U-TARGET-003: fails closed for unresolved, ambiguous, and absent targets", () => {
     const ambiguous: TargetRegistry = {
       ...registry,
-      aliases: { ...registry.aliases, SHORT: ["PLAN-A", "PLAN-B"] },
+      pathAliases: { ...registry.pathAliases, SAME: ["docs/a.md", "docs/family/a.md"] },
     };
-    expect(resolveCanonicalTarget({ kind: "plan_alias", ref: "MISSING" }, registry)).toMatchObject({
-      ok: false,
-      findings: [{ ruleId: "target-unresolved" }],
-    });
-    expect(resolveCanonicalTarget({ kind: "plan_alias", ref: "SHORT" }, ambiguous)).toMatchObject({
-      ok: false,
-      findings: [{ ruleId: "target-ambiguous" }],
-    });
+    expect(resolveCanonicalTarget({ kind: "artifact_path", ref: "SAME" }, ambiguous)).toMatchObject(
+      {
+        ok: false,
+        findings: [{ ruleId: "target-ambiguous" }],
+      },
+    );
     expect(
       resolveCanonicalTarget({ kind: "artifact_path", ref: "docs/missing.md" }, registry),
     ).toMatchObject({

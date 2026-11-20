@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import {
   readabilityMessages,
   runtimeReadabilityMessages,
 } from "../src/lint/readability.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 describe("readability lint (freeze doc mojibake guard)", () => {
   it("detects replacement characters and em-space/ascii mojibake", () => {
@@ -268,7 +269,7 @@ describe("byte-level integrity guard (PLAN-L7-395: BOM / strict-UTF8 / control /
         line: 1,
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

@@ -1,7 +1,6 @@
 schema_version: ut-tdd.vmodel-contract/v1
 status: draft
 owner: PO/TL
-source_plan: PLAN-L4-24-declarative-vmodel-contract-right-arm
 principles:
   authoring_source_precedes_detector: true
   projection_is_not_authoring_source: true
@@ -28,11 +27,9 @@ forward_workflow:
     - layer: L11
       reason: UAT/trace review is a cross-layer process evidence aggregation, not a single left-layer test-design pair
       allowed_pair_layers: [L1, L3, L4, L5, L6, L7]
-      required_backlinks: [PLAN-L1-07-vmodel-engine-swap-requirements-delta, PLAN-L4-24-declarative-vmodel-contract-right-arm]
     - layer: L13
       reason: production observation follows deploy/acceptance and owns process evidence instead of a test-design pair
       allowed_pair_layers: [L12]
-      required_backlinks: [PLAN-L12-01-engine-swap-acceptance-deploy, PLAN-L4-24-declarative-vmodel-contract-right-arm]
 layers:
   - layer: L0
     gate: G0.5
@@ -115,7 +112,7 @@ layers:
     exit_criteria: mandatory_integration_cases_green_and_defects_routed
     defect_routing: reverse_to_L5_or_L6
     approval_role: QA/TL
-    verification_plan_id: PLAN-L8-01-engine-swap-integration-verification
+    verification_issue: https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/1579
     governance_artifact: docs/test-design/harness/L8-integration-test-design.md
     case_id_prefix: IT-
     evidence_manifest: .ut-tdd/evidence/g8-integration/engine-swap.json
@@ -128,7 +125,7 @@ layers:
     exit_criteria: mandatory_system_cases_green_and_design_intent_verified
     defect_routing: reverse_to_L4
     approval_role: QA/TL
-    verification_plan_id: PLAN-L9-01-engine-swap-system-verification
+    verification_issue: https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/1580
     governance_artifact: docs/test-design/harness/L9-system-test-design.md
     case_id_prefix: ST-
     evidence_manifest: .ut-tdd/evidence/g9-system/engine-swap.json
@@ -141,7 +138,7 @@ layers:
     exit_criteria: real_data_ux_cases_green_and_findings_routed
     defect_routing: reverse_to_L2_or_L4
     approval_role: PO/QA
-    verification_plan_id: PLAN-L10-01-engine-swap-ux-validation
+    verification_issue: https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/1581
     governance_artifact: docs/test-design/harness/L10-ux-validation-test-design.md
     case_id_prefix: UXV-
     evidence_manifest: .ut-tdd/evidence/g10-ux/engine-swap.json
@@ -154,7 +151,7 @@ layers:
     exit_criteria: no_unresolved_trace_or_uat_blocker
     defect_routing: reverse_to_owning_layer
     approval_role: PO/TL
-    verification_plan_id: PLAN-L11-01-engine-swap-uat-review
+    verification_issue: https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/1582
     governance_artifact: docs/process/evidence/g11-uat-review-design.md
     case_id_prefix: UAT-
     evidence_manifest: .ut-tdd/evidence/g11-uat/engine-swap.json
@@ -167,7 +164,7 @@ layers:
     exit_criteria: deployment_verified_and_all_mandatory_acceptance_cases_green
     defect_routing: rollback_or_reverse_to_L3_L7
     approval_role: PO/TL
-    verification_plan_id: PLAN-L12-01-engine-swap-acceptance-deploy
+    verification_issue: https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/1583
     governance_artifact: docs/test-design/harness/L12-acceptance-test-design.md
     case_id_prefix: AT-
     evidence_manifest: .ut-tdd/evidence/g12-acceptance/engine-swap.json
@@ -180,7 +177,7 @@ layers:
     exit_criteria: observation_window_closed_without_unrouted_blocker
     defect_routing: incident_recovery_or_rollback
     approval_role: PO/TL
-    verification_plan_id: PLAN-L13-01-engine-swap-post-deploy-verification
+    verification_issue: https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/1584
     governance_artifact: docs/process/evidence/g13-post-deploy-verification-design.md
     case_id_prefix: SMOKE-
     evidence_manifest: .ut-tdd/evidence/g13-post-deploy/engine-swap.json
@@ -193,7 +190,7 @@ layers:
     exit_criteria: operational_cases_green_and_value_feedback_routed
     defect_routing: requirement_backprop_or_concept_policy
     approval_role: PO
-    verification_plan_id: PLAN-L14-01-engine-swap-operational-value-verification
+    verification_issue: https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/1585
     governance_artifact: docs/test-design/harness/L14-vmodel-engine-swap-operational-test-design.md
     case_id_prefix: OT-
     evidence_manifest: .ut-tdd/evidence/g14-operational/engine-swap.json

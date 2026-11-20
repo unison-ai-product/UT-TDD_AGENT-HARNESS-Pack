@@ -18,20 +18,20 @@ decision_points:
     choose: "state only the actor, trigger, and observable system response"
     over: "describing transport or encoding details (headers, serialisation format) at L3"
     because: "transport/encoding is explicitly out of scope at L3 — that belongs to L4"
-  - when: "an L2/L3 boundary is shared with another PLAN's scope"
-    choose: "create a placeholder_dep in the PLAN"
-    over: "duplicating ownership of that boundary in both PLANs"
-    because: "no boundary may be owned by two PLANs simultaneously — duplication breaks single ownership"
+  - when: "an L2/L3 boundary is shared with another Issue's scope"
+    choose: "link the owning Issue and design revision"
+    over: "duplicating ownership of that boundary in both Issues"
+    because: "an explicit owner prevents competing boundary contracts"
   - when: "documenting who owns which side of a boundary in the L2 diagram"
     choose: "record ownership explicitly per boundary crossing (source, target, direction, schema owner)"
     over: "leaving ownership implicit and inferable only from the diagram shape"
-    because: "each boundary-crossing record requires explicit ownership so trace-lint and cross-PLAN checks can verify it"
+    because: "each boundary-crossing record requires explicit ownership so trace checks and review can verify it"
   - when: "a Discovery Scrum S2 PoC needs a boundary sketch"
-    choose: "use a lightweight informal component diagram directly in the PLAN doc"
+    choose: "use a lightweight informal component diagram in the PoC Issue"
     over: "authoring a full L2/L3 design doc before any code is written"
     because: "S2 PoC explicitly allows an informal sketch; formalisation is deferred to before S3 verify"
   - when: "an S2 PoC is about to proceed to S3 verify"
-    choose: "promote the informal sketch to a proper L2 or L3 design doc referenced by the PLAN's generates field"
+    choose: "promote the informal sketch to a proper L2 or L3 design doc linked by the PoC Issue"
     over: "carrying the informal sketch forward as the permanent design record"
     because: "the informal sketch is only sufficient pre-S3 — it must be promoted before S3 verify per Discovery drive usage"
 ---
@@ -51,7 +51,7 @@ contract (see `api-contract.md`).
 - An L3 functional design introduces a new component boundary or renames an
   existing one.
 - A Discovery Scrum S2 PoC needs a boundary sketch before code is written.
-- A Refactor PLAN must confirm that no external interface boundary changes before
+- A Refactor Issue must confirm that no external interface boundary changes before
   pair-freeze.
 
 ## L2 boundary obligations
@@ -66,15 +66,14 @@ a system boundary? For each boundary crossing, record:
 
 Produce a `flowchart` or component diagram (Mermaid inline) in the L2 design doc.
 Every boundary in the diagram must map to a named L3 functional requirement or
-placeholder with a `requires` dependency in the PLAN.
+a named design dependency linked from the Issue.
 
 ## L3 functional boundary rules
 
 - Each IA boundary becomes a named **interface point** in the L3 doc with:
   an actor, a trigger, and the system response observable to that actor.
 - Do not describe transport or encoding at L3 — that is L4.
-- Where a boundary is shared with another PLAN's scope, create a `placeholder_dep`
-  in the PLAN rather than duplicating ownership.
+- For a shared boundary, link its owning Issue and design revision.
 
 ## Transition to L4
 
@@ -87,16 +86,14 @@ that `ut-tdd vmodel lint` checks.
 
 - [ ] L2 doc contains a boundary diagram (Mermaid flowchart or component).
 - [ ] Every boundary in the diagram has a named L3 interface point.
-- [ ] Each interface point has a matching `requires` or `placeholder_dep` in the
-      PLAN for the L4 doc that will resolve it.
-- [ ] No boundary is owned by two PLANs simultaneously (check `ut-tdd graph export --format mermaid`).
-- [ ] `ut-tdd plan lint` and `ut-tdd doctor` exit 0.
-- [ ] Refactor PLANs: confirm via `ut-tdd review --uncommitted` that no externally
+- [ ] Each interface point links the responsible L4 design or its tracking Issue.
+- [ ] Each boundary has one owner (check `ut-tdd graph export --format mermaid`).
+- [ ] The applicable doctor checks pass.
+- [ ] Refactor Issues: confirm via `ut-tdd review --uncommitted` that no externally
       visible boundary name changed without a corresponding contract version bump.
 
 ## Discovery drive usage
 
 During Scrum S2 PoC under Discovery drive, a lightweight boundary sketch (informal
-component diagram in the PLAN doc itself) is sufficient. Before S3 verify the
-sketch must be promoted to a proper L2 or L3 design doc and referenced by the
-PLAN's `generates` field.
+component diagram in the PoC Issue) is sufficient. Before S3 verify the
+sketch must be promoted to a proper L2 or L3 design doc and referenced by the PoC Issue.

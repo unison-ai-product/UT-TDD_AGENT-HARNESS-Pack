@@ -6,12 +6,13 @@
  *     legacy PLAN は plan_id prefix → kind の順でフォールバックする。
  *   - kind=refactor / troubleshoot が Forward へ誤投影されない (旧 4 分岐の損失解消)。
  *   - docs/process/modes/ の mode doc は全件 MODE_CATALOG_DOC_FILES 写像を持ち、
- *     新 mode doc 追加時の取りこぼしを drive-db-registration lint が fail-close 検出する。
+ *     新 mode doc 追加時の取りこぼしを mode catalog の検査が検出する。
  */
-import { readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
-import { analyzeDriveDbRegistration } from "../src/lint/drive-db-registration.ts";
 import {
   MODE_CATALOG_DOC_FILES,
   ROUTE_MODE_DISPLAY,
@@ -20,6 +21,57 @@ import {
   workflowModeForPlan,
 } from "../src/schema/mode-catalog.ts";
 import { ROUTE_SIGNAL_MAP } from "../src/schema/route-map.ts";
+
+const ORPHAN_INSPECTION_TOKEN = /(?:workflow|model|skill)[\w-]*orphan[\w-]*/i;
+
+function orphanInspectionTokens(path: string, source: string): string[] {
+  const findings: string[] = [];
+  if (!/\.(?:ts|tsx|js|mjs|cjs)$/.test(path)) {
+    const withoutYamlComments = source.replace(/^\s*#.*$/gm, "");
+    for (const match of withoutYamlComments.matchAll(
+      /(?:workflow|model|skill)[\w-]*orphan[\w-]*/gi,
+    )) {
+      findings.push(`${path}:${match[0]}`);
+    }
+    return findings;
+  }
+
+  const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+  const inTestFile = path.startsWith("tests/");
+  const visit = (node: ts.Node): void => {
+    const token = ts.isIdentifier(node) || ts.isStringLiteralLike(node) ? node.text : null;
+    if (token && ORPHAN_INSPECTION_TOKEN.test(token)) {
+      const isTestTitle =
+        inTestFile &&
+        ts.isStringLiteralLike(node) &&
+        ts.isCallExpression(node.parent) &&
+        node.parent.arguments[0] === node &&
+        ((ts.isIdentifier(node.parent.expression) &&
+          ["it", "test", "describe"].includes(node.parent.expression.text)) ||
+          (ts.isPropertyAccessExpression(node.parent.expression) &&
+            ["it", "test", "describe"].includes(
+              node.parent.expression.expression.getText(sourceFile),
+            )));
+      if (!isTestTitle) findings.push(`${path}:${token}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return findings.sort();
+}
+
+function trackedOrphanInspectionTokens(repoRoot: string): string[] {
+  const trackedPaths = execFileSync("git", ["ls-files", "--", "src", "tests", ".github"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  })
+    .split(/\r?\n/)
+    .filter(Boolean);
+
+  return trackedPaths.flatMap((path) =>
+    orphanInspectionTokens(path, readFileSync(join(repoRoot, path), "utf8")),
+  );
+}
 
 describe("PLAN-L7-243: mode catalog derivation", () => {
   it("route_mode frontmatter wins over plan_id prefix and kind", () => {
@@ -76,48 +128,47 @@ describe("PLAN-L7-243: mode catalog derivation", () => {
     }
   });
 
-  it("drive-db-registration fails closed on expected-mode gaps and unmapped catalog docs", () => {
-    const base = {
-      planCount: 1,
-      driveRuns: 1,
-      plansWithoutDriveRun: 0,
-      workflowRuns: 1,
-      workflowOrphans: 0,
-      modelRuns: 1,
-      modelOrphans: 0,
-      skillRecommendations: 1,
-      skillRecommendationOrphans: 0,
-      skillInvocations: 1,
-      skillInvocationOrphans: 0,
-      registeredHookEvents: 1,
-      hookOrphans: 0,
-      modes: ["Forward"],
-    };
+  it("mode catalog reports unmapped documentation without a DB registration check", () => {
+    expect(
+      unmappedModeCatalogDocs(["README.md", "forward.md", "new-mode.md", "notes.txt"]),
+    ).toEqual(["forward.md", "new-mode.md"]);
+  });
 
-    const gap = analyzeDriveDbRegistration({
-      ...base,
-      expectedModes: ["Forward", "Refactor"],
-      unmappedCatalogDocs: [],
-    });
-    expect(gap.ok).toBe(false);
-    expect(gap.violations).toContainEqual({ reason: "missing_required_mode", mode: "Refactor" });
+  it("orphan scanner detects function declarations and calls in test files", () => {
+    const checkerName = ["check", "Workflow", "Orphans"].join("");
+    const fixturePath = ["tests", "orphan-scanner-fixture.test.ts"].join("/");
+    const source = [`function ${checkerName}() {}`, `${checkerName}();`].join("\n");
+    const finding = `${fixturePath}:${checkerName}`;
+    expect(orphanInspectionTokens(fixturePath, source)).toEqual([finding, finding]);
+  });
 
-    const unmapped = analyzeDriveDbRegistration({
-      ...base,
-      expectedModes: ["Forward"],
-      unmappedCatalogDocs: ["new-mode.md"],
-    });
-    expect(unmapped.ok).toBe(false);
-    expect(unmapped.violations).toContainEqual({
-      reason: "mode_catalog_unmapped",
-      mode: "new-mode.md",
-    });
+  it("CANDIDATE-U-PLANRET-009: retires drive DB registration and keeps mode catalog coverage", () => {
+    const root = process.cwd();
+    expect(existsSync(join(root, "src", "lint", "drive-db-registration.ts"))).toBe(false);
+    expect(existsSync(join(root, "src", "state-db", "drive-registration.ts"))).toBe(false);
+    expect(existsSync(join(root, "tests", "drive-db-registration.test.ts"))).toBe(false);
 
-    const green = analyzeDriveDbRegistration({
-      ...base,
-      expectedModes: ["Forward"],
-      unmappedCatalogDocs: [],
-    });
-    expect(green.ok).toBe(true);
+    const checkGroups = readFileSync(
+      join(root, "src", "doctor", "check-definition-groups.ts"),
+      "utf8",
+    );
+    const profiles = readFileSync(join(root, "src", "doctor", "profiles.ts"), "utf8");
+    expect(checkGroups).not.toContain('full("drive-db-registration"');
+    expect(profiles).not.toContain('"drive-db-registration"');
+
+    const packageJson = readFileSync(join(root, "package.json"), "utf8");
+    const runtimePortability = readFileSync(
+      join(root, "src", "lint", "runtime-portability.ts"),
+      "utf8",
+    );
+    expect(packageJson).not.toContain("tests/drive-db-registration.test.ts");
+    expect(runtimePortability).not.toContain("tests/drive-db-registration.test.ts");
+    const dbCurrency = readFileSync(join(root, "src", "lint", "db-currency.ts"), "utf8");
+    expect(dbCurrency).not.toContain("collectCurrentPlanRegistryFingerprint");
+    expect(trackedOrphanInspectionTokens(root)).toEqual([]);
+
+    const unmapped = unmappedModeCatalogDocs(["README.md", "new-mode.md"]);
+    expect(unmapped).toEqual(["new-mode.md"]);
+    expect(unmapped).not.toEqual([]);
   });
 });

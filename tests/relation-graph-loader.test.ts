@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -8,13 +8,10 @@ import {
   collectRelationGraphProjection,
   exportRelationDiagram,
 } from "../src/lint/relation-graph.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
-// PLAN-L7-32 §9 discharge: repo→RelationGraphSourceSet loader の結合テスト。
-// tmp repo に PLAN(generates)+src+test(import)+design(pair_artifact)+test-design を置き、
-// loader が plan→source(generates) / source→test(covered-by) / design→test-design(pairs)
-// の edge を生む source set を返すこと、純関数と結合して impact/export が動くことを検証する。
+// Exercise source/test and design/test-design relationships through the repository loader.
 function buildRepo(root: string): void {
-  mkdirSync(join(root, "docs", "plans"), { recursive: true });
   mkdirSync(join(root, "docs", "adr"), { recursive: true });
   mkdirSync(join(root, "docs", "design", "harness"), { recursive: true });
   mkdirSync(join(root, "docs", "governance"), { recursive: true });
@@ -50,26 +47,6 @@ function buildRepo(root: string): void {
   writeFileSync(
     join(root, "docs", "governance", "ai-dev-team-concept_v1.1.md"),
     ["# AI Dev Team Concept", "", "Fixture governance concept body.", ""].join("\n"),
-    "utf8",
-  );
-  writeFileSync(
-    join(root, "docs", "plans", "PLAN-TEST-01-widget.md"),
-    [
-      "---",
-      "plan_id: PLAN-TEST-01-widget",
-      "status: confirmed",
-      "kind: impl",
-      "generates:",
-      "  - artifact_path: src/widget/core.ts",
-      "    artifact_type: source_module",
-      "dependencies:",
-      "  requires:",
-      "    - FR-L1-99",
-      "---",
-      "",
-      "## body references FR-L1-99",
-      "",
-    ].join("\n"),
     "utf8",
   );
   writeFileSync(join(root, "src", "widget", "core.ts"), "export const core = 1;\n", "utf8");
@@ -192,57 +169,83 @@ function buildRepo(root: string): void {
 }
 
 describe("loadRelationGraphSourceSet", () => {
-  it("keeps draft outputs that are not materialized as pending graph artifacts", () => {
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-graph-loader-pending-"));
+  it.each([
+    "confirmed",
+    "completed",
+    "accepted",
+  ])("U-PAEXRET-002: excludes legacy PLAN targets and keeps stale-edge detection ($0)", (status) => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-graph-loader-plan-target-retirement-"));
     try {
       buildRepo(root);
+      mkdirSync(join(root, "docs", "plans"), { recursive: true });
+      const generatedPath = "src/widget/declared-but-absent.ts";
       writeFileSync(
-        join(root, "docs", "plans", "PLAN-TEST-02-future.md"),
+        join(root, "docs", "plans", "PLAN-TEST-01-widget.md"),
         [
           "---",
-          "plan_id: PLAN-TEST-02-future",
-          "status: draft",
-          "kind: add-impl",
+          "plan_id: PLAN-TEST-01-widget",
+          `status: ${status}`,
+          "kind: impl",
           "generates:",
-          "  - artifact_path: src/future/recovery.ts",
+          `  - artifact_path: ${generatedPath}`,
           "    artifact_type: source_module",
+          "dependencies:",
+          "  requires:",
+          "    - FR-L1-99",
           "---",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const missingTestDesign = "docs/test-design/harness/missing-widget-test-design.md";
+      writeFileSync(
+        join(root, "docs", "design", "harness", "widget-design.md"),
+        [
+          "---",
+          "layer: L6",
+          "status: confirmed",
+          `pair_artifact: ${missingTestDesign}`,
+          "---",
+          "",
+          "design body",
           "",
         ].join("\n"),
         "utf8",
       );
 
       const sourceSet = loadRelationGraphSourceSet(root);
-      const plan = sourceSet.plans?.find((item) => item.id === "PLAN-TEST-02-future");
-      expect(plan?.generates).toEqual(["src/future/recovery.ts"]);
-      expect(plan?.status).toBe("draft");
-      expect(plan?.availability).toEqual({ "src/future/recovery.ts": "planned" });
+      expect(sourceSet.plans ?? []).toEqual([]);
+      expect(sourceSet.requirements).toEqual([]);
 
       const projection = collectRelationGraphProjection(sourceSet);
-      expect(projection.edges).toContainEqual({
-        from: "plan:PLAN-TEST-02-future",
-        to: "source:src/future/recovery.ts",
-        kind: "generates",
-        lifecycle: "planned",
-      });
+      expect(projection.nodes.some((node) => node.kind === "plan")).toBe(false);
+      expect(projection.nodes.map((node) => node.id)).not.toContain(
+        "source:src/widget/declared-but-absent.ts",
+      );
+      expect(
+        projection.edges.some((edge) => edge.kind === "generates" || edge.kind === "derives-from"),
+      ).toBe(false);
       const result = analyzeRelationImpact({ changedPaths: [], projection });
-      expect(result.findings.filter((finding) => finding.code === "stale-edge")).toEqual([]);
+      const staleEdges = result.findings.filter((finding) => finding.code === "stale-edge");
+      expect(staleEdges).toContainEqual(
+        expect.objectContaining({
+          nodeId: "design:docs/design/harness/widget-design.md",
+          message: expect.stringContaining(
+            `design:docs/design/harness/widget-design.md -[pairs]-> test-design:${missingTestDesign}`,
+          ),
+        }),
+      );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
-  it("builds a source set with plan→source, source→test, design→test-design edges", () => {
+  it("builds source-to-test and design-to-test-design relationships", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-graph-loader-"));
     try {
       // U-GRAPH-001
       buildRepo(root);
       const sourceSet = loadRelationGraphSourceSet(root);
-
-      // plan generates src + FR requirement ref
-      const plan = sourceSet.plans?.find((p) => p.id === "PLAN-TEST-01-widget");
-      expect(plan?.generates).toContain("src/widget/core.ts");
-      expect(plan?.requirements).toContain("FR-L1-99");
 
       // source→test covered-by (import 解析)
       const src = sourceSet.sourceFiles?.find((s) => s.path === "src/widget/core.ts");
@@ -361,14 +364,13 @@ describe("loadRelationGraphSourceSet", () => {
         path: "README.md",
       });
 
-      // projection + impact: changing the source surfaces its owning plan + sibling test
+      // Source changes propagate to the covering test.
       const projection = collectRelationGraphProjection(sourceSet);
       const impact = analyzeRelationImpact({
         changedPaths: ["src/widget/core.ts"],
         projection,
       });
       expect(impact.changedNodes.map((n) => n.id)).toContain("source:src/widget/core.ts");
-      expect(impact.impacted.map((n) => n.id)).toContain("plan:PLAN-TEST-01-widget");
       expect(impact.impacted.map((n) => n.id)).toContain("test:tests/core.test.ts");
 
       const processImpact = analyzeRelationImpact({
@@ -530,7 +532,7 @@ describe("loadRelationGraphSourceSet", () => {
       expect(diagram.ok).toBe(true);
       expect(diagram.content).toContain("flowchart TD");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -539,36 +541,47 @@ describe("loadRelationGraphSourceSet", () => {
     try {
       const sourceSet = loadRelationGraphSourceSet(root);
       expect(sourceSet.sourceFiles ?? []).toEqual([]);
+      expect(sourceSet.requirements ?? []).toEqual([]);
       expect(sourceSet.plans ?? []).toEqual([]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
-  it("materializes a requirement node for every FR a plan derives from (no dangling derives-from)", () => {
+  it("materializes a requirement node from the FR registry", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-graph-loader-req-"));
     try {
-      buildRepo(root); // PLAN-TEST-01 derives-from FR-L1-99 (no FR registry doc in this tmp repo)
+      buildRepo(root);
+      const l1 = join(root, "docs", "design", "harness", "L1-requirements");
+      const l3 = join(root, "docs", "design", "harness", "L3-functional");
+      mkdirSync(l1, { recursive: true });
+      mkdirSync(l3, { recursive: true });
+      writeFileSync(
+        join(l1, "functional-requirements.md"),
+        ["## §1 機能一覧", "| **FR-L1-99** | Widget |", "### §1.1"].join("\n"),
+        "utf8",
+      );
+      writeFileSync(join(l1, "screen-requirements.md"), "", "utf8");
+      writeFileSync(join(l3, "functional-requirements.md"), "", "utf8");
+
       const sourceSet = loadRelationGraphSourceSet(root);
-      // requirement node must exist for the referenced FR even without a registry doc (union of refs)
-      expect(sourceSet.requirements?.map((r) => r.id)).toContain("FR-L1-99");
+      expect(sourceSet.requirements).toEqual([
+        { id: "FR-L1-99", path: "docs/design/harness/L1-requirements/functional-requirements.md" },
+      ]);
       const projection = collectRelationGraphProjection(sourceSet);
       const result = analyzeRelationImpact({ changedPaths: [], projection });
       const staleEdges = result.findings.filter((f) => f.code === "stale-edge");
       expect(staleEdges.map((f) => f.message)).toEqual([]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });
 
-// PLAN-L7-142: real-repo regression fence for the relation-graph loader coverage gap.
-// 合成 fixture ではなく実 loadRelationGraphSourceSet(process.cwd()) を通し、derives-from
-// (plan→requirement) / pairs (design→test-design) / generates (plan→source) の端点 node が
-// すべて実在し stale-edge == 0 であることを機械保証する (coverage≠substance、PLAN-L7-32 の
-// loader が requirement node を一切 materialize しなかった回帰の再発防止)。
+// 実 repo の regression fence: 実 loadRelationGraphSourceSet(process.cwd()) の edge の端点が全て実在し
+// stale-edge == 0 であること、PLAN に依らない node / edge が空でないことを保証する (#1430)。
 describe("relation graph real-repo loader (PLAN-L7-142 stale-edge fence)", () => {
-  it("has zero stale-edge findings through the real loader and materializes requirement nodes", () => {
+  it("CANDIDATE-U-PLANRET-024: has zero stale-edge findings through the real loader and materializes requirement nodes", () => {
     const projection = collectRelationGraphProjection(loadRelationGraphSourceSet(process.cwd()));
     const result = analyzeRelationImpact({ changedPaths: [], projection });
     const staleEdges = result.findings.filter((f) => f.code === "stale-edge");
@@ -576,14 +589,15 @@ describe("relation graph real-repo loader (PLAN-L7-142 stale-edge fence)", () =>
     expect(staleEdges.map((f) => f.message)).toEqual([]);
     const requirementNodes = projection.nodes.filter((n) => n.kind === "requirement");
     expect(requirementNodes.length).toBeGreaterThan(0);
+    for (const kind of ["pairs", "covered-by"]) {
+      expect(projection.edges.filter((e) => e.kind === kind).length).toBeGreaterThan(0);
+    }
     const agentImpact = analyzeRelationImpact({
-      changedPaths: [".claude/agents/refactor-scout.md"],
+      changedPaths: [".claude/commands/build.md"],
       projection,
     });
     expect(agentImpact.ok).toBe(true);
-    expect(agentImpact.changedNodes.map((n) => n.id)).toContain(
-      "design:.claude/agents/refactor-scout.md",
-    );
+    expect(agentImpact.changedNodes.map((n) => n.id)).toContain("design:.claude/commands/build.md");
     expect(agentImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
     for (const path of [".claude/commands/ut-tdd-status.md", ".claude/commands/ut-tdd-test.md"]) {
       const impact = analyzeRelationImpact({ changedPaths: [path], projection });
@@ -599,12 +613,12 @@ describe("relation graph real-repo loader (PLAN-L7-142 stale-edge fence)", () =>
     expect(skillMapImpact.changedNodes.map((n) => n.id)).toContain("design:skills/SKILL_MAP.md");
     expect(skillMapImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
     const adapterAgentImpact = analyzeRelationImpact({
-      changedPaths: ["docs/templates/adapter/.claude/agents/ut-tdd-tl.md"],
+      changedPaths: ["docs/templates/adapter/.claude/commands/build.md"],
       projection,
     });
     expect(adapterAgentImpact.ok).toBe(true);
     expect(adapterAgentImpact.changedNodes.map((n) => n.id)).toContain(
-      "design:docs/templates/adapter/.claude/agents/ut-tdd-tl.md",
+      "design:docs/templates/adapter/.claude/commands/build.md",
     );
     expect(adapterAgentImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
     const adapterCommandImpact = analyzeRelationImpact({
@@ -698,12 +712,12 @@ describe("relation graph real-repo loader (PLAN-L7-142 stale-edge fence)", () =>
     );
     expect(g8EvidenceImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
     const g9EvidenceImpact = analyzeRelationImpact({
-      changedPaths: [".ut-tdd/evidence/g9-system/20260629-st-system-minimum.json"],
+      changedPaths: [".ut-tdd/evidence/g9-system/20261117-s7-fresh-system.json"],
       projection,
     });
     expect(g9EvidenceImpact.ok).toBe(true);
     expect(g9EvidenceImpact.changedNodes.map((n) => n.id)).toContain(
-      "design:.ut-tdd/evidence/g9-system/20260629-st-system-minimum.json",
+      "design:.ut-tdd/evidence/g9-system/20261117-s7-fresh-system.json",
     );
     expect(g9EvidenceImpact.findings.map((f) => f.code)).not.toContain("missing-projection");
     const g10EvidenceDirImpact = analyzeRelationImpact({

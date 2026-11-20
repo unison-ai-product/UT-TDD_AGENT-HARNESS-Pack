@@ -1,4 +1,4 @@
-import type { LintResult } from "../plan/lint.ts";
+import type { LintResult } from "../lint/lint-result.ts";
 
 export interface DoctorTiming {
   id: string;
@@ -23,12 +23,19 @@ export interface DoctorResultInput {
   timings?: DoctorTiming[];
 }
 
+// 自分で `doctor: ` を付けた check (claude-version-floor) の行に二重に付けない。
+const DOCTOR_PREFIX = "doctor: ";
+
 export function buildDoctorResult(input: DoctorResultInput): DoctorResult {
   const result: DoctorResult = {
     ok: input.checks.every((check) => check.ok),
     messages: [
       ...input.leadingMessages,
-      ...input.checks.flatMap((check) => check.messages.map((message) => `doctor: ${message}`)),
+      ...input.checks.flatMap((check) =>
+        check.messages.map((message) =>
+          message.startsWith(DOCTOR_PREFIX) ? message : `${DOCTOR_PREFIX}${message}`,
+        ),
+      ),
     ],
   };
   if (input.timings) result.timings = input.timings;

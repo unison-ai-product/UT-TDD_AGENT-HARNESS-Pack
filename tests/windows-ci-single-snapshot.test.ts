@@ -9,9 +9,7 @@ const FAST_EXCLUDES = [
   "tests/db-projection-ingestion.test.ts",
   "tests/distribution-acceptance.test.ts",
   "tests/doctor.test.ts",
-  "tests/drive-db-registration.test.ts",
   "tests/projection-writer.test.ts",
-  "tests/review-green-command-projection.test.ts",
   "tests/runtime-hook-entrypoints.test.ts",
 ] as const;
 const CLI_FILES = [

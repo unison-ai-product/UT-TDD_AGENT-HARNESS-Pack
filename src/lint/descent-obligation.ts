@@ -18,6 +18,7 @@ import {
   type ThinCoverageAdvisory,
   type TraceKeyedArtifact,
 } from "./descent-obligation-types.ts";
+import { analyzeL6FrCoverage, parseL6FrCoverageRows } from "./l6-fr-coverage.ts";
 import { normalizePath } from "./shared.ts";
 
 const DOC_FR_TRACE_RE = /\bFR-L1-(\d+)(?:(?:[〜～]|\.\.)(?:FR-L1-)?(\d+)|((?:\/\d+)+))?/g;
@@ -270,7 +271,6 @@ export function loadDeferLedger(root = process.cwd()): DeferEntry[] {
   const files = [
     ...recursiveFiles(join(root, "docs", "design"), (path) => path.endsWith(".md")),
     ...recursiveFiles(join(root, "docs", "test-design"), (path) => path.endsWith(".md")),
-    ...recursiveFiles(join(root, "docs", "plans"), (path) => path.endsWith(".md")),
   ];
   return files.flatMap((path) => deferRowsForFile(root, path));
 }
@@ -285,11 +285,26 @@ export function loadFrUnitCoverageOracles(root = process.cwd()): Set<string> {
   const path = join(root, "docs", "design", "harness", "L6-function-design", "fr-unit-coverage.md");
   const oracles = new Set<string>();
   if (!existsSync(path)) return oracles;
-  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const row = line.match(/^\|\s*FR-L1-(\d+)\s*\|/);
-    // frId で正規化し、advisory の traceKey 生成 (documentTraceKeyProvenance も frId 経由) と
-    // 同一表記 (2 桁 zero-pad) に揃える。1 桁/2 桁の表記揺れで filter が miss しないようにする。
-    if (row && /\bU-FR-L1-\d+\b/.test(line)) oracles.add(frId(row[1]));
+  const coverageText = readFileSync(path, "utf8");
+  const rows = parseL6FrCoverageRows(coverageText);
+  // doctor (l6-fr-coverage) と同じ analyzeL6FrCoverage の判定を使う (別解釈を持たない)。
+  const result = analyzeL6FrCoverage({
+    frIds: rows.map((r) => r.fr_id),
+    coverageText,
+    repoRoot: root,
+  });
+  const failed = new Set(
+    [
+      ...result.incomplete,
+      ...result.missingSpecFiles,
+      ...result.weakContracts,
+      ...result.missingSubstance,
+    ].map((r) => r.fr_id),
+  );
+  // frId で正規化し、advisory の traceKey 生成 (documentTraceKeyProvenance も frId 経由) と
+  // 同一表記 (2 桁 zero-pad) に揃える。
+  for (const row of rows) {
+    if (!failed.has(row.fr_id)) oracles.add(frId(row.fr_id.slice("FR-L1-".length)));
   }
   return oracles;
 }

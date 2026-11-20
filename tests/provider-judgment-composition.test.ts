@@ -454,7 +454,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
       repoRoot: root,
       request,
       provider: "claude",
-      model: "claude-opus-5",
+      model: "claude-opus-5-5",
     });
     if (!first.ok) throw new Error(first.reason);
     writeFileSync(first.path, verdictText(request, 1), "utf8");
@@ -474,7 +474,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
     expect(failures).toHaveLength(1);
     expect(failures[0].reason).toBe("receipt_audit_append_failed");
     expect(
-      beginReviewAttempt({ repoRoot: root, request, provider: "claude", model: "claude-opus-5" }),
+      beginReviewAttempt({ repoRoot: root, request, provider: "claude", model: "claude-opus-5-5" }),
     ).toMatchObject({ ok: true, attempt: 2 });
   });
 
@@ -485,7 +485,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       writeFileSync(first.path, verdictText(request, 1), "utf8");
@@ -514,7 +514,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
       repoRoot: root,
       request,
       provider: "claude",
-      model: "claude-opus-5",
+      model: "claude-opus-5-5",
     });
     if (!first.ok) throw new Error(first.reason);
     writeFileSync(first.path, verdictText(request, 1), "utf8");
@@ -552,7 +552,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
       repoRoot: root,
       request,
       provider: "claude",
-      model: "claude-opus-5",
+      model: "claude-opus-5-5",
     });
     expect(second).toMatchObject({ ok: true, attempt: 2 });
     if (!second.ok) throw new Error(second.reason);
@@ -583,7 +583,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
       repoRoot: root,
       request,
       provider: "claude",
-      model: "claude-opus-5",
+      model: "claude-opus-5-5",
     });
     expect(first).toMatchObject({ ok: true, attempt: 1 });
     expect(existsSync(temp)).toBe(false);
@@ -611,7 +611,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
       repoRoot: same.root,
       request: same.request,
       provider: "claude",
-      model: "claude-opus-5",
+      model: "claude-opus-5-5",
     });
     if (!probe.ok) throw new Error(probe.reason);
     writeFileSync(probe.path, verdictText(same.request, 1), "utf8");
@@ -630,7 +630,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
       repoRoot: same.root,
       request: same.request,
       provider: "claude",
-      model: "claude-opus-5",
+      model: "claude-opus-5-5",
     });
     expect(retry).toMatchObject({ ok: true, attempt: 1 });
     if (!retry.ok) throw new Error(retry.reason);
@@ -657,7 +657,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
         repoRoot: same.root,
         request: same.request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       }),
     ).toEqual({ ok: false, reason: "review_receipt_already_exists" });
 
@@ -672,7 +672,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
       repoRoot: differing.root,
       request: differing.request,
       provider: "claude",
-      model: "claude-opus-5",
+      model: "claude-opus-5-5",
     });
     expect(start).toMatchObject({ ok: true, attempt: 1 });
     if (!start.ok) throw new Error(start.reason);
@@ -716,7 +716,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       writeFileSync(first.path, verdictText(request, 1), "utf8");
@@ -745,7 +745,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       expect(next).toMatchObject({ ok: true, attempt: 2 });
       expect(readFileSync(receiptPathOf(root, digest)).length).toBeGreaterThan(0);
@@ -758,7 +758,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
       repoRoot: root,
       request,
       provider: "claude",
-      model: "claude-opus-5",
+      model: "claude-opus-5-5",
     });
     if (!first.ok) throw new Error(first.reason);
     writeFileSync(first.path, verdictText(request, 1), "utf8");
@@ -785,7 +785,7 @@ describe("PLAN-L7-534 §3.2 custody ordering (attempt_completed → hardlink rec
     ).toHaveLength(1);
     // The linked receipt is terminal: no further attempt may start.
     expect(
-      beginReviewAttempt({ repoRoot: root, request, provider: "claude", model: "claude-opus-5" }),
+      beginReviewAttempt({ repoRoot: root, request, provider: "claude", model: "claude-opus-5-5" }),
     ).toMatchObject({ ok: false });
   });
 });
@@ -899,7 +899,7 @@ function attestation(
   request: ReviewAttestationRequest,
   attempt: number,
   exitCode: number,
-  model = "claude-opus-5",
+  model = "claude-opus-5-5",
 ): ReviewAttestation {
   return {
     provider: "claude",
@@ -919,7 +919,7 @@ function attestation(
 function verdictText(
   request: ReviewAttestationRequest,
   attempt: number,
-  model = "claude-opus-5",
+  model = "claude-opus-5-5",
 ): string {
   return [
     "schema_version: ut-tdd.review-verdict/v1",

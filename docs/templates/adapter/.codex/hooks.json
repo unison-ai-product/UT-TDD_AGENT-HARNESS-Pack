@@ -1,5 +1,5 @@
 {
-  "description": "UT-TDD Codex adapter hooks (PLAN-L7-668 command schema). Hosted/API tool surfaces still require explicit `ut-tdd guard preflight` before edits because repo-local Codex hooks do not execute there.",
+  "description": "UT-TDD Codex adapter hooks (current command schema). Hosted/API tool surfaces still require explicit `ut-tdd guard preflight` before edits because repo-local Codex hooks do not execute there.",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,7 +9,7 @@
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.ut-tdd/bin/ut-tdd.mjs\" hook agent-guard",
             "timeout": 5,
-            "statusMessage": "agent-guard: Codex subagent allowlist/model enforcement"
+            "statusMessage": "agent-guard: Codex generic subagent type and model check"
           }
         ]
       },
@@ -31,7 +31,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.ut-tdd/bin/ut-tdd.mjs\" session start",
-            "timeout": 5,
+            "timeout": 30,
             "statusMessage": "session-log: session start (fail-open)"
           }
         ]
@@ -44,7 +44,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.ut-tdd/bin/ut-tdd.mjs\" hook post-tool-use",
-            "timeout": 5,
+            "timeout": 30,
             "statusMessage": "session-log: post tool use (fail-open)"
           }
         ]
@@ -56,8 +56,8 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.ut-tdd/bin/ut-tdd.mjs\" session summary",
-            "timeout": 5,
-            "statusMessage": "session-log: PLAN digest summary (fail-open)"
+            "timeout": 30,
+            "statusMessage": "session-log: work digest summary (fail-open)"
           }
         ]
       }

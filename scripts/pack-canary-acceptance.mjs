@@ -18,11 +18,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 
 export const CANARY_TAG = "v0.2.0-canary.2";
-export const AGENT_E2E_TAG = "v0.2.0-canary.6";
+export const AGENT_E2E_TAG = "v0.2.0-canary.7";
+const CANARY_ISSUE_NUMBER = 418;
 export const PACK_RELEASE_PREFIX =
   "https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/releases/tag/";
 export const SOURCE_ISSUE_PREFIX =
   "https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/418#issuecomment-";
+export const AGENT_E2E_SOURCE_ISSUE_PREFIX =
+  "https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/946#issuecomment-";
 export const canaryAssetsForTag = (tag) => Object.freeze([
   `${tag}.tar.gz`,
   `${tag}.tar.gz.sha256`,
@@ -59,7 +62,7 @@ function verifyPair(pair, field) {
   return producer;
 }
 
-/** Parse a JSON copy of the canonical #418 publish comment; the comment remains authoritative. */
+/** Parse a JSON copy of the canonical issue-bound publish comment; the comment remains authoritative. */
 export function parsePublishRecord(value, commentUrl, { expectedTag = CANARY_TAG } = {}) {
   if (!objectWith(value, [
     "tag", "release_url", "c1_commit", "c2_commit", "recorded_by", "recorded_at",
@@ -82,9 +85,12 @@ export function parsePublishRecord(value, commentUrl, { expectedTag = CANARY_TAG
     verifyPair(value.assets[name], `assets.${name}`),
   ]));
   const consumerAnchorDigest = verifyPair(value.consumer_anchor_digest, "consumer_anchor_digest");
+  const issueCommentPrefix = expectedTag === AGENT_E2E_TAG
+    ? AGENT_E2E_SOURCE_ISSUE_PREFIX
+    : SOURCE_ISSUE_PREFIX;
   if (typeof commentUrl !== "string" ||
-      !commentUrl.startsWith(SOURCE_ISSUE_PREFIX) ||
-      !/^\d+$/.test(commentUrl.slice(SOURCE_ISSUE_PREFIX.length)))
+      !commentUrl.startsWith(issueCommentPrefix) ||
+      !/^\d+$/.test(commentUrl.slice(issueCommentPrefix.length)))
     throw new Error("publish-record-comment-url-invalid");
   return { value, assetDigests, consumerAnchorDigest, commentUrl };
 }
@@ -125,7 +131,7 @@ export function parseAgentE2ERecord(value, commentUrl) {
   return parsePublishRecord(value, commentUrl, { expectedTag: AGENT_E2E_TAG });
 }
 
-/** Build only the canary.6 Release-assets installer command used by AT-DIST-003. */
+/** Build only the canary.7 Release-assets installer command used by AT-DIST-003. */
 export function buildAgentE2EInstallerInvocation(releaseDirectory, anchorDigest) {
   if (!digestPattern.test(anchorDigest)) throw new Error("agent-e2e-anchor-invalid");
   return [
@@ -207,7 +213,7 @@ function parseAgentGateResult(result, label) {
     throw new Error(`${label}-static-gate-result-invalid`);
   if (gate.passed) {
     const trace = gate.messages.find((message) => typeof message === "string" && message.startsWith("g1-trace - OK ("));
-    const counts = trace?.match(/business=(\d+), screens=(\d+), p0Fr=(\d+), l3Plans=(\d+)/);
+    const counts = trace?.match(/business=(\d+), screens=(\d+), p0Fr=(\d+)/);
     if (!counts || Number(counts[1]) < 1 || Number(counts[2]) < 1 || Number(counts[3]) < 1)
       throw new Error(`${label}-g1-trace-baseline-empty`);
   }
@@ -223,7 +229,8 @@ export function runAgentAuthoringAndGates(input) {
   if (!agentEvidenceObject(input) || typeof input.consumerRoot !== "string")
     throw new Error("agent-authoring-input-invalid");
   const root = realpathSync.native(resolve(input.consumerRoot));
-  const run = input.run ?? ((binary, args, options) => spawnSync(binary, args, options));
+  const run = input.run ?? ((binary, args, options) =>
+    spawnSync(binary, args, { ...options, windowsHide: true }));
   const cliPath = realpathSync.native(resolve(root, ".ut-tdd", "bin", "ut-tdd.mjs"));
   if (!isInside(root, cliPath)) throw new Error("consumer_runtime_external_path");
   const git = (...args) => {
@@ -466,7 +473,7 @@ function readCanonicalJson(path, root, label) {
 
 function runGitBuffer(root, args) {
   return execFileSync("git", ["-C", root, ...args], {
-    encoding: "buffer", stdio: ["ignore", "pipe", "ignore"],
+    encoding: "buffer", stdio: ["ignore", "pipe", "ignore"], windowsHide: true,
   });
 }
 
@@ -734,7 +741,8 @@ function parseArgs(argv) {
 
 export function main(argv = process.argv.slice(2), deps = {}) {
   const now = deps.now ?? (() => new Date().toISOString());
-  const run = deps.spawnSync ?? spawnSync;
+  const run = deps.spawnSync ?? ((binary, args, options) =>
+    spawnSync(binary, args, { ...options, windowsHide: true }));
   const parsed = parseArgs(argv);
   if (parsed.phase === "verify") return verifySmoke(parsed, { now, run });
   const args = parsed.values;
@@ -785,6 +793,7 @@ export function main(argv = process.argv.slice(2), deps = {}) {
   }
   const transcript = `${child.stdout ?? ""}${child.stderr ?? ""}`;
   let authoringTemplate = null;
+  let authoringDocumentSha256 = null;
   if (!child.error && child.status === 0) {
     const identityPath = join(consumerRoot, "ut-tdd.project.json");
     if (!existsSync(identityPath)) throw new Error("consumer-project-identity-not-generated");
@@ -792,18 +801,20 @@ export function main(argv = process.argv.slice(2), deps = {}) {
     runProductGit(run, consumerRoot, ["commit", "--quiet", "-m", "canary consumer identity"]);
     // Keep only the consumer-owned authoring input, derived from verified release bytes.
     verifyReleaseDirectory(directory, record);
-    const template = run("tar", ["-xOf", join(directory, `${tag}.tar.gz`),
-      "docs/templates/plan/design/template.md"], {
-      cwd: consumerRoot, encoding: "utf8", windowsHide: true, timeout: 30_000,
+    const templatePath = "docs/templates/design/L6-function-spec-template.md";
+    const template = run("tar", ["-xOf", `${tag}.tar.gz`, templatePath], {
+      cwd: directory, encoding: "utf8", windowsHide: true, timeout: 30_000,
     });
     if (template.error || template.status !== 0)
-      throw new Error(`shipped-plan-template-unavailable:${template.error?.message ?? template.stderr}`);
-    createConsumerPlan(consumerRoot, template.stdout);
+      throw new Error(`shipped-design-template-unavailable:${template.error?.message ?? template.stderr}`);
+    const authoringDocumentPath = createConsumerIssueDesignDocument(consumerRoot, template.stdout);
     authoringTemplate = {
       asset_name: `${tag}.tar.gz`,
-      path: "docs/templates/plan/design/template.md",
+      path: templatePath,
       sha256: `sha256:${createHash("sha256").update(template.stdout, "utf8").digest("hex")}`,
     };
+    const authoringDocument = readFileSync(join(consumerRoot, ...authoringDocumentPath.split("/")));
+    authoringDocumentSha256 = `sha256:${createHash("sha256").update(authoringDocument).digest("hex")}`;
   }
   const evidence = {
     phase: "installed-awaiting-clean-restart",
@@ -826,9 +837,7 @@ export function main(argv = process.argv.slice(2), deps = {}) {
     consumer_root: consumerRoot,
     release_directory: directory,
     consumer_head: child.status === 0 ? productHead(run, consumerRoot) : null,
-    authoring_input_sha256: child.status === 0
-      ? `sha256:${createHash("sha256").update(readFileSync(join(consumerRoot, "canary-plan-draft.json"))).digest("hex")}`
-      : null,
+    authoring_document_sha256: authoringDocumentSha256,
     authoring_template: authoringTemplate,
     reviewer_independent_digest_verification: "pending",
   };
@@ -840,7 +849,12 @@ export function main(argv = process.argv.slice(2), deps = {}) {
 }
 
 /** Observe the released installer fail before any consumer write on a wrong anchor. */
-export function verifyWrongAnchorDenial(releaseDirectory, expectedAnchor, run = spawnSync, tag = CANARY_TAG) {
+export function verifyWrongAnchorDenial(
+  releaseDirectory,
+  expectedAnchor,
+  run = (binary, args, options) => spawnSync(binary, args, { ...options, windowsHide: true }),
+  tag = CANARY_TAG,
+) {
   if (!digestPattern.test(expectedAnchor)) throw new Error("wrong-anchor-input-invalid");
   const wrongAnchor = `sha256:${expectedAnchor[7] === "0" ? "1" : "0"}${expectedAnchor.slice(8)}`;
   const denyRoot = mkdtempSync(join(tmpdir(), "ut-canary-anchor-deny-"));
@@ -957,11 +971,10 @@ function verifySmoke(parsed, { now, run }) {
   try {
     runCli("doctor-setup-smoke", ["doctor", "--setup-smoke"]);
     runCli("doctor-consumer-profile", ["doctor", "--profile", "consumer-setup-smoke"]);
-    const authoringInput = readFileSync(join(consumerRoot, "canary-plan-draft.json"));
-    if (`sha256:${createHash("sha256").update(authoringInput).digest("hex")}` !== evidence.authoring_input_sha256)
-      throw new Error("consumer-authoring-input-drift");
-    runCli("plan-authoring", ["plan", "draft", "--manifest", join(consumerRoot, "canary-plan-draft.json")]);
-    runCli("plan-lint", ["plan", "lint"]);
+    const authoringDocument = readFileSync(join(consumerRoot, "docs", "design", "canary-function-spec.md"));
+    if (`sha256:${createHash("sha256").update(authoringDocument).digest("hex")}` !== evidence.authoring_document_sha256)
+      throw new Error("consumer-authoring-document-drift");
+    assertIssueFrontmatter(authoringDocument.toString("utf8"));
     runCli("db-rebuild", ["db", "rebuild", "--json"]);
     if (!existsSync(join(consumerRoot, ".ut-tdd", "harness.db")))
       throw new Error("consumer-local-db-missing");
@@ -1092,45 +1105,39 @@ export function verifyInstallEvidence(evidence, consumerRoot, removedPaths, expe
     throw new Error("verify-removed-paths-not-bound-to-install");
 }
 
-export function createConsumerPlan(consumerRoot, source) {
-  if (typeof source !== "string") throw new Error("consumer-plan-template-invalid");
+export function createConsumerIssueDesignDocument(consumerRoot, source) {
+  if (typeof source !== "string") throw new Error("consumer-design-template-invalid");
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/.exec(source);
-  if (!match) throw new Error("consumer-plan-template-invalid");
-  let frontmatter = match[1];
-  const replaceScalar = (key, value) => {
-    const pattern = new RegExp(`^${key}:.*$`, "m");
-    if (!pattern.test(frontmatter)) throw new Error(`consumer-plan-template-missing:${key}`);
-    frontmatter = frontmatter.replace(pattern, `${key}: ${value}`);
-  };
-  replaceScalar("plan_id", "PLAN-L2-999-canary-authoring");
-  replaceScalar("title", '"Canary consumer の設計起票"');
-  replaceScalar("drive", "agent");
-  replaceScalar("created", "2026-09-30");
-  replaceScalar("owner", '"Canary consumer"');
-  const generatesStart = frontmatter.indexOf("\ngenerates:\n");
-  const dependenciesStart = frontmatter.indexOf("\ndependencies:\n", generatesStart);
-  const relatedDocsStart = frontmatter.indexOf("\nrelated_docs:\n", dependenciesStart);
-  if (generatesStart < 0 || dependenciesStart < 0 || relatedDocsStart < 0)
-    throw new Error("consumer-plan-template-structure-invalid");
-  frontmatter = `${frontmatter.slice(0, generatesStart)}\ngenerates: []${frontmatter.slice(dependenciesStart, relatedDocsStart)}\nrelated_docs: []\nroute_signal: forward\nroute_mode: forward\nsub_doc: screen-list`;
-  const body = match[2].replaceAll(
-    "(本 PLAN でどの範囲の設計を凍結するかを 1-2 段落で記述)",
-    "配布された PLAN テンプレートから consumer 固有の draft を正規 CLI で起票する。",
+  if (!match) throw new Error("consumer-design-template-invalid");
+  const document = source.replace(
+    /^issue:\s*<Issue 番号>\s*$/m,
+    `issue: ${CANARY_ISSUE_NUMBER}`,
   );
-  const planPath = "docs/plans/PLAN-L2-999-canary-authoring.md";
-  mkdirSync(join(consumerRoot, "docs", "plans"), { recursive: true });
-  mkdirSync(join(consumerRoot, "docs", "governance"), { recursive: true });
-  writeFileSync(join(consumerRoot, "docs", "governance", "plan-admission-receipts.json"),
-    JSON.stringify({ schema_version: "ut-tdd.plan-admission-receipts/v1", records: [] }), "utf8");
-  writeFileSync(join(consumerRoot, "canary-plan-draft.json"), JSON.stringify({
-    version: 2,
-    command_id: "canary:plan-authoring",
-    plan_id: "PLAN-L2-999-canary-authoring",
-    recorded_at: "2026-09-30T00:00:00.000Z",
-    admission: { route_signal: "forward", route_mode: "forward", kind: "design", layer: "L2", drive: "agent", branch: "work/forward-canary", status: "draft", sub_doc: "screen-list" },
-    source: { path: planPath, content: `---\n${frontmatter}\n---\n${body}` },
-    projection: { path: "docs/governance/plan-admission-receipts.json" },
-  }), "utf8");
+  assertIssueFrontmatter(document);
+  const destination = "docs/design/canary-function-spec.md";
+  const target = join(consumerRoot, ...destination.split("/"));
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, document, { flag: "wx" });
+  return destination;
+}
+
+function assertIssueFrontmatter(source) {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(source);
+  if (!match) throw new Error("consumer-design-template-frontmatter-invalid");
+  const fields = new Map();
+  for (const line of match[1].split(/\r?\n/)) {
+    if (line.trim() === "" || /^\s*#/.test(line)) continue;
+    const field = /^([A-Za-z_][A-Za-z0-9_-]*):(?:[ \t]+(.*))?$/.exec(line);
+    if (!field) throw new Error("consumer-design-template-frontmatter-invalid");
+    const [, key, rawValue = ""] = field;
+    if (fields.has(key)) throw new Error("consumer-design-template-frontmatter-duplicate-key");
+    fields.set(key, rawValue.trim());
+  }
+  if (fields.has("plan"))
+    throw new Error("consumer-design-template-plan-field-forbidden");
+  const issue = fields.get("issue");
+  if (typeof issue !== "string" || !/^[1-9]\d*$/.test(issue) || !Number.isSafeInteger(Number(issue)))
+    throw new Error("consumer-design-template-issue-invalid");
 }
 
 export function makeAccessAuditModule(forbiddenPaths, accessLog, processLog) {

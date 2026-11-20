@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import {
   loadSystemSecretScanArtifacts,
   secretScanMessages,
 } from "../src/lint/secret-scan.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 describe("docs-wide secret scan", () => {
   it("U-DOCSECRET-001: detects credential families required by PLAN-L6-62", () => {
@@ -61,7 +62,7 @@ describe("docs-wide secret scan", () => {
       expect(paths).toContain("docs/plans/ok.md");
       expect(paths).toContain(".ut-tdd/memory/ok.md");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 

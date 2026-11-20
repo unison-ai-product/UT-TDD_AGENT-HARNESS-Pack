@@ -40,7 +40,7 @@ function attestation(
   request: ReviewAttestationRequest,
   attempt: number,
   exitCode: number,
-  model = "claude-opus-5",
+  model = "claude-opus-5-5",
 ): ReviewAttestation {
   return {
     provider: "claude",
@@ -60,7 +60,7 @@ function attestation(
 function verdictText(
   request: ReviewAttestationRequest,
   attempt: number,
-  model = "claude-opus-5",
+  model = "claude-opus-5-5",
   provider: "codex" | "claude" = "claude",
 ) {
   return [
@@ -89,7 +89,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       expect(first).toMatchObject({ ok: true, attempt: 1 });
       if (!first.ok) return;
@@ -116,15 +116,15 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-sonnet-5",
+        model: "claude-fable-5-2",
       });
       expect(second).toMatchObject({ ok: true, attempt: 2 });
       if (!second.ok) return;
-      writeFileSync(second.path, verdictText(request, 2, "claude-sonnet-5"), "utf8");
+      writeFileSync(second.path, verdictText(request, 2, "claude-fable-5-2"), "utf8");
       const projected = projectReviewVerdict({
         repoRoot: root,
         request,
-        attestation: attestation(request, 2, 0, "claude-sonnet-5"),
+        attestation: attestation(request, 2, 0, "claude-fable-5-2"),
         verdictFile: second.path,
       });
       expect(projected).toMatchObject({ ok: true });
@@ -187,7 +187,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       writeFileSync(first.path, verdictText(request, 1), "utf8");
@@ -204,15 +204,15 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-sonnet-5",
+        model: "claude-fable-5-2",
       });
       if (!second.ok) throw new Error(second.reason);
-      writeFileSync(second.path, verdictText(request, 2, "claude-sonnet-5"), "utf8");
+      writeFileSync(second.path, verdictText(request, 2, "claude-fable-5-2"), "utf8");
       expect(
         projectReviewVerdict({
           repoRoot: root,
           request,
-          attestation: attestation(request, 2, 8, "claude-sonnet-5"),
+          attestation: attestation(request, 2, 8, "claude-fable-5-2"),
           verdictFile: second.path,
         }),
       ).toEqual({ ok: false, reason: "reviewer_exit_nonzero" });
@@ -221,7 +221,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       expect(third).toMatchObject({ ok: true, attempt: 3 });
       if (!third.ok) return;
@@ -262,15 +262,18 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
           repoRoot: root,
           request,
           provider: testCase.reason === "same_family_reviewer_denied" ? expectedProvider : "claude",
-          model: "claude-opus-5",
+          model:
+            testCase.reason === "same_family_reviewer_denied" && expectedProvider === "codex"
+              ? "gpt-6.1-sol"
+              : "claude-opus-5-5",
         });
         if (!first.ok) throw new Error(first.reason);
         if (testCase.name === "missing custody envelope") {
           writeFileSync(first.path, "VERDICT: PASS\n", "utf8");
         } else if (testCase.reason !== "verdict_file_missing") {
-          writeFileSync(first.path, verdictText(request, 1, "claude-opus-5", "claude"), "utf8");
+          writeFileSync(first.path, verdictText(request, 1, "claude-opus-5-5", "claude"), "utf8");
         }
-        const firstAttestation = attestation(request, 1, 0, "claude-opus-5");
+        const firstAttestation = attestation(request, 1, 0, "claude-opus-5-5");
         if (testCase.reason === "review_identity_mismatch") firstAttestation.head = otherHead;
         if (testCase.reason === "invalid_review_attestation") firstAttestation.role = "";
         if (testCase.reason === "same_family_reviewer_denied") firstAttestation.provider = "claude";
@@ -292,20 +295,17 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
           ]),
         );
 
+        const secondModel = expectedProvider === "codex" ? "gpt-6.1-sol" : "claude-fable-5-2";
         const second = beginReviewAttempt({
           repoRoot: root,
           request,
           provider: expectedProvider,
-          model: "claude-sonnet-5",
+          model: secondModel,
         });
         expect(second).toMatchObject({ ok: true, attempt: 2 });
         if (!second.ok) return;
-        writeFileSync(
-          second.path,
-          verdictText(request, 2, "claude-sonnet-5", expectedProvider),
-          "utf8",
-        );
-        const secondAttestation = attestation(request, 2, 0, "claude-sonnet-5");
+        writeFileSync(second.path, verdictText(request, 2, secondModel, expectedProvider), "utf8");
+        const secondAttestation = attestation(request, 2, 0, secondModel);
         secondAttestation.provider = expectedProvider;
         expect(
           projectReviewVerdict({
@@ -328,7 +328,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       writeFileSync(first.path, verdictText(request, 1), "utf8");
@@ -356,7 +356,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       writeFileSync(first.path, verdictText(request, 1), "utf8");
@@ -365,7 +365,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         request,
         attempt: 1,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         exitCode: 7,
         verdictPath: first.path,
         now: "2026-08-28T00:01:00.000Z",
@@ -383,7 +383,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
           repoRoot: root,
           request,
           provider: "claude",
-          model: "claude-sonnet-5",
+          model: "claude-fable-5-2",
         }),
       ).toEqual({
         ok: false,
@@ -401,7 +401,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       const recorded = recordReviewAttemptFailure({
@@ -409,7 +409,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         request,
         attempt: 1,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         exitCode: 7,
         verdictPath: first.path,
         now: "2026-08-28T00:01:00.000Z",
@@ -430,7 +430,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
           repoRoot: root,
           request,
           provider: "claude",
-          model: "claude-sonnet-5",
+          model: "claude-fable-5-2",
         }),
       ).toEqual({
         ok: false,
@@ -448,7 +448,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       writeFileSync(first.path, verdictText(request, 1), "utf8");
@@ -489,7 +489,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         exactHead: request.exactHead,
         verdictPath: first.path,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         exitCode: 7,
         reason: "reviewer_exit_nonzero",
       });
@@ -500,7 +500,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         exactHead: request.exactHead,
         verdictPath: first.path,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         exitCode: 9,
         reason: "attempt_outcome_conflict",
         oldAttemptDigest: firstFailure.verdictDigest,
@@ -528,7 +528,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-sonnet-5",
+        model: "claude-fable-5-2",
       });
       expect(blocked).toEqual({ ok: false, reason: "attempt_outcome_indeterminate" });
       expect(readFileSync(auditPath)).toEqual(auditBeforeBegin);
@@ -561,7 +561,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       const recorded = recordReviewAttemptFailure({
@@ -569,7 +569,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         request,
         attempt: 1,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
         exitCode: 7,
         verdictPath: first.path,
         now: "2026-08-28T00:01:00.000Z",
@@ -590,7 +590,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
           repoRoot: root,
           request,
           provider: "claude",
-          model: "claude-sonnet-5",
+          model: "claude-fable-5-2",
         }),
       ).toEqual({ ok: false, reason: "attempt_outcome_indeterminate" });
     } finally {
@@ -605,7 +605,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       if (!first.ok) throw new Error(first.reason);
       writeFileSync(first.path, verdictText(request, 1), "utf8");
@@ -638,7 +638,7 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         repoRoot: root,
         request,
         provider: "claude",
-        model: "claude-opus-5",
+        model: "claude-opus-5-5",
       });
       expect(retry).toMatchObject({ ok: true, attempt: 2 });
       if (!retry.ok) throw new Error(retry.reason);
@@ -657,7 +657,12 @@ describe("PLAN-L7-520 append-only receipt supersession", () => {
         ),
       ).toHaveLength(1);
       expect(
-        beginReviewAttempt({ repoRoot: root, request, provider: "claude", model: "claude-opus-5" }),
+        beginReviewAttempt({
+          repoRoot: root,
+          request,
+          provider: "claude",
+          model: "claude-opus-5-5",
+        }),
       ).toEqual({ ok: false, reason: "attempt_outcome_indeterminate" });
     } finally {
       cleanup(root);

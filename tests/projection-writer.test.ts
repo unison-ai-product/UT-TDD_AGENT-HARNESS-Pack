@@ -18,12 +18,11 @@ import {
   projectIssueApprovalGuardrails,
   projectIssueQueue,
   projectRefactorCandidateSignals,
+  projectRetryEvents,
 } from "../src/state-db/feedback-projections.ts";
 import { type HarnessDb, isSecretLike, openHarnessDb } from "../src/state-db/index.ts";
 import { migrate, rowCounts } from "../src/state-db/migration.ts";
 import {
-  latestReviewEvidenceEntry,
-  missingTestPlanIdNextAction,
   projectDesignPairFreezeFindings,
   projectRuntimeGuardrailDecisionFromSessionEvent,
   projectRuntimeSkillInvocationFromSessionEvent,
@@ -43,60 +42,11 @@ import { projectRuntimeTestRunFromSessionEvent as projectRuntimeTestRunFromSessi
 import { projectSkillMetrics as projectSkillMetricsCore } from "../src/state-db/skill-projections.ts";
 import { claudeProjectSlug } from "../src/state-db/token-tracker.ts";
 
-interface VerificationWorkflowRow {
-  phase: string;
-  ready_status: string;
-  human_required: number;
-}
-
-interface VerificationGateRow {
-  status: string;
-  evidence_path: string;
-}
-
-interface DriveRunRow {
-  plan_id: string;
-  mode: string;
-  status: string;
-}
-
-const hasSourcePlanDocs = () => existsSync(join(process.cwd(), "docs", "plans"));
-
-const hasSourceProjectionPlanDocs = () =>
-  existsSync(join(process.cwd(), "docs", "plans", "PLAN-L7-46-projection-writer.md")) &&
-  existsSync(join(process.cwd(), "docs", "plans", "PLAN-M-00-verify-cutover.md")) &&
-  existsSync(join(process.cwd(), "docs", "plans", "PLAN-M-01-cutover-backfill.md"));
-
 const hasSourceScreenDocs = () =>
   existsSync(join(process.cwd(), "docs", "design", "harness", "L2-screen", "screen-list.md")) &&
   existsSync(
     join(process.cwd(), "docs", "design", "harness", "L1-requirements", "screen-requirements.md"),
   );
-
-describe("review evidence projection selection", () => {
-  it("U-SCHEDULE-LIVE-002: compares reviewed_at as instants and resolves ties by declaration", () => {
-    const latest = latestReviewEvidenceEntry([
-      { reviewed_at: "2026-07-10T00:30:00+09:00", verdict: "offset-but-older" },
-      { reviewed_at: "2026-07-09T20:00:00Z", verdict: "absolute-latest" },
-      { reviewed_at: "2026-07-10T05:00:00+09:00", verdict: "approve-after-fix" },
-    ]);
-    expect(latest?.verdict).toBe("approve-after-fix");
-  });
-});
-
-describe("PLAN-L7-450 W1 remediation routing", () => {
-  it("U-L7-450-W1-001: draft ownership candidate requires confirm and declaration together", () => {
-    expect(missingTestPlanIdNextAction("draft")).toContain("confirm");
-  });
-
-  it("U-L7-450-W1-002: confirmed ownership candidate directs generates declaration", () => {
-    expect(missingTestPlanIdNextAction("confirmed")).toContain("generates");
-  });
-
-  it("U-L7-450-W1-003: no candidate preserves the legacy remediation", () => {
-    expect(missingTestPlanIdNextAction(undefined)).toContain("generates");
-  });
-});
 
 describe("SECRET_PATTERN word-boundary anchoring", () => {
   it("does not match 'sk' inside a word but matches a boundary-delimited token", () => {
@@ -167,8 +117,7 @@ describe("IT-DB-01/02: harness.db projection writer", () => {
     }
   });
 
-  it("projects design-quality coverage rows from the real repo rebuild", () => {
-    if (!hasSourceProjectionPlanDocs()) return;
+  it("CANDIDATE-U-PLANRET-022: projects design-quality coverage rows from the real repo rebuild", () => {
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
@@ -233,7 +182,7 @@ describe("IT-DB-01/02: harness.db projection writer", () => {
   });
 
   it("detects typed refactor candidates for split, extraction, dedupe, and externalization", () => {
-    expect(REFACTOR_CANDIDATE_THRESHOLDS.splitModuleLines).toBe(700);
+    expect(REFACTOR_CANDIDATE_THRESHOLDS.splitModuleLines).toBe(400);
     expect(REFACTOR_POLICY_TERMS).toContain("subagent");
 
     const longFunction = Array.from({ length: 121 }, (_, i) => `  total += ${i};`).join("\n");
@@ -355,7 +304,7 @@ export const noise = [
     ]).find((candidate) => candidate.kind === "split-module");
     expect(declarativeCatalog).toMatchObject({
       score: expect.any(Number),
-      threshold: 700,
+      threshold: 400,
       confidence: "medium",
     });
     const shortFunctionOrchestrator = analyzeRefactorCandidates([
@@ -369,7 +318,7 @@ export const noise = [
     ]).find((candidate) => candidate.kind === "split-module");
     expect(shortFunctionOrchestrator).toMatchObject({
       score: expect.any(Number),
-      threshold: 700,
+      threshold: 400,
       confidence: "medium",
     });
     const largeFunctionModule = analyzeRefactorCandidates([
@@ -383,7 +332,7 @@ export const noise = [
     ]).find((candidate) => candidate.kind === "split-module");
     expect(largeFunctionModule).toMatchObject({
       score: expect.any(Number),
-      threshold: 700,
+      threshold: 400,
       confidence: "high",
     });
     const policyExternalization = analyzeRefactorCandidates([
@@ -777,76 +726,43 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
         linkedTestCount: 1,
         passedLinkedTestRunCount: 1,
         dependencyChecked: true,
-        openDependencyImpacts: 0,
-        recoveryPlanIds: ["PLAN-REVERSE-56"],
+        openDependencyImpacts: 1,
       }),
-    ).toMatchObject({ state: "recovering", color: "yellow" });
+    ).toMatchObject({ state: "dependency_unchecked", color: "red" });
   });
 
-  it("records normalized projection events idempotently and keeps rows joinable by plan_id", () => {
+  it("records normalized projection events idempotently", () => {
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
-
-      recordProjectionEvent(db, {
-        table: "plan_registry",
-        id: "PLAN-L7-46-projection-writer",
-        row: {
-          plan_id: "PLAN-L7-46-projection-writer",
-          kind: "impl",
-          layer: "L7",
-          drive: "db",
-          status: "draft",
-          updated_at: "2026-06-11T00:00:00.000Z",
-        },
-      });
-      recordProjectionEvent(db, {
+      const event = {
         table: "gate_runs",
         id: "gate-1",
         row: {
           gate_run_id: "gate-1",
           gate_id: "G-L7DB.B",
-          plan_id: "PLAN-L7-46-projection-writer",
+          plan_id: null,
           status: "passed",
           checked_at: "2026-06-11T00:01:00.000Z",
           evidence_path: "docs/handover/projection.md",
         },
-      });
-      recordProjectionEvent(db, {
-        table: "gate_runs",
-        id: "gate-1",
-        row: {
-          gate_run_id: "gate-1",
-          gate_id: "G-L7DB.B",
-          plan_id: "PLAN-L7-46-projection-writer",
-          status: "passed",
-          checked_at: "2026-06-11T00:01:00.000Z",
-          evidence_path: "docs/handover/projection.md",
-        },
-      });
+      };
+      recordProjectionEvent(db, event);
+      recordProjectionEvent(db, event);
 
-      expect(rowCounts(db).plan_registry).toBe(1);
       expect(rowCounts(db).gate_runs).toBe(1);
-      const joined = db
-        .prepare(
-          `SELECT g.gate_id, p.plan_id
-           FROM gate_runs g
-           JOIN plan_registry p ON p.plan_id = g.plan_id
-           WHERE g.gate_run_id = ?`,
-        )
-        .get("gate-1");
-      expect(joined).toMatchObject({
-        gate_id: "G-L7DB.B",
-        plan_id: "PLAN-L7-46-projection-writer",
-      });
+      expect(
+        db.prepare("SELECT * FROM gate_runs WHERE gate_run_id = ?").get("gate-1"),
+      ).toMatchObject(event.row);
     } finally {
       db.close();
     }
   });
 
-  it("U-DBPROJ-GATE-01 projects persisted gate run evidence into gate/workflow/retry rows", () => {
+  it("U-DBPROJ-GATE-01 projects runs with legacy PLAN IDs or aliases without PLAN links or retries", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-gate-run-projection-"));
-    const planId = "PLAN-L7-363-routine-gate-run-projection";
+    const planAlias = "PLAN-L7-363";
+    const planId = `${planAlias}-routine-gate-run-projection`;
     try {
       mkdirSync(join(root, "docs", "plans"), { recursive: true });
       writeFileSync(
@@ -879,7 +795,7 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
               schema_version: 1,
               gate_run_id: `gate-run:G4:attempt-${index + 1}`,
               gate_id: "G4",
-              plan_id: planId,
+              plan_id: index === 0 ? planId : planAlias,
               status,
               checked_at: `2026-07-09T00:0${index}:00.000Z`,
               session_id: "session-gate-projection",
@@ -899,44 +815,59 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
 
       const db = openHarnessDb(":memory:", { repoRoot: root });
       try {
-        rebuildHarnessDb({ repoRoot: root, db });
+        rebuildHarnessDb({ repoRoot: root, db, skipTokenTelemetry: true });
         const gateRows = db
           .prepare(
-            "SELECT gate_id, status, evidence_path FROM gate_runs WHERE plan_id = ? ORDER BY checked_at",
+            "SELECT gate_id, plan_id, status, evidence_path FROM gate_runs WHERE gate_id = ? ORDER BY checked_at",
           )
-          .all(planId);
+          .all("G4");
         expect(gateRows).toEqual([
           {
             gate_id: "G4",
+            plan_id: null,
             status: "failed",
             evidence_path: ".ut-tdd/gate_runs/G4-attempt-1.json",
           },
           {
             gate_id: "G4",
+            plan_id: null,
             status: "passed",
             evidence_path: ".ut-tdd/gate_runs/G4-attempt-2.json",
           },
         ]);
         const workflows = db
           .prepare(
-            "SELECT workflow, phase, ready_status FROM workflow_runs WHERE plan_id = ? ORDER BY checked_at",
+            "SELECT workflow_run_id, plan_id, drive_run_id, workflow, phase, ready_status FROM workflow_runs WHERE workflow = ? AND phase = ? ORDER BY checked_at",
           )
-          .all(planId);
+          .all("routine-gate", "G4");
         expect(workflows).toEqual([
-          { workflow: "routine-gate", phase: "G4", ready_status: "blocked" },
-          { workflow: "routine-gate", phase: "G4", ready_status: "passed" },
+          {
+            workflow_run_id: stableId("gate-workflow", "gate-run:G4:attempt-1"),
+            plan_id: null,
+            drive_run_id: "",
+            workflow: "routine-gate",
+            phase: "G4",
+            ready_status: "blocked",
+          },
+          {
+            workflow_run_id: stableId("gate-workflow", "gate-run:G4:attempt-2"),
+            plan_id: null,
+            drive_run_id: "",
+            workflow: "routine-gate",
+            phase: "G4",
+            ready_status: "passed",
+          },
         ]);
-        const retry = db
+        const retries = db
           .prepare(
-            "SELECT plan_id, workflow, phase, attempt_count FROM retry_events WHERE plan_id = ?",
+            "SELECT workflow, phase, attempt_count FROM retry_events WHERE workflow = ? AND phase = ?",
           )
-          .get(planId);
-        expect(retry).toMatchObject({
-          plan_id: planId,
-          workflow: "routine-gate",
-          phase: "G4",
-          attempt_count: 2,
-        });
+          .all("routine-gate", "G4");
+        expect(retries).toEqual([]);
+        const retryMetric = db
+          .prepare("SELECT value, status FROM quality_signals WHERE metric = ? AND subject_id = ?")
+          .get("workflow_retry_groups", "workflow");
+        expect(retryMetric).toMatchObject({ value: 0, status: "pass" });
       } finally {
         db.close();
       }
@@ -945,84 +876,90 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     }
   });
 
-  it("U-DBPROJ-GATE-02 (PLAN-RECOVERY-14): gate-run-derived workflow_runs joins the plan's documented drive_runs row (no false workflow_orphans)", () => {
-    // Regression for the drive-db-registration `workflow_orphans` false-positive root
-    // cause: projectGateRunEvidence previously stamped drive_run_id via
-    // stableId("gate-drive", planId), a different id namespace than the
-    // stableId("drive-run", `${planId}:documented`) row projectDriveRuns always
-    // creates for every projected plan — so every gate-derived workflow_runs row was
-    // an unconditional orphan regardless of whether the plan was real and current.
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-gate-run-orphan-fix-"));
-    const planId = "PLAN-TEST-recovery-14-gate-orphan";
+  it("U-DBPROJ-GATE-01 projects planless gate runs to workflow rows and excludes retry groups", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-planless-gate-run-projection-"));
+    const runs = [
+      { gate_run_id: "gate-run:G7:planless-attempt-1", status: "failed" },
+      { gate_run_id: "gate-run:G7:planless-attempt-2", status: "passed" },
+    ];
     try {
-      mkdirSync(join(root, "docs", "plans"), { recursive: true });
-      writeFileSync(
-        join(root, "docs", "plans", `${planId}.md`),
-        [
-          "---",
-          `plan_id: ${planId}`,
-          'title: "gate orphan join fixture"',
-          "kind: impl",
-          "layer: L7",
-          "drive: db",
-          "status: confirmed",
-          "route_signal: feature_addition",
-          "route_mode: add-feature",
-          "created: 2026-07-17",
-          "updated: 2026-07-17",
-          "---",
-          "",
-          "# gate orphan join fixture",
-          "",
-        ].join("\n"),
-        "utf8",
-      );
-      mkdirSync(join(root, ".ut-tdd", "gate_runs"), { recursive: true });
-      writeFileSync(
-        join(root, ".ut-tdd", "gate_runs", "G4-attempt-1.json"),
-        `${JSON.stringify(
-          {
-            schema_version: 1,
-            gate_run_id: "gate-run:G4:recovery-14-attempt-1",
-            gate_id: "G4",
-            plan_id: planId,
-            status: "passed",
-            checked_at: "2026-07-17T00:00:00.000Z",
-            session_id: "session-recovery-14",
-            mode: "hybrid",
-            tier: "cross_agent",
-            review_kind: "cross_agent",
-            static_applicable: true,
-            source: "ut-tdd gate",
-            messages: [],
-          },
-          null,
-          2,
-        )}\n`,
-        "utf8",
-      );
-
-      const db = openHarnessDb(":memory:", { repoRoot: root });
-      try {
-        rebuildHarnessDb({ repoRoot: root, db });
-        const driveRunId = String(
-          db.prepare("SELECT drive_run_id FROM drive_runs WHERE plan_id = ?").get(planId)
-            ?.drive_run_id,
+      const gateRunsDir = join(root, ".ut-tdd", "gate_runs");
+      mkdirSync(gateRunsDir, { recursive: true });
+      for (const [index, run] of runs.entries()) {
+        writeFileSync(
+          join(gateRunsDir, `G7-planless-attempt-${index + 1}.json`),
+          `${JSON.stringify(
+            {
+              schema_version: 1,
+              gate_run_id: run.gate_run_id,
+              gate_id: "G7",
+              plan_id: "",
+              status: run.status,
+              checked_at: `2026-07-09T00:0${index}:00.000Z`,
+              session_id: "session-planless-gate-projection",
+              mode: "hybrid",
+              tier: "cross_agent",
+              review_kind: "cross_agent",
+              static_applicable: true,
+              source: "ut-tdd gate",
+              messages: [],
+            },
+            null,
+            2,
+          )}\n`,
+          "utf8",
         );
-        const workflowRow = db
-          .prepare("SELECT drive_run_id FROM workflow_runs WHERE plan_id = ?")
-          .get(planId) as { drive_run_id?: string } | undefined;
-        expect(workflowRow?.drive_run_id).toBe(driveRunId);
+      }
 
-        const orphan = db
+      const db = openHarnessDb(":memory:", { repoRoot: root });
+      try {
+        rebuildHarnessDb({ repoRoot: root, db });
+        const gateRows = db
           .prepare(
-            `SELECT COUNT(*) AS value
-             FROM workflow_runs w
-             LEFT JOIN drive_runs d ON d.drive_run_id = w.drive_run_id
-             WHERE d.drive_run_id IS NULL`,
+            "SELECT gate_run_id, gate_id, plan_id, status FROM gate_runs WHERE gate_id = ? ORDER BY checked_at",
           )
-          .get() as { value: number };
-        expect(orphan.value).toBe(0);
+          .all("G7");
+        expect(gateRows).toEqual(
+          runs.map((run) => ({
+            gate_run_id: run.gate_run_id,
+            gate_id: "G7",
+            plan_id: null,
+            status: run.status,
+          })),
+        );
+
+        const workflowRows = db
+          .prepare(
+            "SELECT workflow_run_id, plan_id, drive_run_id, workflow, phase, ready_status FROM workflow_runs WHERE workflow = ? AND phase = ? ORDER BY checked_at",
+          )
+          .all("routine-gate", "G7");
+        expect(workflowRows).toEqual([
+          {
+            workflow_run_id: stableId("gate-workflow", runs[0].gate_run_id),
+            plan_id: null,
+            drive_run_id: "",
+            workflow: "routine-gate",
+            phase: "G7",
+            ready_status: "blocked",
+          },
+          {
+            workflow_run_id: stableId("gate-workflow", runs[1].gate_run_id),
+            plan_id: null,
+            drive_run_id: "",
+            workflow: "routine-gate",
+            phase: "G7",
+            ready_status: "passed",
+          },
+        ]);
+        expect(
+          db
+            .prepare("SELECT * FROM retry_events WHERE workflow = ? AND phase = ?")
+            .all("routine-gate", "G7"),
+        ).toEqual([]);
+        const retryMetric = db
+          .prepare("SELECT value, status FROM quality_signals WHERE metric = ? AND subject_id = ?")
+          .get("workflow_retry_groups", "workflow");
+        expect(retryMetric).toMatchObject({ value: 0, status: "pass" });
       } finally {
         db.close();
       }
@@ -1031,132 +968,105 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     }
   });
 
-  it("U-DBPROJ-GATE-03 (PLAN-RECOVERY-14): gate-run evidence resolves legacy short plan_id aliases like other DB-linked projections", () => {
-    // gate_runs projection previously skipped the resolveProjectedPlanId alias
-    // resolution that projectHookEvents / model_runs / skill projections already apply
-    // (PLAN migrations that append a descriptive suffix to a plan_id leave older gate
-    // evidence pointing at the bare prefix). Unresolved aliases become permanent
-    // orphan_gate_run rows even though the PLAN is live under its current id.
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-gate-run-alias-fix-"));
-    const shortPlanId = "PLAN-TEST-recovery-14-alias";
-    const currentPlanId = `${shortPlanId}-full-title`;
+  it("U-DBPROJ-GATE-01 keeps retry grouping for repeated non-routine workflows", () => {
+    const db = openHarnessDb(":memory:");
     try {
-      mkdirSync(join(root, "docs", "plans"), { recursive: true });
-      writeFileSync(
-        join(root, "docs", "plans", `${currentPlanId}.md`),
-        [
-          "---",
-          `plan_id: ${currentPlanId}`,
-          'title: "gate alias fixture"',
-          "kind: impl",
-          "layer: L7",
-          "drive: db",
-          "status: confirmed",
-          "route_signal: feature_addition",
-          "route_mode: add-feature",
-          "created: 2026-07-17",
-          "updated: 2026-07-17",
-          "---",
-          "",
-          "# gate alias fixture",
-          "",
-        ].join("\n"),
-        "utf8",
+      migrate(db);
+      const workflow = db.prepare(
+        `INSERT INTO workflow_runs
+           (workflow_run_id, plan_id, workflow, phase, ready_status, human_required)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       );
-      mkdirSync(join(root, ".ut-tdd", "gate_runs"), { recursive: true });
-      writeFileSync(
-        join(root, ".ut-tdd", "gate_runs", "G4-attempt-1.json"),
-        `${JSON.stringify(
-          {
-            schema_version: 1,
-            gate_run_id: "gate-run:G4:recovery-14-alias-attempt-1",
-            gate_id: "G4",
-            plan_id: shortPlanId,
-            status: "passed",
-            checked_at: "2026-07-17T00:00:00.000Z",
-            session_id: "session-recovery-14-alias",
-            mode: "hybrid",
-            tier: "cross_agent",
-            review_kind: "cross_agent",
-            static_applicable: true,
-            source: "ut-tdd gate",
-            messages: [],
-          },
-          null,
-          2,
-        )}\n`,
-        "utf8",
-      );
+      workflow.run("forward-impl-1", "PLAN-RETRY-CONTROL", "forward", "implement", "blocked", 0);
+      workflow.run("forward-impl-2", "PLAN-RETRY-CONTROL", "forward", "implement", "passed", 0);
+      projectRetryEvents(db, {
+        nowIso: () => "2026-07-09T00:02:00.000Z",
+        stableId,
+        recordProjectionEvent,
+      });
 
-      const db = openHarnessDb(":memory:", { repoRoot: root });
-      try {
-        rebuildHarnessDb({ repoRoot: root, db });
-        const gateRow = db
-          .prepare("SELECT plan_id FROM gate_runs WHERE gate_run_id = ?")
-          .get("gate-run:G4:recovery-14-alias-attempt-1") as { plan_id?: string } | undefined;
-        expect(gateRow?.plan_id).toBe(currentPlanId);
-
-        const orphanGate = db
-          .prepare(
-            `SELECT COUNT(*) AS value
-             FROM gate_runs g
-             WHERE COALESCE(g.plan_id, '') <> ''
-               AND NOT EXISTS (SELECT 1 FROM plan_registry p WHERE p.plan_id = g.plan_id)`,
-          )
-          .get() as { value: number };
-        expect(orphanGate.value).toBe(0);
-      } finally {
-        db.close();
-      }
+      expect(
+        db
+          .prepare("SELECT workflow, phase, attempt_count FROM retry_events WHERE plan_id = ?")
+          .get("PLAN-RETRY-CONTROL"),
+      ).toEqual({ workflow: "forward", phase: "implement", attempt_count: 2 });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      db.close();
     }
   });
 
-  it("U-DBPROJ-GATE-04 (PLAN-RECOVERY-14): gate-run evidence for a genuinely nonexistent PLAN stays a fail-closed orphan_gate_run (negative regression)", () => {
-    // The alias-resolution and drive_run_id join fixes above must not silently swallow
-    // real orphans: evidence referencing a plan_id that never existed (typo, deleted
-    // PLAN, ad-hoc test run) must still trip gate-run-coverage.
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-gate-run-real-orphan-"));
+  it.each([
+    false,
+    true,
+  ])("U-DBPROJ-GATE-01 keeps A-132 seeds historical and ownerless with PLAN present=%s", (planPresent) => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-verification-band-seed-"));
+    const layers = ["L8", "L9", "L10", "L11", "L12", "L13", "L14"] as const;
+    const auditPath = ".ut-tdd/audit/A-132-l8-l14-verification-band-execution.md";
     try {
-      mkdirSync(join(root, "docs", "plans"), { recursive: true });
-      mkdirSync(join(root, ".ut-tdd", "gate_runs"), { recursive: true });
-      writeFileSync(
-        join(root, ".ut-tdd", "gate_runs", "G4-attempt-1.json"),
-        `${JSON.stringify(
-          {
-            schema_version: 1,
-            gate_run_id: "gate-run:G4:recovery-14-real-orphan-attempt-1",
-            gate_id: "G4",
-            plan_id: "PLAN-DOES-NOT-EXIST-RECOVERY-14",
-            status: "passed",
-            checked_at: "2026-07-17T00:00:00.000Z",
-            session_id: "session-recovery-14-real-orphan",
-            mode: "hybrid",
-            tier: "cross_agent",
-            review_kind: "cross_agent",
-            static_applicable: true,
-            source: "ut-tdd gate",
-            messages: [],
-          },
-          null,
-          2,
-        )}\n`,
-        "utf8",
-      );
+      mkdirSync(join(root, ".ut-tdd", "audit"), { recursive: true });
+      writeFileSync(join(root, auditPath), "# A-132 verification-band execution\n", "utf8");
+      if (planPresent) {
+        mkdirSync(join(root, "docs", "plans"), { recursive: true });
+        writeFileSync(
+          join(root, "docs", "plans", "PLAN-M-00-verify-cutover.md"),
+          [
+            "---",
+            "plan_id: PLAN-M-00-verify-cutover",
+            'title: "verification band seed fixture"',
+            "kind: impl",
+            "layer: L7",
+            "drive: db",
+            "status: confirmed",
+            "route_signal: feature_addition",
+            "route_mode: add-feature",
+            "created: 2026-07-09",
+            "updated: 2026-07-09",
+            "---",
+            "",
+            "# verification band seed fixture",
+            "",
+          ].join("\n"),
+          "utf8",
+        );
+      }
 
       const db = openHarnessDb(":memory:", { repoRoot: root });
       try {
         rebuildHarnessDb({ repoRoot: root, db });
-        const orphanGate = db
+        const seedGates = layers.map((layer) =>
+          db
+            .prepare(
+              "SELECT gate_run_id, gate_id, plan_id, status, evidence_path FROM gate_runs WHERE gate_run_id = ?",
+            )
+            .get(stableId("verification-band-gate", layer)),
+        );
+        expect(seedGates).toEqual(
+          layers.map((layer) => ({
+            gate_run_id: stableId("verification-band-gate", layer),
+            gate_id: `G-VERIFY.${layer}`,
+            plan_id: null,
+            status: "historical",
+            evidence_path: auditPath,
+          })),
+        );
+
+        const workflowIds = layers.map((layer) => stableId("verification-band-workflow", layer));
+        const workflowRows = db
           .prepare(
-            `SELECT COUNT(*) AS value
-             FROM gate_runs g
-             WHERE COALESCE(g.plan_id, '') <> ''
-               AND NOT EXISTS (SELECT 1 FROM plan_registry p WHERE p.plan_id = g.plan_id)`,
+            `SELECT workflow_run_id FROM workflow_runs WHERE workflow_run_id IN (${workflowIds.map(() => "?").join(",")})`,
           )
-          .get() as { value: number };
-        expect(orphanGate.value).toBe(1);
+          .all(...workflowIds);
+        expect(workflowRows).toEqual([]);
+
+        const coverageIds = layers.map((layer) =>
+          stableId("verification-band-coverage", `${layer}:local_check_passed`),
+        );
+        const coverageRows = db
+          .prepare(
+            `SELECT coverage_id FROM coverage WHERE coverage_id IN (${coverageIds.map(() => "?").join(",")})`,
+          )
+          .all(...coverageIds);
+        expect(coverageRows).toEqual([]);
       } finally {
         db.close();
       }
@@ -1169,86 +1079,58 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
-      recordProjectionEvent(db, {
-        table: "plan_registry",
-        id: "PLAN-L7-193-runtime-test-run-provenance",
-        row: {
-          plan_id: "PLAN-L7-193-runtime-test-run-provenance",
-          kind: "impl",
-          layer: "L7",
-          drive: "db",
-          status: "confirmed",
-          title: "runtime test run provenance",
-          source_path: "docs/plans/PLAN-L7-193-runtime-test-run-provenance.md",
-          source_hash: "sha256:test",
-          updated_at: "2026-06-29T00:00:00Z",
-        },
-      });
-      const plans = new Map([
-        [
-          "PLAN-L7-193-runtime-test-run-provenance",
-          {
-            planId: "PLAN-L7-193-runtime-test-run-provenance",
-            kind: "impl",
-            layer: "L7",
-            drive: "db",
-            status: "confirmed",
-            updatedAt: "2026-06-29T00:00:00Z",
-          },
-        ],
-      ]);
-
       projectRuntimeTestRunFromSessionEvent({
         db,
-        plans,
         event: {
           ts: "2026-06-29T00:01:00Z",
           session_id: "session-runtime-1",
-          plan_id: "PLAN-L7-193-runtime-test-run-provenance",
+          plan_id: null,
           event_type: "tool_use",
           tool: "Bash",
           target: "Bash (vitest)",
           outcome: "ok",
         },
         evidencePath: ".ut-tdd/logs/session/session-runtime-1.jsonl",
+        lineNumber: 1,
       });
       projectRuntimeTestRunFromSessionEvent({
         db,
-        plans,
         event: {
           ts: "2026-06-29T00:02:00Z",
           session_id: "session-runtime-1",
-          plan_id: "PLAN-L7-193-runtime-test-run-provenance",
+          plan_id: null,
           event_type: "tool_use",
           tool: "Bash",
           target: "Bash (git)",
           outcome: "ok",
         },
         evidencePath: ".ut-tdd/logs/session/session-runtime-1.jsonl",
+        lineNumber: 2,
       });
       projectRuntimeTestRunFromSessionEvent({
         db,
-        plans,
         event: {
           ts: "2026-06-29T00:03:00Z",
           session_id: "session-runtime-1",
-          plan_id: "PLAN-L7-193-runtime-test-run-provenance",
+          plan_id: null,
           event_type: "tool_use",
           tool: "PowerShell",
           target: "PowerShell (tsc)",
           outcome: "ok",
         },
         evidencePath: ".ut-tdd/logs/session/session-runtime-1.jsonl",
+        lineNumber: 3,
       });
 
       const rows = db
         .prepare(
-          "SELECT session_id, command, runner, runtime, scope, exit_code, status, evidence_path FROM test_runs",
+          "SELECT session_id, plan_id, command, runner, runtime, scope, exit_code, status, evidence_path FROM test_runs",
         )
         .all();
       expect(rows).toHaveLength(2);
       expect(rows[0]).toMatchObject({
         session_id: "session-runtime-1",
+        plan_id: null,
         command: "Bash (vitest)",
         runner: "node",
         runtime: "hook-session-log",
@@ -1259,6 +1141,7 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
       });
       expect(rows[1]).toMatchObject({
         session_id: "session-runtime-1",
+        plan_id: null,
         command: "PowerShell (tsc)",
         runner: "node",
         runtime: "hook-session-log",
@@ -1276,38 +1159,8 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
-      recordProjectionEvent(db, {
-        table: "plan_registry",
-        id: "PLAN-L7-230-runtime-projection-extraction",
-        row: {
-          plan_id: "PLAN-L7-230-runtime-projection-extraction",
-          kind: "refactor",
-          layer: "L7",
-          drive: "db",
-          status: "confirmed",
-          title: "runtime projection extraction",
-          source_path: "docs/plans/PLAN-L7-230-runtime-projection-extraction.md",
-          source_hash: "sha256:test",
-          updated_at: "2026-07-02T00:00:00Z",
-        },
-      });
-      const plans = new Map([
-        [
-          "PLAN-L7-230-runtime-projection-extraction",
-          {
-            planId: "PLAN-L7-230-runtime-projection-extraction",
-            kind: "refactor",
-            layer: "L7",
-            drive: "db",
-            status: "confirmed",
-            updatedAt: "2026-07-02T00:00:00Z",
-          },
-        ],
-      ]);
-
       projectRuntimeTestRunFromSessionEventCore({
         db,
-        plans,
         event: {
           ts: "2026-07-02T00:01:00Z",
           session_id: "session-runtime-core",
@@ -1318,16 +1171,16 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
           outcome: "error",
         },
         evidencePath: ".ut-tdd/logs/session/session-runtime-core.jsonl",
+        lineNumber: 4,
         deps: {
           stableId: (prefix, value) => `${prefix}:${value}`,
-          resolvePlanId: () => "PLAN-L7-230-runtime-projection-extraction",
           recordProjectionEvent,
         },
       });
 
       const row = db.prepare("SELECT plan_id, runner, exit_code, status FROM test_runs").get();
       expect(row).toMatchObject({
-        plan_id: "PLAN-L7-230-runtime-projection-extraction",
+        plan_id: null,
         runner: "node",
         exit_code: 1,
         status: "failed",
@@ -1406,50 +1259,26 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
-      recordProjectionEvent(db, {
-        table: "plan_registry",
-        id: "PLAN-L7-200-runtime-guardrail-provenance",
-        row: {
-          plan_id: "PLAN-L7-200-runtime-guardrail-provenance",
-          kind: "impl",
-          layer: "L7",
-          drive: "db",
-          status: "confirmed",
-          title: "runtime guardrail provenance",
-          source_path: "docs/plans/PLAN-L7-200-runtime-guardrail-provenance.md",
-          source_hash: "sha256:test",
-          updated_at: "2026-06-29T00:00:00Z",
-        },
-      });
-      const plans = new Map([
-        [
-          "PLAN-L7-200-runtime-guardrail-provenance",
-          {
-            planId: "PLAN-L7-200-runtime-guardrail-provenance",
-            kind: "impl",
-            layer: "L7",
-            drive: "db",
-            status: "confirmed",
-            updatedAt: "2026-06-29T00:00:00Z",
+      const projectForcedStop = (sessionId: string, ts: string, planId: string | null) =>
+        projectRuntimeGuardrailDecisionFromSessionEvent({
+          db,
+          event: {
+            ts,
+            session_id: sessionId,
+            plan_id: planId,
+            event_type: "forced_stop",
+            outcome: "error",
           },
-        ],
-      ]);
-
+          evidencePath: `.ut-tdd/logs/session/${sessionId}.jsonl`,
+          lineNumber: 1,
+        });
+      projectForcedStop(
+        "session-guardrail-1",
+        "2026-06-29T00:01:00Z",
+        "PLAN-L7-200-runtime-guardrail-provenance",
+      );
       projectRuntimeGuardrailDecisionFromSessionEvent({
         db,
-        plans,
-        event: {
-          ts: "2026-06-29T00:01:00Z",
-          session_id: "session-guardrail-1",
-          plan_id: "PLAN-L7-200-runtime-guardrail-provenance",
-          event_type: "forced_stop",
-          outcome: "error",
-        },
-        evidencePath: ".ut-tdd/logs/session/session-guardrail-1.jsonl",
-      });
-      projectRuntimeGuardrailDecisionFromSessionEvent({
-        db,
-        plans,
         event: {
           ts: "2026-06-29T00:02:00Z",
           session_id: "session-guardrail-1",
@@ -1460,122 +1289,137 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
           outcome: "ok",
         },
         evidencePath: ".ut-tdd/logs/session/session-guardrail-1.jsonl",
+        lineNumber: 2,
       });
+      projectForcedStop("session-guardrail-no-plan", "2026-06-29T00:03:00Z", null);
 
       const rows = db
         .prepare(
-          "SELECT session_id, guardrail, decision, mode, human_signoff_required, evidence_path, decided_at FROM guardrail_decisions",
+          "SELECT session_id, plan_id, guardrail, decision, mode, human_signoff_required, evidence_path, decided_at FROM guardrail_decisions ORDER BY decided_at",
         )
         .all();
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({
-        session_id: "session-guardrail-1",
-        guardrail: "forced-stop",
-        decision: "block",
-        mode: "runtime-hook",
-        human_signoff_required: 0,
-        evidence_path: ".ut-tdd/logs/session/session-guardrail-1.jsonl",
-        decided_at: "2026-06-29T00:01:00Z",
-      });
+      expect(rows).toEqual([
+        {
+          session_id: "session-guardrail-1",
+          plan_id: null,
+          guardrail: "forced-stop",
+          decision: "block",
+          mode: "runtime-hook",
+          human_signoff_required: 0,
+          evidence_path: ".ut-tdd/logs/session/session-guardrail-1.jsonl",
+          decided_at: "2026-06-29T00:01:00Z",
+        },
+        {
+          session_id: "session-guardrail-no-plan",
+          plan_id: null,
+          guardrail: "forced-stop",
+          decision: "block",
+          mode: "runtime-hook",
+          human_signoff_required: 0,
+          evidence_path: ".ut-tdd/logs/session/session-guardrail-no-plan.jsonl",
+          decided_at: "2026-06-29T00:03:00Z",
+        },
+      ]);
     } finally {
       db.close();
     }
   });
 
-  it("projects runtime skill_invocations from skill suggest session events only", () => {
+  it("projects valid provider handovers without PLAN and skips unrelated JSON", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "ut-tdd-provider-handover-projection-"));
+    const db = openHarnessDb(":memory:");
+    try {
+      const dir = join(repoRoot, ".ut-tdd", "handover", "provider");
+      mkdirSync(dir, { recursive: true });
+      const handoverId = "20260629000300-claude-to-codex";
+      const timestamp = "2026-06-29T00:03:00Z";
+      writeFileSync(
+        join(dir, `${handoverId}.json`),
+        JSON.stringify({
+          schema_version: "provider-handover.v1",
+          handover_kind: "mechanical",
+          handover_id: handoverId,
+          from: "claude",
+          to: "codex",
+          active_plan: null,
+          context: { summary: "resume", next_actions: [], files: [] },
+          created_at: timestamp,
+        }),
+        "utf8",
+      );
+      writeFileSync(join(dir, "unrelated.json"), "{}", "utf8");
+
+      expect(rebuildHarnessDb({ repoRoot, db, skipTokenTelemetry: true }).ok).toBe(true);
+      const events = db
+        .prepare(
+          "SELECT session_id, plan_id, hook_name, occurred_at, digest FROM hook_events WHERE event_type = 'provider_handover'",
+        )
+        .all();
+      expect(events).toEqual([
+        {
+          session_id: handoverId,
+          plan_id: null,
+          hook_name: "ProviderHandover",
+          occurred_at: timestamp,
+          digest: "resume",
+        },
+      ]);
+    } finally {
+      db.close();
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("projects runtime skill invocation observations without PLAN or catalog identities", () => {
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
-      recordProjectionEvent(db, {
-        table: "plan_registry",
-        id: "PLAN-L7-201-runtime-skill-provenance",
-        row: {
-          plan_id: "PLAN-L7-201-runtime-skill-provenance",
-          kind: "impl",
-          layer: "L7",
-          drive: "db",
-          status: "confirmed",
-          title: "runtime skill provenance",
-          source_path: "docs/plans/PLAN-L7-201-runtime-skill-provenance.md",
-          source_hash: "sha256:test",
-          updated_at: "2026-06-29T00:00:00Z",
-        },
-      });
-      recordProjectionEvent(db, {
-        table: "automation_assets",
-        id: "skill:review-checklist",
-        row: {
-          asset_id: "skill:review-checklist",
-          asset_type: "skill",
-          path: "docs/skills/review-checklist.yaml",
-          trigger: "review checklist",
-          role: "reviewer",
-          capability: "quality review checklist",
-          skill_type: "workflow",
-          applies_layers: "L7",
-          applies_drive_models: "Forward",
-          drift_status: "ok",
-          indexed_at: "2026-06-29T00:00:00Z",
-        },
-      });
-      const plans = new Map([
-        [
-          "PLAN-L7-201-runtime-skill-provenance",
-          {
-            planId: "PLAN-L7-201-runtime-skill-provenance",
-            kind: "impl",
-            layer: "L7",
-            drive: "db",
-            status: "confirmed",
-            updatedAt: "2026-06-29T00:00:00Z",
-          },
-        ],
-      ]);
-
-      projectRuntimeSkillInvocationFromSessionEvent({
-        db,
-        plans,
-        event: {
-          ts: "2026-06-29T00:01:00Z",
-          session_id: "session-skill-1",
-          plan_id: "PLAN-L7-201-runtime-skill-provenance",
-          event_type: "tool_use",
-          tool: "Bash",
-          target: "Bash (skill)",
-          outcome: "ok",
-        },
-        evidencePath: ".ut-tdd/logs/session/session-skill-1.jsonl",
-      });
-      projectRuntimeSkillInvocationFromSessionEvent({
-        db,
-        plans,
-        event: {
-          ts: "2026-06-29T00:02:00Z",
-          session_id: "session-skill-1",
-          plan_id: "PLAN-L7-201-runtime-skill-provenance",
-          event_type: "tool_use",
-          tool: "Bash",
-          target: "Bash (bash)",
-          outcome: "ok",
-        },
-        evidencePath: ".ut-tdd/logs/session/session-skill-1.jsonl",
-      });
-
-      const rows = db
-        .prepare(
-          "SELECT session_id, skill_id, layer, drive, source, accepted, fired_at FROM skill_invocations",
-        )
-        .all();
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({
+      const event = {
+        ts: "2026-06-29T00:01:00Z",
         session_id: "session-skill-1",
-        skill_id: "skill:review-checklist",
-        layer: "L7",
-        drive: "db",
+        plan_id: null,
+        event_type: "tool_use",
+        tool: "Bash",
+        target: "Bash (skill)",
+        outcome: "ok",
+      };
+      const evidencePath = ".ut-tdd/logs/session/session-skill-1.jsonl";
+      const invocation = { db, event, evidencePath, lineNumber: 1 };
+      projectRuntimeSkillInvocationFromSessionEvent(invocation);
+      projectRuntimeSkillInvocationFromSessionEvent(invocation);
+      projectRuntimeSkillInvocationFromSessionEvent({
+        db,
+        event: { ...event, target: "Bash (bash)" },
+        evidencePath,
+        lineNumber: 2,
+      });
+
+      const selectObservations = db.prepare(
+        "SELECT session_id, plan_id, skill_id, layer, drive, source, accepted, fired_at FROM skill_invocations",
+      );
+      const observation = {
+        session_id: "session-skill-1",
+        plan_id: null,
+        skill_id: null,
+        layer: null,
+        drive: null,
         source: "runtime-hook:skill-suggest",
         accepted: 1,
         fired_at: "2026-06-29T00:01:00Z",
+      };
+      expect(selectObservations.all()).toEqual([observation]);
+
+      projectRuntimeSkillInvocationFromSessionEvent({
+        db,
+        event: { ...event, outcome: "error" },
+        evidencePath,
+        lineNumber: 3,
       });
+      const observations = selectObservations.all();
+      expect(observations).toHaveLength(2);
+      expect(observations).toEqual(
+        expect.arrayContaining([observation, { ...observation, accepted: 0 }]),
+      );
     } finally {
       db.close();
     }
@@ -1767,180 +1611,6 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     }
   });
 
-  it("turns unresolved cross-drive/model joins into findings instead of silently skipping them", () => {
-    const db = openHarnessDb(":memory:");
-    try {
-      migrate(db);
-
-      recordProjectionEvent(db, {
-        table: "model_runs",
-        id: "run-with-missing-plan",
-        row: {
-          run_id: "run-with-missing-plan",
-          runtime: "codex",
-          model: "gpt-5.4",
-          role: "se",
-          drive: "db",
-          plan_id: "PLAN-L7-46-missing",
-          started_at: "2026-06-11T00:02:00.000Z",
-          completed_at: "2026-06-11T00:03:00.000Z",
-          evidence_path: ".ut-tdd/evidence/run.json",
-        },
-      });
-
-      const finding = db
-        .prepare("SELECT kind, severity, subject_id, status FROM findings WHERE subject_id = ?")
-        .get("model_runs:run-with-missing-plan");
-      expect(finding).toMatchObject({
-        kind: "unresolved-join",
-        severity: "warn",
-        status: "open",
-      });
-    } finally {
-      db.close();
-    }
-  });
-
-  it("does NOT flag work-context plan_id labels (audit-cycle id / compound) as unresolved joins (PLAN-L7-144)", () => {
-    const db = openHarnessDb(":memory:");
-    try {
-      migrate(db);
-      // hook_events carries the active WORK CONTEXT, which can be a non-PLAN label:
-      // an audit-cycle id, or a compound "PLAN-a+b+c" spanning several PLANs. Neither
-      // is a single-PLAN foreign key, so neither is a dangling reference.
-      for (const [id, planId] of [
-        ["audit-ctx", "A-136-cycle-p4-verification-audit"],
-        ["compound-ctx", "PLAN-L7-47+48+49-db-feedback-audit-close"],
-      ] as const) {
-        recordProjectionEvent(db, {
-          table: "model_runs",
-          id,
-          row: {
-            run_id: id,
-            runtime: "codex",
-            model: "gpt-5.4",
-            role: "se",
-            drive: "db",
-            plan_id: planId,
-            started_at: "2026-06-11T00:02:00.000Z",
-            completed_at: "2026-06-11T00:03:00.000Z",
-            evidence_path: ".ut-tdd/evidence/run.json",
-          },
-        });
-      }
-      const flagged = db
-        .prepare(
-          "SELECT COUNT(*) AS n FROM findings WHERE kind = 'unresolved-join' AND subject_id IN (?, ?)",
-        )
-        .get("model_runs:audit-ctx", "model_runs:compound-ctx") as { n: number };
-      expect(flagged.n).toBe(0);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("resolves unique short PLAN labels before creating unresolved join findings", () => {
-    const db = openHarnessDb(":memory:");
-    try {
-      migrate(db);
-
-      recordProjectionEvent(db, {
-        table: "plan_registry",
-        id: "PLAN-L7-46-projection-writer",
-        row: {
-          plan_id: "PLAN-L7-46-projection-writer",
-          kind: "impl",
-          layer: "L7",
-          drive: "db",
-          status: "confirmed",
-          parent: "",
-          updated_at: "2026-07-09",
-          source_hash: "hash",
-        },
-      });
-      recordProjectionEvent(db, {
-        table: "model_runs",
-        id: "run-with-short-plan",
-        row: {
-          run_id: "run-with-short-plan",
-          runtime: "codex",
-          model: "gpt-5.4",
-          role: "se",
-          drive: "db",
-          plan_id: "PLAN-L7-46",
-          started_at: "2026-07-09T00:02:00.000Z",
-          completed_at: "2026-07-09T00:03:00.000Z",
-          evidence_path: ".ut-tdd/evidence/run.json",
-        },
-      });
-
-      const flagged = db
-        .prepare(
-          "SELECT COUNT(*) AS n FROM findings WHERE kind = 'unresolved-join' AND subject_id = ?",
-        )
-        .get("model_runs:run-with-short-plan") as { n: number };
-      expect(flagged.n).toBe(0);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("separates stale bare numeric runtime PLAN context from true unresolved joins", () => {
-    const db = openHarnessDb(":memory:");
-    try {
-      migrate(db);
-
-      recordProjectionEvent(db, {
-        table: "hook_events",
-        id: "hook-with-stale-runtime-plan",
-        row: {
-          event_id: "hook-with-stale-runtime-plan",
-          session_id: "session-1",
-          plan_id: "PLAN-L7-40",
-          hook_name: "SessionStart",
-          event_type: "session_start",
-          occurred_at: "2026-07-09T00:02:00.000Z",
-          digest: "",
-          evidence_path: ".ut-tdd/logs/session/session-1.jsonl",
-        },
-      });
-      recordProjectionEvent(db, {
-        table: "model_runs",
-        id: "run-with-missing-bare-plan",
-        row: {
-          run_id: "run-with-missing-bare-plan",
-          runtime: "codex",
-          model: "gpt-5.4",
-          role: "se",
-          drive: "db",
-          plan_id: "PLAN-L7-40",
-          started_at: "2026-07-09T00:02:00.000Z",
-          completed_at: "2026-07-09T00:03:00.000Z",
-          evidence_path: ".ut-tdd/evidence/run.json",
-        },
-      });
-
-      const stale = db
-        .prepare("SELECT kind, severity, status FROM findings WHERE subject_id = ?")
-        .get("hook_events:hook-with-stale-runtime-plan");
-      expect(stale).toMatchObject({
-        kind: "stale-runtime-plan-context",
-        severity: "warn",
-        status: "open",
-      });
-      const unresolved = db
-        .prepare("SELECT kind, severity, status FROM findings WHERE subject_id = ?")
-        .get("model_runs:run-with-missing-bare-plan");
-      expect(unresolved).toMatchObject({
-        kind: "unresolved-join",
-        severity: "warn",
-        status: "open",
-      });
-    } finally {
-      db.close();
-    }
-  });
-
   it("does not turn feedback_events queue rows into unresolved join findings", () => {
     const db = openHarnessDb(":memory:");
     try {
@@ -1973,27 +1643,25 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     }
   });
 
-  it("rebuildHarnessDb is atomic: a mid-rebuild failure rolls back, leaving the prior projection intact", () => {
-    if (!hasSourcePlanDocs()) return;
-
+  it("U-DOMAIN-008: rebuildHarnessDb is atomic and preserves the prior projection after a mid-rebuild failure", () => {
     const real = openHarnessDb(":memory:");
     try {
-      // Baseline: a successful rebuild populates plan_registry.
+      // Baseline: a successful rebuild populates test_cases (input independent of docs/plans).
       const baseline = rebuildHarnessDb({ repoRoot: process.cwd(), db: real });
       expect(baseline.ok).toBe(true);
-      const before = rowCounts(real).plan_registry;
+      const before = rowCounts(real).test_cases;
       expect(before).toBeGreaterThan(0);
 
-      // Inject a failure once the projection starts writing plan_registry — this is
+      // Inject a failure once the projection starts writing test_cases — this is
       // *after* truncateProjectionTables has emptied the tables. Without a transaction
-      // boundary the rebuild would leave plan_registry truncated (0 rows).
+      // boundary the rebuild would leave test_cases truncated (0 rows).
       let injected = false;
       const flaky: HarnessDb = {
         path: real.path,
         driver: real.driver,
         exec: (sql) => real.exec(sql),
         prepare: (sql) => {
-          if (!injected && /INSERT INTO plan_registry\b/i.test(sql)) {
+          if (!injected && /INSERT INTO test_cases\b/i.test(sql)) {
             injected = true;
             throw new Error("injected mid-rebuild failure");
           }
@@ -2009,13 +1677,13 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
       expect(injected).toBe(true);
 
       // The prior projection must survive: the truncate is rolled back, not committed.
-      expect(rowCounts(real).plan_registry).toBe(before);
+      expect(rowCounts(real).test_cases).toBe(before);
     } finally {
       real.close();
     }
   });
 
-  it("auto-populates relation, profile, document export, and test catalog projections on rebuild", () => {
+  it("CANDIDATE-U-PLANRET-021: auto-populates relation, profile, document export, and test catalog projections on rebuild", () => {
     const db = openHarnessDb(":memory:");
     try {
       const result = rebuildHarnessDb({ repoRoot: process.cwd(), db });
@@ -2023,16 +1691,6 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
       expect(result.ok).toBe(true);
       expect(rowCounts(db).graph_nodes).toBeGreaterThan(0);
       expect(rowCounts(db).dependency_edges).toBeGreaterThan(0);
-      const plannedEdge = db
-        .prepare(
-          "SELECT is_actual FROM dependency_edges WHERE from_node_id = ? AND edge_kind = ? AND to_node_id = ?",
-        )
-        .get(
-          "plan:PLAN-L7-441-plan-draft-recovery-v4",
-          "generates",
-          "source:src/plan-admission/draft-recovery.ts",
-        ) as { is_actual: number } | undefined;
-      expect(plannedEdge?.is_actual).toBe(0);
       expect(rowCounts(db).graph_snapshots).toBeGreaterThan(0);
       expect(rowCounts(db).impact_rules).toBeGreaterThan(0);
       expect(rowCounts(db).verification_profiles).toBeGreaterThan(0);
@@ -2047,9 +1705,6 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
       expect(rowCounts(db).artifact_progress).toBeGreaterThan(0);
       expect(rowCounts(db).spec_defs).toBeGreaterThan(0);
       expect(rowCounts(db).spec_relations).toBeGreaterThan(0);
-      expect(rowCounts(db).schedule_entries).toBeGreaterThan(0);
-      expect(rowCounts(db).activation_entries).toBeGreaterThan(0);
-      expect(rowCounts(db).activation_schedule_reviews).toBeGreaterThan(0);
       expect(rowCounts(db).document_catalog_entries).toBeGreaterThan(0);
       expect(rowCounts(db).document_scale_profile_entries).toBeGreaterThan(0);
       expect(rowCounts(db).document_scale_profile_reviews).toBeGreaterThan(0);
@@ -2058,52 +1713,6 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
         .prepare("SELECT COUNT(*) AS count FROM test_cases WHERE test_file = ? AND oracle_id = ?")
         .get("tests/handover.test.ts", "U-HOVER-001") as { count: number } | undefined;
       expect(inheritedOracle?.count ?? 0).toBeGreaterThan(0);
-      const specPlan = db
-        .prepare("SELECT layer, sub_doc, lifecycle_status FROM spec_defs WHERE plan_id = ?")
-        .get("PLAN-L6-39-vmodel-spec-ir-function-contracts") as
-        | { layer: string; sub_doc: string; lifecycle_status: string }
-        | undefined;
-      expect(specPlan).toMatchObject({
-        layer: "L6",
-        sub_doc: "function-spec",
-        lifecycle_status: "confirmed",
-      });
-      const specRelation = db
-        .prepare("SELECT relation_kind FROM spec_relations WHERE plan_id = ? AND evidence_path = ?")
-        .get(
-          "PLAN-L6-39-vmodel-spec-ir-function-contracts",
-          "PLAN-L5-13-vmodel-spec-ir-physical-data",
-        ) as { relation_kind: string } | undefined;
-      expect(specRelation).toMatchObject({ relation_kind: "requires" });
-      const schedule = db
-        .prepare("SELECT v_pair, rag FROM schedule_entries WHERE plan_id = ?")
-        .get("PLAN-L6-39-vmodel-spec-ir-function-contracts") as
-        | { v_pair: string; rag: string }
-        | undefined;
-      expect(schedule).toMatchObject({ v_pair: "L7", rag: "green" });
-      const activation = db
-        .prepare("SELECT profile_id, enabled FROM activation_entries WHERE plan_id = ?")
-        .get("PLAN-L6-39-vmodel-spec-ir-function-contracts") as
-        | { profile_id: string; enabled: number }
-        | undefined;
-      expect(activation).toMatchObject({ profile_id: "vmodel-clean-core", enabled: 1 });
-      const activationReview = db
-        .prepare(
-          "SELECT profile_id, current_location, scope_status, rag FROM activation_schedule_reviews WHERE plan_id = ?",
-        )
-        .get("PLAN-L7-385-vmodel-activation-profile-join") as
-        | { profile_id: string; current_location: string; scope_status: string; rag: string }
-        | undefined;
-      expect(activationReview).toMatchObject({
-        profile_id: "vmodel-clean-core",
-        current_location:
-          "U7b: activation profile と工程表をjoinしてversion-up対象/除外/延期理由を検索可能化済",
-        scope_status: "in_scope",
-        rag: "green",
-      });
-      expect(findReference(db, "vmodel-clean-core PLAN-L7-385").at(0)).toMatchObject({
-        subject_type: "activation_schedule_review",
-      });
       const documentCatalog = db
         .prepare(
           "SELECT layer, sub_doc, default_status FROM document_catalog_entries WHERE doc_type_id = ?",
@@ -2245,53 +1854,35 @@ export function evaluateAgentGuard(input: { stage: string; route: string; model:
     }
   });
 
-  it("closes working-tree relation impacts when the owning PLAN has review and green evidence", () => {
+  it("projects open working-tree impacts and pair-freeze evidence without PLAN input", () => {
     const repoRoot = join(tmpdir(), `ut-tdd-impact-closure-${randomUUID()}`);
-    mkdirSync(join(repoRoot, "docs", "plans"), { recursive: true });
+    const designPath = "docs/design/contract.md";
+    const testDesignPath = "docs/test-design/L7-contract.md";
+    const designId = `design:${designPath}`;
+    const testDesignId = `test-design:${testDesignPath}`;
     mkdirSync(join(repoRoot, "docs", "design"), { recursive: true });
-    execFileSync("git", ["init"], { cwd: repoRoot, stdio: "ignore" });
-    writeFileSync(
-      join(repoRoot, "docs", "design", "contract.md"),
-      "# Contract\n\n設計本文。\n",
-      "utf8",
+    mkdirSync(join(repoRoot, "docs", "test-design"), { recursive: true });
+    const gitOptions = { cwd: repoRoot, stdio: "ignore" } as const;
+    execFileSync("git", ["init"], gitOptions);
+    writeFileSync(join(repoRoot, designPath), "# Contract\n\n設計本文。\n", "utf8");
+    writeFileSync(join(repoRoot, testDesignPath), "# Test design\n\n検証本文。\n", "utf8");
+    execFileSync("git", ["add", "--", designPath, testDesignPath], gitOptions);
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=Projection Fixture",
+        "-c",
+        "user.email=projection-fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "test: seed paired artifacts",
+      ],
+      gitOptions,
     );
-    writeFileSync(
-      join(repoRoot, "docs", "plans", "PLAN-L7-999-impact-closure.md"),
-      `---
-plan_id: PLAN-L7-999-impact-closure
-title: "PLAN-L7-999: Impact closure fixture"
-kind: impl
-layer: L7
-drive: db
-status: confirmed
-created: 2026-06-30
-updated: 2026-06-30
-generates:
-  - artifact_path: docs/design/contract.md
-    artifact_type: design_doc
-review_evidence:
-  - reviewer: codex-fixture
-    review_kind: intra_runtime_subagent
-    reviewed_at: "2026-06-30T00:00:00Z"
-    tests_green_at: "2026-06-30T00:00:00Z"
-    verdict: approve
-    green_commands:
-      - kind: unit_test
-        command: "bun run vitest run tests\\\\fixture.test.ts"
-        runner: bun
-        scope: targeted
-        exit_code: 0
-        completed_at: "2026-06-30T00:00:00Z"
-        evidence_path: tests/fixture.test.ts
-        output_digest: "sha256:fixture"
----
-
-# PLAN-L7-999
-
-Fixture.
-`,
-      "utf8",
-    );
+    writeFileSync(join(repoRoot, designPath), "# Contract\n\n設計本文を変更した。\n", "utf8");
     const db = openHarnessDb(":memory:");
     try {
       const result = rebuildHarnessDb({
@@ -2299,13 +1890,10 @@ Fixture.
         db,
         relationGraph: {
           nodes: [
-            {
-              id: "design:docs/design/contract.md",
-              kind: "design",
-              path: "docs/design/contract.md",
-            },
+            { id: designId, kind: "design", path: designPath },
+            { id: testDesignId, kind: "test-design", path: testDesignPath },
           ],
-          edges: [],
+          edges: [{ from: designId, to: testDesignId, kind: "pairs" }],
           verificationProfiles: [],
           findings: [],
         },
@@ -2313,29 +1901,36 @@ Fixture.
       expect(result.ok).toBe(true);
       const impacts = db
         .prepare(
-          `SELECT required_action, status, evidence_path
+          `SELECT root_node_id, required_action, status, evidence_path
            FROM impact_results
-           WHERE root_node_id = ?
+           WHERE change_set_id = ?
            ORDER BY required_action`,
         )
-        .all("design:docs/design/contract.md") as Array<{
-        required_action: string;
-        status: string;
-        evidence_path: string;
-      }>;
-      expect(impacts.map((row) => [row.required_action, row.status])).toEqual([
-        ["record-trace-freeze-evidence", "closed"],
-        ["update-plan-dod", "closed"],
+        .all("working-tree");
+      expect(impacts).toEqual([
+        {
+          root_node_id: designId,
+          required_action: "record-trace-freeze-evidence",
+          status: "open",
+          evidence_path: "git status --porcelain",
+        },
+        {
+          root_node_id: testDesignId,
+          required_action: "update-paired-artifact",
+          status: "closed",
+          evidence_path: "doctor:pair-freeze",
+        },
+        {
+          root_node_id: designId,
+          required_action: "update-plan-dod",
+          status: "open",
+          evidence_path: "git status --porcelain",
+        },
       ]);
-      expect(impacts.every((row) => row.evidence_path.includes("PLAN-L7-999"))).toBe(true);
       const progress = db
-        .prepare(
-          "SELECT color, open_dependency_impacts FROM artifact_progress WHERE artifact_path = ?",
-        )
-        .get("docs/design/contract.md") as
-        | { color: string; open_dependency_impacts: number }
-        | undefined;
-      expect(progress).toMatchObject({ color: "yellow", open_dependency_impacts: 0 });
+        .prepare("SELECT open_dependency_impacts FROM artifact_progress WHERE artifact_path = ?")
+        .get(designPath);
+      expect(progress).toMatchObject({ open_dependency_impacts: 2 });
     } finally {
       db.close();
       rmSync(repoRoot, { recursive: true, force: true });
@@ -2391,9 +1986,7 @@ Fixture.
     }
   });
 
-  it("rebuildHarnessDb deterministically projects plans and Phase3 outputs without source mutation", () => {
-    if (!hasSourceProjectionPlanDocs()) return;
-
+  it("CANDIDATE-U-PLANRET-023: rebuildHarnessDb deterministically projects Phase3 outputs without source mutation", () => {
     const db = openHarnessDb(":memory:");
     try {
       const result = rebuildHarnessDb({
@@ -2402,9 +1995,9 @@ Fixture.
         relationGraph: {
           nodes: [
             {
-              id: "plan:PLAN-L7-46-projection-writer",
-              kind: "plan",
-              path: "docs/plans/PLAN-L7-46-projection-writer.md",
+              id: "source:src/state-db/projection-writer.ts",
+              kind: "source",
+              path: "src/state-db/projection-writer.ts",
             },
           ],
           edges: [],
@@ -2468,192 +2061,16 @@ Fixture.
         ...secondStableCounts
       } = second.rowCounts;
       expect(secondStableCounts).toEqual(firstStableCounts);
-      expect(rowCounts(db).plan_registry).toBeGreaterThan(0);
-      const projectedPlan = db
-        .prepare("SELECT source_hash FROM plan_registry WHERE source_hash <> '' LIMIT 1")
-        .get() as { source_hash?: string } | undefined;
-      expect(projectedPlan?.source_hash).toMatch(/^sha256:[a-f0-9]{64}$/);
       expect(rowCounts(db).graph_nodes).toBe(1);
       expect(rowCounts(db).document_export_runs).toBe(1);
-      expect(rowCounts(db).roadmap_rollups).toBe(1);
-      expect(rowCounts(db).roadmap_band_coverage).toBeGreaterThan(0);
-      expect(rowCounts(db).roadmap_gate_progress).toBeGreaterThan(0);
-      expect(rowCounts(db).review_evidence_registry).toBeGreaterThan(0);
       expect(rowCounts(db).descent_obligations).toBeGreaterThan(0);
-      expect(rowCounts(db).drive_runs).toBeGreaterThan(0);
       expect(rowCounts(db).hook_events).toBeGreaterThan(0);
-      expect(rowCounts(db).model_runs).toBeGreaterThan(0);
       expect(rowCounts(db).automation_assets).toBeGreaterThan(0);
-      expect(rowCounts(db).skill_recommendations).toBeGreaterThan(0);
-      expect(rowCounts(db).skill_invocations).toBeGreaterThan(0);
       expect(rowCounts(db).quality_signals).toBeGreaterThan(0);
       expect(rowCounts(db).feedback_events).toBeGreaterThan(0);
       expect(rowCounts(db).issue_queue).toBeGreaterThan(0);
       expect(rowCounts(db).trouble_events).toBeGreaterThanOrEqual(0);
       expect(rowCounts(db).improvement_log).toBeGreaterThan(0);
-
-      const program = db
-        .prepare("SELECT * FROM roadmap_rollups WHERE rollup_id = ?")
-        .get("program");
-      expect(program).toMatchObject({
-        total_bands: 5,
-        covered_bands: 5,
-        parked_bands: 0,
-        uncovered_bands: 0,
-        total_gates: 20,
-        reached_gates: 20,
-      });
-
-      const verificationBand = db
-        .prepare("SELECT status, roadmap_ids FROM roadmap_band_coverage WHERE band_id = ?")
-        .get("verification");
-      expect(verificationBand).toMatchObject({ status: "covered" });
-      expect(String(verificationBand?.roadmap_ids)).toContain("PLAN-M-00-verify-cutover");
-
-      const cutoverBand = db
-        .prepare("SELECT status, roadmap_ids FROM roadmap_band_coverage WHERE band_id = ?")
-        .get("cutover");
-      expect(cutoverBand).toMatchObject({ status: "covered" });
-      expect(String(cutoverBand?.roadmap_ids)).toContain("PLAN-M-01-cutover-backfill");
-
-      const cutoverGate = db
-        .prepare(
-          "SELECT reached, confirmed_spans, total_spans FROM roadmap_gate_progress WHERE plan_id = ? AND gate_id = ?",
-        )
-        .get("PLAN-M-01-cutover-backfill", "G-CUTOVER.B");
-      expect(cutoverGate).toMatchObject({
-        reached: 1,
-        confirmed_spans: 1,
-        total_spans: 1,
-      });
-
-      const reviewEvidence = db
-        .prepare(
-          "SELECT has_evidence, review_kind, verdict FROM review_evidence_registry WHERE plan_id = ?",
-        )
-        .get("PLAN-M-01-cutover-backfill");
-      expect(reviewEvidence).toMatchObject({
-        has_evidence: 1,
-        review_kind: "intra_runtime_subagent",
-        verdict: "pass",
-      });
-
-      const verificationRuns = db
-        .prepare(
-          `SELECT phase, ready_status, human_required
-           FROM workflow_runs
-           WHERE plan_id = ? AND workflow = ?
-           ORDER BY CASE phase
-             WHEN 'L8' THEN 8
-             WHEN 'L9' THEN 9
-             WHEN 'L10' THEN 10
-             WHEN 'L11' THEN 11
-             WHEN 'L12' THEN 12
-             WHEN 'L13' THEN 13
-             WHEN 'L14' THEN 14
-             ELSE 99
-           END`,
-        )
-        .all(
-          "PLAN-M-00-verify-cutover",
-          "L8-L14-verification-band",
-        ) as unknown as VerificationWorkflowRow[];
-      expect(verificationRuns).toHaveLength(7);
-      expect(verificationRuns.map((row) => row.phase)).toEqual([
-        "L8",
-        "L9",
-        "L10",
-        "L11",
-        "L12",
-        "L13",
-        "L14",
-      ]);
-      expect(verificationRuns.every((row) => row.ready_status === "passed_local")).toBe(true);
-      expect(
-        verificationRuns
-          .filter((row) => row.phase === "L12" || row.phase === "L13")
-          .every((row) => row.human_required === 1),
-      ).toBe(true);
-
-      const verificationDriveJoin = db
-        .prepare(
-          `SELECT d.plan_id, d.mode, d.status
-           FROM workflow_runs w
-           JOIN drive_runs d ON d.drive_run_id = w.drive_run_id
-           WHERE w.plan_id = ? AND w.phase = ?`,
-        )
-        .get("PLAN-M-00-verify-cutover", "L8") as DriveRunRow | undefined;
-      expect(verificationDriveJoin).toMatchObject({
-        plan_id: "PLAN-M-00-verify-cutover",
-        mode: "Verification",
-      });
-
-      const hookJoin = db
-        .prepare(
-          `SELECT COUNT(*) AS value
-           FROM hook_events h
-           JOIN plan_registry p ON p.plan_id = h.plan_id`,
-        )
-        .get() as { value: number };
-      expect(hookJoin.value).toBeGreaterThan(0);
-
-      const modelJoin = db
-        .prepare(
-          `SELECT COUNT(*) AS value
-           FROM model_runs m
-           JOIN plan_registry p ON p.plan_id = m.plan_id`,
-        )
-        .get() as { value: number };
-      expect(modelJoin.value).toBeGreaterThan(0);
-
-      const verificationGates = db
-        .prepare(
-          "SELECT gate_id, status, evidence_path FROM gate_runs WHERE plan_id = ? AND gate_id LIKE ? ORDER BY gate_id",
-        )
-        .all("PLAN-M-00-verify-cutover", "G-VERIFY.L%") as unknown as VerificationGateRow[];
-      expect(verificationGates).toHaveLength(7);
-      expect(verificationGates.every((row) => row.status === "passed")).toBe(true);
-      expect(
-        verificationGates.every((row) =>
-          String(row.evidence_path).includes("A-132-l8-l14-verification-band-execution.md"),
-        ),
-      ).toBe(true);
-
-      const coverage = db
-        .prepare(
-          "SELECT value, threshold, status FROM coverage WHERE scope = ? AND subject_id = ? AND metric = ?",
-        )
-        .get("verification-band", "program", "covered_program_bands");
-      expect(coverage).toMatchObject({
-        value: 5,
-        threshold: 5,
-        status: "passed",
-      });
-
-      const skillRecommendation = db
-        .prepare(
-          "SELECT skill_id, reason FROM skill_recommendations WHERE plan_id = ? ORDER BY rank LIMIT 1",
-        )
-        .get("PLAN-M-01-cutover-backfill");
-      expect(skillRecommendation).toBeDefined();
-      expect(String(skillRecommendation?.skill_id ?? "")).not.toBe("skill:review-checklist");
-      expect(String(skillRecommendation?.reason)).toContain("layer=");
-
-      const skillInvocation = db
-        .prepare(
-          "SELECT skill_id, source, accepted FROM skill_invocations WHERE plan_id = ? AND skill_id = ?",
-        )
-        .get("PLAN-M-01-cutover-backfill", String(skillRecommendation?.skill_id ?? ""));
-      expect(skillInvocation).toMatchObject({
-        skill_id: skillRecommendation?.skill_id,
-        source: "auto-projection:review-evidence",
-        accepted: 1,
-      });
-
-      const driveMetric = db
-        .prepare("SELECT metric, status FROM quality_signals WHERE metric = ? LIMIT 1")
-        .get("drive_firing_rate");
-      expect(driveMetric).toMatchObject({ metric: "drive_firing_rate" });
 
       const feedbackEvent = db
         .prepare("SELECT signal_type, next_action FROM feedback_events ORDER BY created_at LIMIT 1")

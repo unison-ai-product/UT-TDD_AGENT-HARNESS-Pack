@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeScrumReverse,
-  loadSrPlans,
   type ParsedSrPlan,
   parseLinks,
   parseSrPlan,
@@ -112,15 +111,5 @@ describe("U-SCRUMREV-004 messages", () => {
         (m) => m.includes("Reverse 合流が無い"),
       ),
     ).toBe(true);
-  });
-});
-
-describe("U-SCRUMREV-005 実 repo の scrum-reverse 整合 (回帰ガード)", () => {
-  it("confirmed poc は全て Reverse 合流済 (redesign 除く) / reverse 参照は confirmed poc のみ", () => {
-    const r = analyzeScrumReverse(loadSrPlans());
-    expect({ pocOrphans: r.pocOrphans, badReverseRefs: r.badReverseRefs }).toEqual({
-      pocOrphans: [],
-      badReverseRefs: [],
-    });
   });
 });

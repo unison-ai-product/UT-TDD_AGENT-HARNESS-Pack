@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -19,6 +19,7 @@ import {
   sweepStaleGuardSlots,
 } from "../src/runtime/agent-slots.ts";
 import { resolveRosterCapability } from "../src/runtime/agent-slots-roster.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const statePath = join("/repo", ".ut-tdd", "state", "agent-slots.json");
 
@@ -339,7 +340,7 @@ describe("U-SLOT-009 nodeAgentSlotsDeps atomic write", () => {
       // The atomic-write temp files (`*.tmp-<pid>-<seq>`) must be renamed/cleaned, never leaked.
       expect(readdirSync(stateDir).filter((name) => name.includes(".tmp-"))).toEqual([]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeTestTree(dir);
     }
   });
 });

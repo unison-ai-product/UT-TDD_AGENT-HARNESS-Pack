@@ -9,6 +9,7 @@
  * receipt との照合そのものは domain (`admitReviewCustody`) が持つ。
  */
 import { spawnSync } from "node:child_process";
+import { GH_COMMAND_TIMEOUT_MS, ghCommandEnv } from "../../github/gh-command.ts";
 import type {
   GitHubAttestationFacts,
   GitHubAttestationQuery,
@@ -32,7 +33,12 @@ const RUN_INVOCATION_PATTERN = /\/actions\/runs\/([0-9]{1,20})\/attempts\/([0-9]
 
 function defaultRunner(binary: string): (args: readonly string[]) => GhCommandResult {
   return (args) => {
-    const result = spawnSync(binary, [...args], { encoding: "utf8", windowsHide: true });
+    const result = spawnSync(binary, [...args], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: GH_COMMAND_TIMEOUT_MS,
+      env: ghCommandEnv(process.env),
+    });
     if (result.error) {
       // 実行不能は「検証できなかった」であって「検証に失敗した」ではない。
       return { status: null, stdout: "" };

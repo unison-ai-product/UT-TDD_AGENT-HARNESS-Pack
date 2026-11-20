@@ -1,13 +1,91 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const readTrace = vi.hoisted(() => ({
+  active: false,
+  calls: [] as Array<{ api: "existsSync" | "readdirSync" | "readFileSync"; path: string }>,
+}));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const tracePath = (path: unknown): string =>
+    typeof path === "string" || Buffer.isBuffer(path) ? String(path).replaceAll("\\", "/") : "";
+  return {
+    ...actual,
+    existsSync: (path: Parameters<typeof actual.existsSync>[0]) => {
+      if (readTrace.active) readTrace.calls.push({ api: "existsSync", path: tracePath(path) });
+      return actual.existsSync(path);
+    },
+    readdirSync: (...args: Parameters<typeof actual.readdirSync>) => {
+      if (readTrace.active) readTrace.calls.push({ api: "readdirSync", path: tracePath(args[0]) });
+      return actual.readdirSync(...args);
+    },
+    readFileSync: (...args: Parameters<typeof actual.readFileSync>) => {
+      if (readTrace.active) readTrace.calls.push({ api: "readFileSync", path: tracePath(args[0]) });
+      return actual.readFileSync(...args);
+    },
+  };
+});
+
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   analyzeG1Trace,
   extractG1BusinessIds,
   extractG1BusinessTrace,
   extractG1P0FrIds,
   extractG1ScreenIds,
+  g1TraceMessages,
   g1TraceOk,
   loadG1TraceDocs,
 } from "../src/lint/g1-trace.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
+
+const REQUIRED_DOCS = [
+  ["business", "docs/design/harness/L1-requirements/business-requirements.md"],
+  ["functional", "docs/design/harness/L1-requirements/functional-requirements.md"],
+  ["screen", "docs/design/harness/L1-requirements/screen-requirements.md"],
+] as const;
+const temporaryRoots: string[] = [];
+
+function fixtureRoot(sourceDocs: ReturnType<typeof loadG1TraceDocs>, plan?: string): string {
+  const root = mkdtempSync(join(tmpdir(), "ut-g1-trace-"));
+  temporaryRoots.push(root);
+  for (const [key, relativePath] of REQUIRED_DOCS) {
+    const path = join(root, relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, sourceDocs[key], "utf8");
+  }
+  if (plan !== undefined) {
+    const plansPath = join(root, "docs", "plans");
+    mkdirSync(plansPath, { recursive: true });
+    writeFileSync(join(plansPath, "PLAN-L3-01-fixture.md"), plan, "utf8");
+  }
+  return root;
+}
+
+function observeLoader(root: string): {
+  docs: ReturnType<typeof loadG1TraceDocs>;
+  calls: typeof readTrace.calls;
+} {
+  readTrace.calls = [];
+  readTrace.active = true;
+  try {
+    return { docs: loadG1TraceDocs(root), calls: [...readTrace.calls] };
+  } finally {
+    readTrace.active = false;
+  }
+}
+
+function normalized(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
+afterEach(() => {
+  readTrace.active = false;
+  readTrace.calls = [];
+  for (const root of temporaryRoots.splice(0)) removeTestTree(root);
+});
 
 describe("G1-trace coverage (business/screen/functional)", () => {
   const docs = loadG1TraceDocs();
@@ -91,7 +169,6 @@ describe("G1-trace coverage (business/screen/functional)", () => {
         "| **PM-01** | BR-01 |",
         "### §5.6 Details",
       ].join("\n"),
-      plans: [],
     };
 
     const result = analyzeG1Trace(plainDocs);
@@ -124,11 +201,98 @@ describe("G1-trace coverage (business/screen/functional)", () => {
     expect(p0Fr.has("FR-L1-46")).toBe(false);
   });
 
-  it("passes the current repo with no G1 trace or L3 requires orphan", () => {
+  it("passes the current repo with no G1 trace orphan", () => {
     expect(result.orphanBusiness).toEqual([]);
     expect(result.orphanScreen).toEqual([]);
     expect(result.orphanP0Fr).toEqual([]);
-    expect(result.missingL3Requires).toEqual([]);
+    expect(g1TraceOk(result)).toBe(true);
+  });
+
+  it("U-CTRACE-001: missing BR-22 screen trace is one harness-fixture orphanBusiness", () => {
+    const brokenScreen = docs.screen.replace("| **BR-22** |", "| **BR-XX** |");
+    expect(brokenScreen).not.toBe(docs.screen);
+    const root = fixtureRoot({ ...docs, screen: brokenScreen });
+    const loaded = loadG1TraceDocs(root);
+    const analyzed = analyzeG1Trace(loaded);
+
+    expect(analyzed.orphanBusiness).toEqual(["BR-22"]);
+    expect(analyzed.orphanScreen).toEqual([]);
+    expect(analyzed.orphanP0Fr).toEqual([]);
+    expect(g1TraceOk(analyzed)).toBe(false);
+  });
+
+  it("U-CTRACE-001: retires plans from loaded docs", () => {
+    const loaded = loadG1TraceDocs();
+    expect("plans" in loaded).toBe(false);
+  });
+
+  it("U-CTRACE-001: retires missingL3Requires from trace result", () => {
+    const analyzed = analyzeG1Trace(docs);
+    expect("missingL3Requires" in analyzed).toBe(false);
+  });
+
+  it("U-CTRACE-001: retires totals.l3Plans from trace result", () => {
+    const analyzed = analyzeG1Trace(docs);
+    expect("l3Plans" in analyzed.totals).toBe(false);
+  });
+
+  it("U-CTRACE-001: preserves the exact non-PLAN OK message", () => {
+    expect(g1TraceMessages(result)).toEqual(["g1-trace - OK (business=13, screens=15, p0Fr=19)"]);
+  });
+
+  const incompletePlan = [
+    "related_l1_screen: docs/design/harness/L1-requirements/screen-requirements.md",
+    "PLAN-L1-02-functional-requirements",
+    "PLAN-L1-03-screen-requirements",
+  ].join("\n");
+
+  const loaderCases = [
+    { label: "incomplete PLAN", plan: incompletePlan },
+    { label: "no PLAN", plan: undefined },
+  ];
+
+  it.each(loaderCases)("U-CTRACE-001: $label preserves required G1 reads and trace", ({ plan }) => {
+    const observed = observeLoader(fixtureRoot(docs, plan));
+    const analyzed = analyzeG1Trace(observed.docs);
+    const requiredReads = REQUIRED_DOCS.map(([, relativePath]) =>
+      observed.calls.filter(
+        (call) => call.api === "readFileSync" && normalized(call.path).endsWith(relativePath),
+      ),
+    );
+
+    expect(requiredReads.map((reads) => reads.length)).toEqual([1, 1, 1]);
+    expect(analyzed.orphanBusiness).toEqual([]);
+    expect(analyzed.orphanScreen).toEqual([]);
+    expect(analyzed.orphanP0Fr).toEqual([]);
+    expect(analyzed.totals.business).toBe(13);
+    expect(analyzed.totals.screen).toBe(15);
+    expect(analyzed.totals.p0Fr).toBe(19);
+  });
+
+  it.each(loaderCases)("U-CTRACE-001: $label never probes docs/plans", ({ plan }) => {
+    const observed = observeLoader(fixtureRoot(docs, plan));
+    const planCalls = observed.calls.filter((call) =>
+      /(?:^|\/)docs\/plans(?:\/|$)/.test(normalized(call.path)),
+    );
+    expect(planCalls).toEqual([]);
+  });
+
+  it("U-CTRACE-001: valid trace is equivalent with no, complete, or incomplete PLAN", () => {
+    const completePlan = [
+      "related_l1_screen: docs/design/harness/L1-requirements/screen-requirements.md",
+      "PLAN-L1-01-business-requirements",
+      "PLAN-L1-02-functional-requirements",
+      "PLAN-L1-03-screen-requirements",
+    ].join("\n");
+    const variants = [undefined, completePlan, incompletePlan].map((plan) => {
+      const loaded = loadG1TraceDocs(fixtureRoot(docs, plan));
+      const analyzed = analyzeG1Trace(loaded);
+      return { ok: g1TraceOk(analyzed), analyzed, messages: g1TraceMessages(analyzed) };
+    });
+
+    expect(variants.map((variant) => variant.ok)).toEqual([true, true, true]);
+    expect(variants[1]).toEqual(variants[0]);
+    expect(variants[2]).toEqual(variants[0]);
   });
 
   it("fails a missing business to screen trace", () => {
@@ -138,28 +302,35 @@ describe("G1-trace coverage (business/screen/functional)", () => {
     };
     const r = analyzeG1Trace(broken);
     expect(r.orphanBusiness).toContain("BR-22");
+    expect(g1TraceOk(r)).toBe(false);
   });
 
-  it("fails L3 plans that omit a required L1 axis", () => {
+  it("fails a missing screen to business or functional trace", () => {
     const broken = {
       ...docs,
-      plans: [
-        {
-          file: "docs/plans/PLAN-L3-X.md",
-          content: [
-            "related_l1_screen: docs/design/harness/L1-requirements/screen-requirements.md",
-            "PLAN-L1-02-functional-requirements",
-            "PLAN-L1-03-screen-requirements",
-          ].join("\n"),
-        },
-      ],
+      screen: docs.screen.replace(
+        "| **PM-01** | BR-01 / BR-06 / UX-02 |",
+        "| **PM-XX** | BR-01 / BR-06 / UX-02 |",
+      ),
     };
+    expect(broken.screen).not.toBe(docs.screen);
     const r = analyzeG1Trace(broken);
-    expect(r.missingL3Requires).toEqual([
-      {
-        file: "docs/plans/PLAN-L3-X.md",
-        missing: ["PLAN-L1-01-business-requirements"],
-      },
-    ]);
+    expect(r.orphanBusiness).toEqual([]);
+    expect(r.orphanScreen).toEqual(["PM-01"]);
+    expect(r.orphanP0Fr).toEqual([]);
+    expect(g1TraceOk(r)).toBe(false);
+  });
+
+  it("fails a missing P0 functional requirement to screen trace", () => {
+    const broken = {
+      ...docs,
+      screen: docs.screen.replace("| **FR-L1-01** (", "| **FR-L1-XX** ("),
+    };
+    expect(broken.screen).not.toBe(docs.screen);
+    const r = analyzeG1Trace(broken);
+    expect(r.orphanBusiness).toEqual([]);
+    expect(r.orphanScreen).toEqual([]);
+    expect(r.orphanP0Fr).toEqual(["FR-L1-01"]);
+    expect(g1TraceOk(r)).toBe(false);
   });
 });

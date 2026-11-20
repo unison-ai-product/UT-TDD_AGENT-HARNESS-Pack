@@ -295,38 +295,18 @@ describe("sealed self-contained consumer Node runtime", () => {
     roots.push(root);
     const checkout = mkdtempSync(join(tmpdir(), "ut-tdd-setup-"));
     roots.push(checkout);
-    const { bundle, payloads } = wrapperBundleFor(root);
-    const activation = join(root, ".ut-tdd", "runtime", "activation");
-    mkdirSync(bundle.bundle_path, { recursive: true });
-    const payloadFiles: Readonly<Record<string, Uint8Array>> = {
-      "ut-tdd.mjs": payloads.compiled_esm,
-      "node-bootstrap-receipt.json": payloads.node_bootstrap_receipt,
-      "marker.json": payloads.marker,
-      "consumer-receipt.json": payloads.consumer_receipt,
-      "history.jsonl": payloads.history,
-      "operation-state.json": payloads.operation_state,
-    };
-    for (const [name, bytes] of Object.entries(payloadFiles))
-      writeFileSync(join(bundle.bundle_path, name), bytes);
-    writeFileSync(join(bundle.bundle_path, "bundle-manifest.json"), JSON.stringify(bundle));
-    mkdirSync(activation, { recursive: true });
-    const entry = join(bundle.bundle_path, "ut-tdd.mjs");
-    writeFileSync(
-      join(activation, "active.json"),
-      JSON.stringify({
-        bundle_path: bundle.bundle_path,
-        entry_path: entry,
-        bundle_digest: bundle.bundle_digest,
-      }),
-    );
+    const { wrapper, pointerPath } = materializeWrapperFixture(root);
     writeFileSync(join(checkout, "src-cli-sentinel"), "must-not-run");
     rmSync(checkout, { recursive: true, force: true });
-    const wrapper = join(root, ".ut-tdd", "bin", "ut-tdd.mjs");
-    mkdirSync(resolve(wrapper, ".."), { recursive: true });
-    writeFileSync(wrapper, renderConsumerNodeWrapper());
     const run = spawnSync(process.execPath, [wrapper], { cwd: tmpdir(), encoding: "utf8" });
     expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
     expect(run.stdout).toBe("consumer-local-ok");
+    rmSync(pointerPath);
+    const absent = spawnSync(process.execPath, [wrapper], { cwd: tmpdir(), encoding: "utf8" });
+    expect(absent.status).toBe(2);
+    expect(absent.stderr).toContain("consumer_runtime_absent");
+    expect(absent.stderr).toContain("setup --worktree");
+    expect(absent.stderr).not.toContain("MODULE_NOT_FOUND");
   });
 
   it("ISSUE-678: long-form consumer root launch remains valid", () => {
@@ -541,7 +521,9 @@ ${payloadRun.stderr}`,
         cwd: tmpdir(),
         encoding: "utf8",
       });
-      expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(78);
+      expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(2);
+      expect(run.stderr).toContain("consumer_runtime_absent");
+      expect(run.stderr).toContain("setup --worktree");
     }
   });
 

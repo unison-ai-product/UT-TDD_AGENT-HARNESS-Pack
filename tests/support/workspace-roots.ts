@@ -20,3 +20,6 @@ export function workspaceRead(input: {
   }
   return input.root;
 }
+
+/** doctor の deps に渡す「PATH に claude が無い」probe (本物の claude を起動しない)。 */
+export const noClaudeProbe = () => ({ kind: "not_found" as const });

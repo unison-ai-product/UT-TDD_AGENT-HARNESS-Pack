@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { ensureDir } from "../shared/fs.ts";
+import { reviewerAdmissionDenial } from "./review-admission-check.ts";
 
 export const REVIEW_REQUEST_SCHEMA_VERSION = "review-request/v1" as const;
 export const REVIEW_VERDICT_SCHEMA_VERSION = "ut-tdd.review-verdict/v1" as const;
@@ -527,9 +528,12 @@ export function beginReviewAttempt(input: {
 }): ReviewAttemptResult {
   if (!isStrictReviewRequest(input.request))
     return { ok: false, reason: "invalid_review_revision" };
-  const expectedProvider = input.request.authorFamily === "codex" ? "claude" : "codex";
-  if (input.provider !== expectedProvider)
-    return { ok: false, reason: "same_family_reviewer_denied" };
+  const denial = reviewerAdmissionDenial({
+    authorFamily: input.request.authorFamily,
+    provider: input.provider,
+    model: input.model,
+  });
+  if (denial) return { ok: false, reason: denial };
   const digest = reviewIdentityDigest(input.request);
   const receiptPath = join(
     resolve(input.repoRoot),

@@ -7,10 +7,10 @@
           {
             "type": "command",
             "command": "node",
-            "args": [".ut-tdd/bin/ut-tdd.mjs","hook","agent-guard"],
+            "args": ["-e","const fs=require(\"node:fs\"),path=require(\"node:path\"),cp=require(\"node:child_process\");let root;try{root=fs.realpathSync.native(process.env.CLAUDE_PROJECT_DIR||cp.execFileSync(\"git\",[\"rev-parse\",\"--show-toplevel\"],{encoding:\"utf8\",windowsHide:true}).trim())}catch{root=path.resolve(process.cwd())}const launcher=path.resolve(root,\".ut-tdd\",\"bin\",\"ut-tdd.mjs\");if(fs.existsSync(launcher)){const result=cp.spawnSync(process.execPath,[launcher,...process.argv.slice(2)],{cwd:root,stdio:\"inherit\",windowsHide:true});if(result.error){console.error(\"consumer_runtime_resolution_denied\");process.exit(78)}process.exit(result.status??1)}let mainLauncher=\"<main worktree>/.ut-tdd/bin/ut-tdd.mjs\";let mainExplanation=\" (resolve <main worktree> from git rev-parse --git-common-dir)\";try{const common=path.resolve(root,cp.execFileSync(\"git\",[\"rev-parse\",\"--git-common-dir\"],{cwd:root,encoding:\"utf8\",windowsHide:true}).trim());mainLauncher=path.join(path.dirname(common),\".ut-tdd\",\"bin\",\"ut-tdd.mjs\");mainExplanation=\"\"}catch{}const q=String.fromCharCode(34);console.error(\"consumer_runtime_absent: runtime is missing from this worktree. Run: node \"+q+mainLauncher+q+\" setup --worktree \"+q+root+q+mainExplanation);process.exit(2)",".ut-tdd/bin/ut-tdd.mjs","hook","agent-guard"],
             "timeout": 5,
-            "blockOnFailure": true,
-            "statusMessage": "agent-guard: subagent allowlist/model enforcement"
+            "onFailure": "block",
+            "statusMessage": "agent-guard: generic subagent type and model check"
           }
         ]
       },
@@ -20,9 +20,9 @@
           {
             "type": "command",
             "command": "node",
-            "args": [".ut-tdd/bin/ut-tdd.mjs","hook","work-guard"],
+            "args": ["-e","const fs=require(\"node:fs\"),path=require(\"node:path\"),cp=require(\"node:child_process\");let root;try{root=fs.realpathSync.native(process.env.CLAUDE_PROJECT_DIR||cp.execFileSync(\"git\",[\"rev-parse\",\"--show-toplevel\"],{encoding:\"utf8\",windowsHide:true}).trim())}catch{root=path.resolve(process.cwd())}const launcher=path.resolve(root,\".ut-tdd\",\"bin\",\"ut-tdd.mjs\");if(fs.existsSync(launcher)){const result=cp.spawnSync(process.execPath,[launcher,...process.argv.slice(2)],{cwd:root,stdio:\"inherit\",windowsHide:true});if(result.error){console.error(\"consumer_runtime_resolution_denied\");process.exit(78)}process.exit(result.status??1)}let mainLauncher=\"<main worktree>/.ut-tdd/bin/ut-tdd.mjs\";let mainExplanation=\" (resolve <main worktree> from git rev-parse --git-common-dir)\";try{const common=path.resolve(root,cp.execFileSync(\"git\",[\"rev-parse\",\"--git-common-dir\"],{cwd:root,encoding:\"utf8\",windowsHide:true}).trim());mainLauncher=path.join(path.dirname(common),\".ut-tdd\",\"bin\",\"ut-tdd.mjs\");mainExplanation=\"\"}catch{}const q=String.fromCharCode(34);console.error(\"consumer_runtime_absent: runtime is missing from this worktree. Run: node \"+q+mainLauncher+q+\" setup --worktree \"+q+root+q+mainExplanation);process.exit(2)",".ut-tdd/bin/ut-tdd.mjs","hook","work-guard"],
             "timeout": 5,
-            "blockOnFailure": true,
+            "onFailure": "block",
             "statusMessage": "work-guard: foreign edit protection"
           }
         ]
@@ -49,7 +49,7 @@
             "type": "command",
             "command": "node",
             "args": [".ut-tdd/bin/ut-tdd.mjs","hook","post-tool-use"],
-            "timeout": 5,
+            "timeout": 30,
             "statusMessage": "session-log: post tool use (fail-open)"
           }
         ]
@@ -62,8 +62,8 @@
             "type": "command",
             "command": "node",
             "args": [".ut-tdd/bin/ut-tdd.mjs","session","summary"],
-            "timeout": 5,
-            "statusMessage": "session-log: PLAN digest summary (fail-open)"
+            "timeout": 30,
+            "statusMessage": "session-log: work digest summary (fail-open)"
           }
         ]
       },

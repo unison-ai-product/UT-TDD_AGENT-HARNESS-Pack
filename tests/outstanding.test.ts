@@ -1,133 +1,99 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   analyzeOutstandingWork,
   computeOutstandingWork,
-  loadOutstandingPlanRows,
-  type OutstandingPlanRow,
   outstandingSummaryLine,
 } from "../src/lint/outstanding.ts";
+import { analyzePlaceholderDeps, loadPlaceholderDepsDocs } from "../src/lint/placeholder-deps.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
-// IMP-139: 「未了の正の集計シグナル」(非終端 PLAN 層別 + open defer) の additive surface 回帰。
+// IMP-139: open defer の additive surface 回帰。
 
 describe("analyzeOutstandingWork", () => {
-  const rows: OutstandingPlanRow[] = [
-    { layer: "L7", status: "draft" },
-    { layer: "L7", status: "in_progress" },
-    { layer: "cross", status: "draft" },
-    { layer: "L4", status: "confirmed" }, // 終端 → 除外
-    { layer: "L5", status: "completed" }, // 終端 → 除外
-    { layer: "L6", status: "accepted" }, // 終端 → 除外
-    { layer: "L3", status: "archived" }, // archived → 除外
-  ];
-
-  it("非終端のみを layer 別に集計し、終端/archived を除外する", () => {
-    const o = analyzeOutstandingWork(rows, 2);
-    expect(o.nonTerminalPlansByLayer).toEqual({ L7: 2, cross: 1 });
-    expect(o.nonTerminalPlansTotal).toBe(3);
-    expect(o.openDefers).toBe(2);
-  });
-
-  it("layer key は昇順 (決定論順)", () => {
-    const o = analyzeOutstandingWork(
-      [
-        { layer: "L9", status: "draft" },
-        { layer: "L2", status: "draft" },
-        { layer: "L5", status: "draft" },
-      ],
-      0,
-    );
-    expect(Object.keys(o.nonTerminalPlansByLayer)).toEqual(["L2", "L5", "L9"]);
-  });
-
-  it("layer 空は unknown へ寄せる", () => {
-    const o = analyzeOutstandingWork([{ layer: "  ", status: "draft" }], 0);
-    expect(o.nonTerminalPlansByLayer).toEqual({ unknown: 1 });
-  });
-
-  it("負の openDefers は 0 にクランプ / 全終端なら total=0", () => {
-    const o = analyzeOutstandingWork([{ layer: "L7", status: "confirmed" }], -5);
-    expect(o.nonTerminalPlansTotal).toBe(0);
-    expect(o.nonTerminalPlansByLayer).toEqual({});
+  it("負の openDefers は 0 にクランプする", () => {
+    const o = analyzeOutstandingWork(-5);
     expect(o.openDefers).toBe(0);
   });
 });
 
 describe("outstandingSummaryLine", () => {
-  it("非終端ありの 1 行サマリ", () => {
-    expect(
-      outstandingSummaryLine({
-        nonTerminalPlansByLayer: { L7: 2, cross: 1 },
-        nonTerminalPlansTotal: 3,
-        versionUpParked: 0,
-        activeDraftTotal: 3,
-        openDefers: 1,
-      }),
-    ).toBe("outstanding: non-terminal PLANs=3 (L7:2, cross:1); open defers=1");
-  });
-
-  it("非終端ゼロは none 表記", () => {
-    expect(
-      outstandingSummaryLine({
-        nonTerminalPlansByLayer: {},
-        nonTerminalPlansTotal: 0,
-        versionUpParked: 0,
-        activeDraftTotal: 0,
-        openDefers: 0,
-      }),
-    ).toBe("outstanding: non-terminal PLANs=0 (none); open defers=0");
+  it("open defer の 1 行サマリ", () => {
+    expect(outstandingSummaryLine({ openDefers: 1 })).toBe("outstanding: open defers=1");
   });
 });
 
-describe("loadOutstandingPlanRows + computeOutstandingWork", () => {
-  function writePlan(root: string, name: string, layer: string, status: string): void {
+describe("computeOutstandingWork", () => {
+  function makeDualRootOutstandingRepo(): {
+    root: string;
+    planPath: string;
+    designPath: string;
+  } {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-planret-012-outstanding-"));
+    const planPath = join(root, "docs", "plans", "x.md");
+    const designPath = join(root, "docs", "design", "harness", "L6-function-design", "y.md");
+    mkdirSync(join(root, "docs", "plans"), { recursive: true });
+    mkdirSync(join(root, "docs", "design", "harness", "L6-function-design"), {
+      recursive: true,
+    });
     writeFileSync(
-      join(root, "docs", "plans", name),
+      planPath,
       [
         "---",
-        `plan_id: ${name.replace(/\.md$/, "")}`,
-        `layer: ${layer}`,
-        `status: ${status}`,
-        "kind: impl",
+        "layer: L7",
+        "status: draft",
         "---",
-        "",
-        `# ${name}`,
-        "本文。",
+        "PLAN fixture",
+        "- FR-L1-46 explicit_l7_defer waiting_layer:L6 owner:tl",
       ].join("\n"),
       "utf8",
     );
+    writeFileSync(
+      designPath,
+      [
+        "---",
+        "status: confirmed",
+        "---",
+        "- FR-L1-47 explicit_l7_defer waiting_layer:L6 owner:tl",
+        "- placeholder_deps: {waiting_layer:L6, waiting_spec: candidate012 fixture}",
+      ].join("\n"),
+      "utf8",
+    );
+    return { root, planPath, designPath };
   }
 
-  it("docs/plans の frontmatter から layer/status を読み非終端を集計する", () => {
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-outstanding-"));
-    try {
-      mkdirSync(join(root, "docs", "plans"), { recursive: true });
-      writePlan(root, "PLAN-A.md", "L7", "draft");
-      writePlan(root, "PLAN-B.md", "L7", "confirmed");
-      writePlan(root, "PLAN-C.md", "cross", "in_progress");
-
-      const rows = loadOutstandingPlanRows(root);
-      expect(rows).toHaveLength(3);
-
-      const o = computeOutstandingWork(root);
-      expect(o.nonTerminalPlansByLayer).toEqual({ L7: 1, cross: 1 });
-      expect(o.nonTerminalPlansTotal).toBe(2);
-      expect(o.openDefers).toBe(0); // design/test-design 不在 → 0 (fail-open)
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("docs/plans 不在は空集計 (fail-open)", () => {
+  it("design/test-design 不在は open defer を 0 にする (fail-open)", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-outstanding-empty-"));
     try {
       const o = computeOutstandingWork(root);
-      expect(o.nonTerminalPlansTotal).toBe(0);
       expect(o.openDefers).toBe(0);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
+    }
+  });
+
+  it("one design open defer is counted", () => {
+    const fixture = makeDualRootOutstandingRepo();
+    try {
+      expect(readFileSync(fixture.designPath, "utf8")).toContain("FR-L1-47 explicit_l7_defer");
+      expect(readFileSync(fixture.designPath, "utf8")).toContain("waiting_layer:L6");
+      expect(analyzePlaceholderDeps(loadPlaceholderDepsDocs(fixture.root)).specBackfillWaits).toBe(
+        1,
+      );
+      expect(computeOutstandingWork(fixture.root).openDefers).toBe(1);
+    } finally {
+      removeTestTree(fixture.root);
+    }
+  });
+
+  it("U-PLANRET-012(b): computeOutstandingWork exposes only openDefers", () => {
+    const fixture = makeDualRootOutstandingRepo();
+    try {
+      expect(computeOutstandingWork(fixture.root)).toEqual({ openDefers: 1 });
+    } finally {
+      removeTestTree(fixture.root);
     }
   });
 });

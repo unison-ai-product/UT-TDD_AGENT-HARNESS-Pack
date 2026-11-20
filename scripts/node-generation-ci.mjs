@@ -1,3 +1,4 @@
+import "../src/runtime/windows-hide.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";

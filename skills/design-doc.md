@@ -66,7 +66,7 @@ alongside any generated SVG — never commit only the SVG.
 
 ## Mermaid templates (UT-TDD contexts)
 
-PLAN lifecycle state:
+Forward work lifecycle:
 
 ```mermaid
 stateDiagram-v2
@@ -79,23 +79,13 @@ stateDiagram-v2
   accept --> [*]
 ```
 
-harness.db projection (ER):
+Example of an authored design and its typed trace:
 
 ```mermaid
-erDiagram
-  PLAN_REGISTRY ||--o{ MODEL_RUNS : drives
-  PLAN_REGISTRY {
-    text plan_id PK
-    text layer
-    text drive
-    text status
-  }
-  MODEL_RUNS {
-    text run_id PK
-    text plan_id FK
-    text model
-    text outcome
-  }
+flowchart LR
+  requirement[Requirement] --> design[Function design]
+  design --> oracle[Test design]
+  oracle --> evidence[Test evidence]
 ```
 
 ## Freeze diagram checklist

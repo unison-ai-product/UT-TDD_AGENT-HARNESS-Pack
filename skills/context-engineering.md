@@ -27,7 +27,7 @@ decision_points:
     over: "Forwarding the full primary session context to the subagent."
     because: "Harness pillar 4 (dynamic context/skill injection) and the context budget rules require per-task scoping; forwarding full context wastes the subagent's budget and drowns the relevant signal."
   - when: "Selecting how many skills to load for a task."
-    choose: "Load the 1-3 most relevant skills, using `ut-tdd skill suggest --plan <plan-id>` to pick them."
+    choose: "Load the 1-3 most relevant skills, using the task text with `ut-tdd skill suggest` to pick them."
     over: "Pre-loading the full skill catalog to be safe."
     because: "Skills cost ~2-4 KB each and the practical context ceiling is ~150-200 KB; bulk-loading crowds out budget for the actual task docs."
   - when: "A task spans multiple V-model layers and context budget is limited."
@@ -57,7 +57,7 @@ skill injection).
 - A subagent prompt is overflowing context budget (~200 KB practical ceiling for
   Sonnet-class models).
 - Adding a new V-model layer to the harness that needs a context injection rule.
-- A `ut-tdd skill suggest --plan <plan-id>` output is being acted on.
+- A `ut-tdd skill suggest --text "..."` output is being acted on.
 
 ## Per-layer injection table
 
@@ -67,13 +67,13 @@ full doc tree.
 | Layer group | Canonical inject | Dynamic add |
 |---|---|---|
 | L0–L3 (concept/requirement) | `CLAUDE.md`, `docs/governance/README.md`, concept + requirements docs | Relevant ADRs, L0 glossary |
-| L4–L6 (design) | L3 requirements for the feature, PLAN doc, design doc skeleton | `documentation-and-adrs` skill, parent design doc |
-| L7 (implementation) | PLAN doc, L6 function-spec, `src/` target files | `gate-planning` skill, test file |
-| L8–L10 (integration / system test) | PLAN, test-design doc, `tests/` target | `harness-observability` skill |
-| L11–L14 (acceptance / production) | PLAN, acceptance criteria, `ut-tdd doctor` output | ADR list, handover state |
+| L4–L6 (design) | L3 requirements for the feature, Issue, design doc skeleton | `documentation-and-adrs` skill, parent design doc |
+| L7 (implementation) | Issue, L6 function-spec, `src/` target files | `gate-planning` skill, test file |
+| L8–L10 (integration / system test) | Issue, test-design doc, `tests/` target | `harness-observability` skill |
+| L11–L14 (acceptance / production) | Issue, acceptance criteria, `ut-tdd doctor` output | ADR list, handover state |
 
-Use `ut-tdd skill suggest --plan <plan-id>` to get a computed skill recommendation
-for a specific PLAN before composing a subagent prompt.
+Use `ut-tdd skill suggest --text "..."` to get a computed skill recommendation
+for the task before composing a subagent prompt.
 
 ## Context budget rules
 
@@ -89,7 +89,7 @@ for a specific PLAN before composing a subagent prompt.
 
 ## Dynamic loading procedure
 
-1. Run `ut-tdd skill suggest --plan <plan-id>` to get the recommended skill set.
+1. Run `ut-tdd skill suggest --text "..."` to get the recommended skill set.
 2. Load the top 1–3 skills. If the task spans multiple layers, load the skill
    for the highest-risk layer first.
 3. For subagent prompts: include only the docs the subagent needs to complete
@@ -101,7 +101,7 @@ for a specific PLAN before composing a subagent prompt.
 
 - Migration snapshots (`docs/archive/`, `vendor source snapshot`) — historical
   only; never needed for forward work.
-- The full `docs/plans/` directory — pass the single relevant PLAN file.
+- Entire design directories. Pass the relevant Issue and design revision.
 - Session logs or raw `harness.db` dumps — use `ut-tdd metrics skill` /
   `ut-tdd find <query>` instead.
 - Credentials, API keys, PII — never in prompt context. See safety boundaries in
