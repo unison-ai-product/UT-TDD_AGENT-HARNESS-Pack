@@ -203,9 +203,9 @@ export function parseFreezeAttributeRows(l8Markdown: string): FreezeAttributeRow
   return rows;
 }
 
-/** L5-25 §7.1 の全数写像表を読む。被覆列の 3 桁表記を full oracle ID へ展開する。 */
+/** L5 D.5 の全数写像表を読む。被覆列の 3 桁表記を full oracle ID へ展開する。 */
 export function parseContractMappingRows(l5Markdown: string): ContractMappingRow[] {
-  const section = sliceSection(l5Markdown, "### 7.1 ");
+  const section = sliceSection(l5Markdown, "### D.5 ");
   const rows: ContractMappingRow[] = [];
   for (const line of section.split(/\r?\n/)) {
     if (!line.startsWith("| `C-RGK-")) continue;

@@ -1,12 +1,12 @@
 ---
-title: "PLAN-L7-676 PR-T1 port index: checked ZIP テンプレート 57 本の分類"
+title: "PR-T1 port index: checked ZIP テンプレート 57 本の分類"
 status: draft
-plan: docs/plans/PLAN-L7-676-release-consumer-dev-start.md
+issue: 676
 ---
 
 # port index: checked ZIP テンプレートの移植先
 
-`Vモデル設計ドキュメント_checked.zip` (repo root、gitignore 対象、PO 承認済み公開移植: issue #676) の `templates/NN_*.yaml` 57 本 (01〜53、96、102、108、109) を、本書で「slot source」か「optional」のどちらか一方だけに分類する (PLAN-L7-676 §3.5.3、CANDIDATE-U-RCDEV-021)。分類の根拠は `docs/governance/vmodel-document-disposition-catalog.md` の `target` 列であり、L2 (直接 source 無し) と L6 (既存テンプレートを正とする例外) は PLAN §3.5.3 の構成元記載に従う。
+`Vモデル設計ドキュメント_checked.zip` (repo root、gitignore 対象、PO 承認済み公開移植: issue #676) の `templates/NN_*.yaml` 57 本 (01〜53、96、102、108、109) を、本書で「slot source」か「optional」のどちらか一方だけに分類する (CANDIDATE-U-RCDEV-021)。分類の根拠は `docs/governance/vmodel-document-disposition-catalog.md` の `target` 列であり、L2 (直接 source 無し) と L6 (既存テンプレートを正とする例外) は例外扱いとし、構成元は各テンプレート冒頭に記載する。
 
 ## 1. slot source (required 21 slot、`docs/templates/vmodel/` 直下)
 
@@ -34,7 +34,7 @@ plan: docs/plans/PLAN-L7-676-release-consumer-dev-start.md
 | `DOC-L13-PRODUCTION-OBSERVATION` | `L13-production-observation.md` | ZIP-DOC-011、ZIP-DOC-021 |
 | `DOC-L14-OPERATIONAL-TEST` | `L14-operational-test-design.md` | ZIP-DOC-011、ZIP-DOC-034 |
 
-21 slot の全てに、frontmatter の `doc_type_id` が一致するテンプレートが exactly 1 本ある (CANDIDATE-U-RCDEV-019)。`DOC-L2-SCREEN` は 04 基本設計書の画面節と `diagrams.yaml` の 画面遷移図 (semantic item catalog `d_screen`) から構成 (直接 source 無し)。`DOC-L6-FUNCTION-SPEC` の正本は既存 `docs/templates/design/L6-function-spec-template.md` であり、`L6-function-spec.md` は ZIP-DOC-024 の補足のみを持つ (PLAN §3.5.3)。
+21 slot の全てに、frontmatter の `doc_type_id` が一致するテンプレートが exactly 1 本ある (CANDIDATE-U-RCDEV-019)。`DOC-L2-SCREEN` は 04 基本設計書の画面節と `diagrams.yaml` の 画面遷移図 (semantic item catalog `d_screen`) から構成 (直接 source 無し)。`DOC-L6-FUNCTION-SPEC` の正本は既存 `docs/templates/design/L6-function-spec-template.md` であり、`L6-function-spec.md` は ZIP-DOC-024 の補足のみを持つ。
 
 ## 2. optional (27 本、`docs/templates/vmodel/optional/`)
 
@@ -72,9 +72,9 @@ optional テンプレートの実体は `docs/templates/vmodel/optional/NNN-<slu
 
 ## 3. 同梱しないもの (ADR-001)
 
-zip `tools/*.py` (27 entry) と `requirements.txt` は同梱しない。検査の意味は PLAN §3.6-4 の共通述語 (S/I/T/E/F/A) として TypeScript gate に再実装する (CANDIDATE-U-RCDEV-024)。
+zip `tools/*.py` (27 entry) と `requirements.txt` は同梱しない。検査の意味は共通述語 (S/I/T/E/F/A) として TypeScript gate に再実装する (CANDIDATE-U-RCDEV-024)。
 
 ## 4. 管理 yaml (第 2 の SSoT を作らない)
 
-`profiles.yaml` / `catalog.yaml` / `diagrams.yaml` / `traceability.yaml` / `wbs.yaml` は 別ファイルとして出荷しない。既存正本 (`docs/governance/vmodel-document-scale-profiles.md` / `vmodel-document-catalog.md` / `vmodel-semantic-item-catalog.md`) へ merge する (PLAN §3.5.4)。この merge 作業は PR-T2 が所有する (CANDIDATE-U-RCDEV-025)。
+`profiles.yaml` / `catalog.yaml` / `diagrams.yaml` / `traceability.yaml` / `wbs.yaml` は 別ファイルとして出荷しない。既存正本 (`docs/governance/vmodel-document-scale-profiles.md` / `vmodel-document-catalog.md` / `vmodel-semantic-item-catalog.md`) へ merge する。この merge 作業は PR-T2 が所有する (CANDIDATE-U-RCDEV-025)。
 

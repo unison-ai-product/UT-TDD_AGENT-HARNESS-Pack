@@ -385,7 +385,7 @@ describe("U-FR-L1-39: classifyTask public surface", () => {
     const result = classifyProposalDocumentCoverage({
       text: "Rename a local docs helper and update README wording.",
     });
-    expect(result.recommended_subagents).toEqual(
+    expect(result.recommended_lanes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           role: "docs",
@@ -415,7 +415,7 @@ describe("U-FR-L1-39: classifyTask public surface", () => {
       text: "Change authentication permissions for PII migration and production rollout.",
     });
     expect(result.granularity).toBe("G4");
-    expect(result.recommended_subagents).toEqual(
+    expect(result.recommended_lanes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           role: "qa",
@@ -428,14 +428,14 @@ describe("U-FR-L1-39: classifyTask public surface", () => {
         }),
       ]),
     );
-    expect(result.recommended_subagents.some((a) => a.tier === "T2-spark")).toBe(false);
+    expect(result.recommended_lanes.some((a) => a.tier === "T2-spark")).toBe(false);
   });
 
   it("keeps proposal subagent recommendation metadata stable", () => {
     const result = classifyProposalDocumentCoverage({
       text: "Research screen templates and API test design coverage.",
     });
-    expect(result.recommended_subagents).toEqual(
+    expect(result.recommended_lanes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           role: "docs",

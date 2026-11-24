@@ -34,6 +34,26 @@ evidence manifest as either `mandatory_st_ids` with passing coverage or
 `deferred_st_ids` with an explicit non-stale defer. Missing row evidence is a
 doctor-blocking gate failure.
 
+G9 current system evidence manifests は `.ut-tdd/evidence/g9-system/` 直下の JSON
+ファイルとする。`.ut-tdd/evidence/g9-system/archive/` 以下の JSON は履歴記録であり、current
+manifest として読み込まない。docs-freeze PR では evidence file の移動・作成を行わず、current
+evidence が無い間は G9 成功を主張しない。凍結の merge 後、後続の実装 PR で既存の日付付き
+manifest を内容を変えずに `archive/` へ移し、その PR の commit 済み HEAD で実際に実行した
+command から新しい current manifest を記録する。新しい各 command 記録には実際の exit code、
+output digest、evidence path を含め、別 HEAD の実行結果や digest を新しい実行の証跡として
+再利用しない。`mandatory_st_ids` と `deferred_st_ids` の合計は L9 に残る全 ST-* 行を網羅し、
+mandatory 行は pass した実行 evidence に、deferred 行は明示的かつ stale でない defer に結び付ける。
+current evidence の欠落は G9 failure とする。
+
+限定例外 (control 採択 #1379 comment 6913172002): source-free の契約freeze PRでは、そのPRで新設するL9行のbindingだけを対象とする実測済みcurrent sidecarを同じPRに含めてよい。対象は新規追加行に限定し、既存行のpass/deferを拡張しない。sidecarは実行command、対象のcommit済みsubject HEAD、実際のexit code、output digest、evidence pathを記録し、別HEADの証跡を流用しない。既存の2つの日付付きcurrent manifestのbytes・status・digestを変更せず、移動・再生成もしない。この限定例外でのG9判定は既存manifestが持つ既存行のcoverageとsidecarが持つ追加行のbindingだけを合成し、他の未解決行をpassへ読み替えない。 後続#1696では既存2件の日付付きmanifestとsidecarを内容変更せずarchiveへ保全し、commit済みHEADで実測した全行bindingを含むfreshな統合current manifestを1件作る。sidecar本数と採取状態が確定した後にG9 golden件数を再測定する。
+
+ST-FUNC-03 の契約である完全な Red→Green→refactor と本体先行 fail-close は縮小しない。現行の
+`tests/forward/fsm.test.ts` U-FSM-001/002/003 は Red 順序・拒否動作の部分証拠に限られ、Refactor
+完了の証明ではないため、OPEN Issue #1335/#1336/#1337 の Refactor 判定 gate 完了まで
+`deferred_st_ids` に記録し、`mandatory_st_ids` の pass にしてはならない。3 Issue 完了後に全要求を
+実証して current manifest を再採取し、mandatory pass へ戻す。ST-FUNC-03 は v4 / 工程②の完了条件に
+残す。
+
 G10-WORKFLOW minimum mechanization (PLAN-L10 ascent): G10 is no longer closed by
 placeholder UX prose alone. A passing G10 slice requires a UX evidence manifest,
 selected UXV-* coverage across UXV-VISUAL / UXV-TOKEN / UXV-A11Y / UXV-VRT /
@@ -98,7 +118,7 @@ G7 は L7 実装完了の唯一の exit gate。以下 3 条件をすべて満た
 
 ## 4. 横断検出ゲート (§7.8.5)
 
-`ut-tdd doctor` / `ut-tdd plan lint` に束ねられる横断検出器。いずれも fail-close で該当 mode への接続を強制する。
+`ut-tdd doctor` に束ねられる横断検出器。いずれも fail-close で該当 mode への接続を強制する。
 
 | 検出器 | fail 条件 | 接続先 mode |
 |--------|----------|------------|

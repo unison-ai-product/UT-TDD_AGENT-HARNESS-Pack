@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -6,7 +6,6 @@ import {
   BACKFILL_RESULT_KEYS,
   backfillMessages,
   KIND_BACKFILL,
-  loadBackfillDocs,
   type ParsedPlan,
   parseConditionalBackfillAuditPlanIds,
   parseGlossaryTerms,
@@ -363,25 +362,5 @@ describe("U-BACKFILL-005b backfill result docs sync", () => {
       expect(requirements).toContain(key);
       expect(concept).toContain(key);
     }
-  });
-});
-
-describe("U-BACKFILL-006 実 repo の back-fill 完全性 (回帰ガード)", () => {
-  it("docs/plans/ 全 add-impl が Reverse 合流済 + §6 用語が L0 §10 に merge 済 (required orphan 0 / glossary gap 0)", () => {
-    if (!existsSync(join(process.cwd(), "docs", "plans"))) return;
-    const docs = loadBackfillDocs();
-    const r = analyzeBackfill(docs.plans, docs.glossaryText, docs.auditedLegacyIds);
-    // 失敗時に具体 PLAN/term を出して直せるように
-    expect({
-      reverseOrphans: r.reverseOrphans,
-      reverseLinkMissing: r.reverseLinkMissing,
-      legacyAuditGaps: r.legacyAuditGaps,
-      glossaryGaps: r.glossaryGaps,
-    }).toEqual({
-      reverseOrphans: [],
-      reverseLinkMissing: [],
-      legacyAuditGaps: [],
-      glossaryGaps: [],
-    });
   });
 });

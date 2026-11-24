@@ -1,7 +1,6 @@
 ## 概要
 
-## 関連 PLAN / Issue
-PLAN:
+## 関連 Issue / 設計文書
 
 `Closes #<issue-number>`（通常Forwardを含む全PRで必須。空の`Closes #`を残さない）
 

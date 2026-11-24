@@ -48,6 +48,65 @@ describe("detectMode (requirements_v1.2 §7.1)", () => {
       missingRuntimes: ["claude", "codex"],
     });
   });
+
+  it.each([
+    [
+      "hybrid",
+      ["claude", "codex"],
+      {
+        mode: "hybrid",
+        claude: true,
+        codex: true,
+        currentRuntime: null,
+        availableRuntimes: ["claude", "codex"],
+        missingRuntimes: [],
+      },
+    ],
+    [
+      "claude-only",
+      ["claude"],
+      {
+        mode: "claude-only",
+        claude: true,
+        codex: false,
+        currentRuntime: null,
+        availableRuntimes: ["claude"],
+        missingRuntimes: ["codex"],
+      },
+    ],
+    [
+      "codex-only",
+      ["codex"],
+      {
+        mode: "codex-only",
+        claude: false,
+        codex: true,
+        currentRuntime: null,
+        availableRuntimes: ["codex"],
+        missingRuntimes: ["claude"],
+      },
+    ],
+    [
+      "standalone",
+      [],
+      {
+        mode: "standalone",
+        claude: false,
+        codex: false,
+        currentRuntime: null,
+        availableRuntimes: [],
+        missingRuntimes: ["claude", "codex"],
+      },
+    ],
+  ] as const)("detects %s from the exact spawnable provider set", (_mode, available, expected) => {
+    const availableSet = new Set<string>(available);
+    const result = detectMode({
+      env: {},
+      isProviderSpawnable: (provider) => availableSet.has(provider),
+    });
+
+    expect(result).toEqual(expected);
+  });
 });
 
 describe("nextActionForMode (PLAN-L7-84 / A-138 ITEM-1, requirements §6)", () => {

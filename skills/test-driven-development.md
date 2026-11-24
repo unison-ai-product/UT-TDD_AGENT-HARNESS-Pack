@@ -48,24 +48,42 @@ implementation it exercises provides zero design signal and weaker oracle value
 
 ## When to load this skill
 
-- Crossing pair-freeze into L7 implementation for any Forward or Add-feature PLAN.
-- A Refactor PLAN must re-confirm regression coverage before touching source.
+- Crossing pair-freeze into L7 implementation for any Forward or Add-feature Issue.
+- A Refactor Issue (with its design document) must re-confirm regression coverage before touching source.
 - A Reverse back-fill requires test-first evidence for an existing code path.
 - `ut-tdd doctor` or `ut-tdd review --uncommitted` flags a missing test or a
   test that post-dates its implementation commit.
 
 ## Red-Green-Refactor cycle (UT-TDD order)
 
+How the three steps map to PRs in this repository (issue #968; the design-protection gate,
+`docs/design/harness/L6-function-design/design-protection-diff-gate.md` §10.2, compares only
+the base and head path sets and does not see commits, so the order is a review rule):
+
+| Step | Where | Commit type | What may change |
+|---|---|---|---|
+| Red | contract PR + Red (no `src/` / `scripts/`) | `test:` | test design promotion and `it.fails` tests |
+| Green | implementation PR, first commits | `feat:` / `fix:` | minimal source; `it.fails` back to `it` |
+| Refactor | implementation PR, after Green | `refactor:` | source structure only; `tests/` content diff 0 (renames only); no test design |
+
+If there is nothing to refactor, say "Refactor なし" with the reason in the PR body; do not skip
+silently. The conditions that justify "Refactor なし" and who judges them are defined in
+`docs/governance/coding-rules.md` §量・分割・Refactor の目安 (the canonical source). Large structural
+changes go to a Refactor Issue (label `refactor`) and a design document, and the code-simplify skill.
+The non-author reviewer checks the commit order and that the Refactor commits leave `tests/`
+content unchanged.
+
 ### 1. Red — write the failing test first
 
 - Derive the test contract from the L6 unit-test design doc paired with the
-  PLAN. The L6 doc must exist and be readable before any test is written.
+  Issue. The L6 doc must exist and be readable before any test is written.
 - Write one `describe` / `it` block in `tests/` that exercises a single
   behaviour. Run `npm run test` and confirm the test **fails** (Red).
 - If the test passes before any source change it is either a vacuous assertion
   or the feature already exists — both require investigation, not celebration.
 - Commit the failing test as a standalone commit so the Red evidence is in git
-  history (FR-L1-02 traceability requirement).
+  history (FR-L1-02 traceability requirement). In this repository the Red tests
+  land in the contract PR + Red as `it.fails`, so `main` CI stays Green.
 
 ### 2. Green — write the minimum source to pass
 
@@ -78,7 +96,10 @@ implementation it exercises provides zero design signal and weaker oracle value
 
 ### 3. Refactor — improve structure while tests stay Green
 
-- Rename, extract, or reorganise source and tests. No behaviour changes.
+- Rename, extract, or reorganise source. No behaviour changes. Test files may be
+  renamed or moved, but their assertions and contents stay identical (`tests/`
+  content diff 0); changing a test is not a refactor.
+- Use `refactor:` commits after the Green commits in the same implementation PR.
 - Re-run the full suite (`npm run typecheck && npm run lint && npm run test &&
   ut-tdd doctor`) after every structural change.
 - If any test turns Red, stop and revert the last change.
@@ -87,9 +108,9 @@ implementation it exercises provides zero design signal and weaker oracle value
 
 - [ ] Each new test file maps to an L6 unit-test design entry in
   `docs/test-design/`.
-- [ ] PLAN `review_evidence` contains a reference to the failing-commit SHA.
+- [ ] PR review evidence contains a reference to the failing-commit SHA.
 - [ ] `npm run test` exits 0 with no `.skip` or `.todo` left open without a
-  PLAN-linked rationale.
+  Issue-linked rationale.
 - [ ] `npm run typecheck` exits 0.
 - [ ] `npm run lint` exits 0 (Biome check — format + lint, not `biome lint` alone).
 - [ ] `ut-tdd doctor` exits 0.
@@ -112,3 +133,5 @@ implementation it exercises provides zero design signal and weaker oracle value
 - Running an unspecified test command instead of the repository's canonical `npm run test` script.
 - Treating `ut-tdd doctor` green as evidence that the test design is correct —
   doctor checks structural governance, not oracle quality or cycle order.
+- Bypassing the Vitest snapshot guard by hand-setting its env vars: forbidden; the rule lives in
+  `CLAUDE.md` §Shared Guard Discipline (Vitest の snapshot guard を env で迂回しない).

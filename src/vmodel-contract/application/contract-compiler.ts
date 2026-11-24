@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { parseIssueUrl } from "../../shared/issue-ref.ts";
 
 export const RIGHT_ARM_LAYERS = ["L8", "L9", "L10", "L11", "L12", "L13", "L14"] as const;
 export const VMODEL_LAYERS = [
@@ -13,20 +14,9 @@ export const VMODEL_LAYERS = [
   ...RIGHT_ARM_LAYERS,
 ] as const;
 
-const PAIR_EXCEPTION_BACKLINKS: Record<string, string[]> = {
-  L11: [
-    "PLAN-L1-07-vmodel-engine-swap-requirements-delta",
-    "PLAN-L4-24-declarative-vmodel-contract-right-arm",
-  ],
-  L13: [
-    "PLAN-L12-01-engine-swap-acceptance-deploy",
-    "PLAN-L4-24-declarative-vmodel-contract-right-arm",
-  ],
-};
-
 export interface CompiledVerificationObligation {
   ruleId: string;
-  planId: string;
+  issueUrl: string;
   layer: string;
   gate: string;
   pairLayers: string[];
@@ -50,7 +40,6 @@ export interface CompiledPairException {
   layer: string;
   reason: string;
   allowedPairLayers: string[];
-  requiredBacklinks: string[];
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -107,9 +96,9 @@ function compileLayer(value: unknown): CompiledVerificationObligation {
   const requiredArtifacts = stringArray(layer, "required_artifacts", layerId);
   const evidenceFamilies = stringArray(layer, "evidence_families", layerId);
   const approvalRole = requiredString(layer, "approval_role", layerId);
-  const planId = requiredString(layer, "verification_plan_id", layerId);
-  if (!planId.startsWith(`PLAN-${layerId}-`)) {
-    throw new Error(`${layerId}.verification_plan_id must start with PLAN-${layerId}-`);
+  const issueUrl = requiredString(layer, "verification_issue", layerId);
+  if (!parseIssueUrl(issueUrl)) {
+    throw new Error(`${layerId}.verification_issue must be a canonical GitHub Issue URL`);
   }
   const governanceArtifact = requiredString(layer, "governance_artifact", layerId);
   const evidenceManifest = requiredString(layer, "evidence_manifest", layerId);
@@ -121,7 +110,7 @@ function compileLayer(value: unknown): CompiledVerificationObligation {
   }
   return {
     ruleId: `right-arm:${layerId}:${gate}`,
-    planId,
+    issueUrl,
     layer: layerId,
     gate,
     pairLayers,
@@ -173,7 +162,7 @@ export function compileRightArmContract(raw: unknown): CompiledRightArmRegistry 
   ) {
     throw new Error(`right-arm layers must be exactly once: ${actualLayers.join(",")}`);
   }
-  for (const key of ["planId", "governanceArtifact", "evidenceManifest"] as const) {
+  for (const key of ["issueUrl", "governanceArtifact", "evidenceManifest"] as const) {
     const values = rightArm.map((entry) => entry[key]);
     if (new Set(values).size !== values.length) throw new Error(`duplicate right-arm ${key}`);
   }
@@ -194,11 +183,6 @@ export function compileRightArmContract(raw: unknown): CompiledRightArmRegistry 
       "allowed_pair_layers",
       `pair exception ${layer}`,
     );
-    const requiredBacklinks = stringArray(
-      exception,
-      "required_backlinks",
-      `pair exception ${layer}`,
-    );
     const layerSource = layers.find(
       (candidate) => record(candidate, "contract layer").layer === layer,
     );
@@ -207,15 +191,7 @@ export function compileRightArmContract(raw: unknown): CompiledRightArmRegistry 
     if (JSON.stringify(allowedPairLayers) !== JSON.stringify(declaredPairs)) {
       throw new Error(`pair exception ${layer} allowed_pair_layers drift`);
     }
-    const expectedBacklinks = PAIR_EXCEPTION_BACKLINKS[layer];
-    if (
-      !expectedBacklinks ||
-      requiredBacklinks.length !== expectedBacklinks.length ||
-      expectedBacklinks.some((backlink) => !requiredBacklinks.includes(backlink))
-    ) {
-      throw new Error(`pair exception ${layer} required_backlinks drift`);
-    }
-    return { layer, reason, allowedPairLayers, requiredBacklinks };
+    return { layer, reason, allowedPairLayers };
   });
   if (
     pairExceptions.length !== 2 ||

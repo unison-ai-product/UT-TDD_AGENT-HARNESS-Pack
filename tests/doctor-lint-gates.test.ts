@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import {
   checkChangeSetIntegrity,
   checkModuleDrift,
 } from "../src/doctor/lint-gates.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 describe("doctor lint gate direct checks", () => {
   it("fails closed when the repo root cannot be read", () => {
@@ -41,7 +42,7 @@ describe("doctor lint gate direct checks", () => {
         messages: ["change-set-integrity — skipped (not a git repository)"],
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

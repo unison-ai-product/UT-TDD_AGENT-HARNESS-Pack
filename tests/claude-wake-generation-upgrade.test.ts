@@ -5,7 +5,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -36,6 +35,7 @@ import {
   fixtureIdentityMatches,
 } from "./support/claude-wake-upgrade-fixture.ts";
 import { ensureTrackedProjectIdentity } from "./support/project-identity-fixture.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const workspaceId = "a".repeat(64);
 const runtimeSourceRevision = "1".repeat(40);
@@ -127,7 +127,7 @@ describe("Claude wake generation rolling upgrade", () => {
         authorityEpoch: 1,
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -154,7 +154,7 @@ describe("Claude wake generation rolling upgrade", () => {
       ).toEqual({ ok: false, reason: "multiple_active_generations" });
       expect(readdirSync(root).sort()).toEqual(before);
 
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
       mkdirSync(root, { recursive: true });
       writeFileSync(
         join(root, "foreign.generation"),
@@ -173,7 +173,7 @@ describe("Claude wake generation rolling upgrade", () => {
       ).toEqual({ ok: false, reason: "foreign_workspace_generation" });
       expect(readdirSync(root)).toEqual(["foreign.generation"]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -224,7 +224,7 @@ describe("Claude wake generation rolling upgrade", () => {
         reason: "capability_policy_mismatch",
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -308,7 +308,7 @@ describe("Claude wake generation rolling upgrade", () => {
         "active",
       ]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -360,7 +360,7 @@ describe("Claude wake generation rolling upgrade", () => {
       );
       expect(journals.some((entry) => entry.state === "rolled_back")).toBe(true);
     } finally {
-      rmSync(repoRoot, { recursive: true, force: true });
+      removeTestTree(repoRoot);
     }
   });
 
@@ -426,7 +426,7 @@ describe("Claude wake generation rolling upgrade", () => {
       expect(replayPath.endsWith(".claim")).toBe(true);
       expect(existsSync(inbox) ? readdirSync(inbox) : []).toEqual(before);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -487,7 +487,7 @@ describe("Claude wake generation rolling upgrade", () => {
       expect(readdirSync(join(runtime, "inbox"))).toHaveLength(1);
     } finally {
       clock.mockRestore();
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 

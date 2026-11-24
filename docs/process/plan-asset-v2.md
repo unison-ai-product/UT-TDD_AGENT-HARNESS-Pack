@@ -89,17 +89,16 @@ evidenceは`subject_asset_id`、`subject_revision`、`source_commit`、redacted 
 - 新規PLANと意味変更PLANはv2へ昇格する。
 - numeric core衝突はmigration ledgerでwinner/new ordinal/legacy aliasを固定し、恒久allowlistへ逃がさない。設計baselineは18群、現HEAD inventoryは20群/41 PLANであり、HEAD digestごとに再計測する。
 - legacy asset IDは`[algorithm label, root tracked ut-tdd.project.json#repository_identity, full legacy plan_id]`をuint32 big-endian byte lengthでframe化したSHA-256から初回だけ導出する。config schema/blob/HEADを検証し、remote URLからidentityを推測せず、config不在はfail-closeする。checkout path、branch、source path、layer、ordinalを入力にせず、導出後はrename時に再計算しない。
-- `ut-tdd plan migrate --dry-run`は書換えず、identity、collision、unresolved reference、evidence bindingを表示する。
-- 明示`--execute`は新revision/alias/ledgerをappendし、履歴を書き換えない。
+- 旧移行コマンドの dry-run は、identity、collision、unresolved reference、evidence binding を表示した。
+- 旧移行コマンドの実行時は、新しい revision、alias、ledger を追記した。
 
-## 8. CLI契約
+## 8. CLI の設計履歴
 
 - `ut-tdd workflow status --plan <alias|asset_id>`（実装予定。現行CLIではない）
 - `ut-tdd workflow transition --plan <asset_id> --to <state> --evidence <id...>`（実装予定。現行CLIではない）
 - `ut-tdd workflow explain --plan <asset_id> --to <state>`（実装予定。現行CLIではない）
-- `ut-tdd plan validate <path>`
-- `ut-tdd plan migrate --dry-run [--path <path>]`
-- `ut-tdd plan revise --asset <asset_id> --from-revision <n>`
+
+PLAN の検証・移行・改訂のコマンドは S7 で退役した。
 
 CLI、hook、doctorは同じcanonical parser、FSM、guard verdict、exit codeを使用する。
 

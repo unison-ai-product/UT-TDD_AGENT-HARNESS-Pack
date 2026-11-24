@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ghCommandEnv } from "../github/gh-command.ts";
 import {
   analyzeReviewDispatch,
   type PrObservation,
@@ -136,6 +137,7 @@ function defaultFetchMergedPrPage(
     const output = run("gh", ["api", endpoint], {
       encoding: "utf8",
       timeout: POST_MERGE_COMMAND_TIMEOUT_MS,
+      env: ghCommandEnv(process.env),
       maxBuffer: POST_MERGE_GH_MAX_BUFFER_BYTES,
       windowsHide: true,
     });

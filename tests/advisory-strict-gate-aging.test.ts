@@ -15,8 +15,7 @@ import {
 } from "../src/lint/advisory-strict-gate-aging.ts";
 
 // PLAN-L7-420 Step 3: doctor 自身が「strict 化待ちのまま放置されている advisory gate」を検出する
-// meta check。green-command-digest (PLAN-L7-132) が opt-in strict のまま CI に投入されず、
-// fake/stale digest が 30->44->49 件と再蓄積した (G-1) の再発防止。coding != substance の機械代替
+// meta check。coding != substance の機械代替
 // として、fixture gate を使った real-repo regression 相当のテストで検出動作を実証する。
 
 function gate(overrides: Partial<AdvisoryStrictGate> = {}): AdvisoryStrictGate {
@@ -70,13 +69,12 @@ describe("analyzeAdvisoryGateAging (PLAN-L7-420 Step 3) — advisory gate 放置
     expect(findings).toHaveLength(0);
   });
 
-  it("実データ (ADVISORY_STRICT_GATES): green-command-digest は PLAN-L7-420 Step 2 で CI 昇格済み、対象外", () => {
-    const gcd = ADVISORY_STRICT_GATES.find((g) => g.id === "green-command-digest");
-    expect(gcd?.promotedInCi).toBe(true);
+  it("実データ (ADVISORY_STRICT_GATES): 退役 gate は無く、残る telemetry gate は advisory", () => {
+    expect(ADVISORY_STRICT_GATES.map((g) => g.id)).toEqual(["db-telemetry-provenance"]);
     const findings = analyzeAdvisoryGateAging(ADVISORY_STRICT_GATES, {
       now: new Date("2030-01-01T00:00:00Z"),
     });
-    expect(findings.map((f) => f.id)).not.toContain("green-command-digest");
+    expect(findings.map((f) => f.id)).toEqual(["db-telemetry-provenance"]);
   });
 });
 
@@ -283,17 +281,18 @@ describe("checkAdvisoryGateAging — workflow 突き合わせ配線 (repoRoot / 
     ]);
   });
 
-  it("real fixture: 実 repo の harness-check.yml で green-command-digest の strict flag が実在する", () => {
+  it("real fixture: telemetry gate は保持され、harness-check.yml では advisory のまま", () => {
     const workflowContent = readHarnessCheckWorkflowContent(process.cwd());
     expect(workflowContent).not.toBeNull();
-    expect(workflowContent).toContain("--strict-green-command-digest");
+    expect(workflowContent).not.toContain("--strict-telemetry-provenance");
 
     const result = checkAdvisoryGateAging({
       now: new Date("2030-01-01T00:00:00Z"),
       workflowContent,
     });
     const joined = result.messages.join(" | ");
-    expect(joined).not.toContain("green-command-digest registry says promoted but flag missing");
+    expect(joined).toContain("db-telemetry-provenance");
+    expect(joined).not.toContain("registry says promoted but flag missing");
   });
 
   it("real fixture: readHarnessCheckWorkflowContent は実際の workflow パスから読める", () => {

@@ -17,7 +17,7 @@ triggers: "テスト戦略: 計画・検証方式・技法・カバレッジ基�
 # vmodel-role-test
 
 > 移植元: zip `build/agent/test.md` (Apache-2.0、PLAN-L7-676 PR-T3、
-> docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1)。
+> plans-archive-20261102:docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5.1)。
 >
 > **これは一般的な行動規約ではなく、サンプル製品「TeamFlow」の設計書 (zip 同梱の
 > `docs/*.yaml`) から `python tools/build.py agentdocs` (移植元 `vmodel-docgen` の

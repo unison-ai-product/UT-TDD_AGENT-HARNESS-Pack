@@ -19,7 +19,7 @@ applies_to:
     - Recovery
 decision_points:
   - when: "A projection or capture point needs a new value written to `harness.db`"
-    choose: "write it through `src/state-db/projection-writer.ts` derived from `docs/plans/*.md` / `.ut-tdd/` state"
+    choose: "write it through `src/state-db/projection-writer.ts` using the tracked authoring sources and `.ut-tdd/` state"
     over: "writing directly to `harness.db` from the calling code"
     because: "harness.db is a deterministic projection, not a source of truth; direct writes break rebuild-from-scratch determinism and diverge from the design docs that are the actual SSoT"
   - when: "Design truth for a feature and a `harness.db` row disagree"
@@ -54,17 +54,17 @@ the DB, or a telemetry capture point.
 
 ## When to load this skill
 
-- A PLAN adds or changes a `harness.db` table, a `gate_runs` / `model_runs`
+- A change adds or changes a `harness.db` table, a `gate_runs` / `model_runs`
   capture, or a metric.
 - A doctor check needs to read DB state and fail-close on a missing row.
 - Cost/token telemetry must be recorded for an agent call.
 
 ## What harness.db is (and is not)
 
-`harness.db` is a **deterministic projection** rebuilt from `docs/plans/*.md`,
+`harness.db` is a **deterministic projection** rebuilt from tracked design and governance inputs,
 `.ut-tdd/` state, and session logs via `src/state-db/projection-writer.ts`.
 Never write to it directly; never treat it as the source of design truth (that
-lives in `docs/design/`). It is authoritative for: PLAN trace coverage, whether
+lives in `docs/design/`). Use it to inspect design trace coverage, whether
 a gate ran (`gate_runs`), model/cost per run (`model_runs`), and skill adoption
 (`skill_evaluations`). Rebuild with `ut-tdd db rebuild`; inspect with
 `ut-tdd metrics skill`, `ut-tdd telemetry scan`, and `ut-tdd find <query>`.
@@ -87,7 +87,7 @@ Token and cost telemetry is exposed by `ut-tdd telemetry` and projected into
 - [ ] Route the call through `ut-tdd claude` / `ut-tdd codex` / `ut-tdd team
       run`, not a raw provider spawn — only the wrappers capture lifecycle and
       cost evidence.
-- [ ] Record the run metadata (runtime, model, role, drive, plan_id, timings)
+- [ ] Record the run metadata (runtime, model, role, drive, subject, timings)
       in `model_runs`.
 - [ ] Store metadata only — never prompt text, response text, credentials, or
       PII.
@@ -95,7 +95,7 @@ Token and cost telemetry is exposed by `ut-tdd telemetry` and projected into
 ## Session log and handover
 
 The `SessionStart` and `Stop` hooks bracket each session
-(`src/runtime/session-log.ts`) and compress events into a PLAN digest. At a
+(`src/runtime/session-log.ts`) and capture session metadata. At a
 session boundary run `ut-tdd handover` to flush
 `.ut-tdd/handover/CURRENT.json`. Treat the handover carry as a claim, not truth:
 verify it against `git log` and `ut-tdd doctor` before relying on it.

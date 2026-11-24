@@ -1,49 +1,33 @@
 /**
- * UT-TDD subagent guard.
+ * UT-TDD subagent guard (issue #1002, contract: docs/design/harness/L6-function-design/agent-guard-delegation-boundary.md).
  *
- * Claude Code Agent calls are controlled fail-closed:
- * 1. Missing subagent_type is blocked.
- * 2. Non-allowlisted subagents are blocked.
- * 3. Missing model is blocked.
- * 4. Calls that request a model family *below* the one declared in frontmatter are
- *    blocked (no quiet downgrade / cost-cutting). Requesting a family *at or above*
- *    the declared floor is allowed (PLAN-L7-399): review-critical subagents
- *    (blind-reviewer / code-reviewer / ut-tdd-tl / security-audit / qa-test) declare a sonnet floor,
- *    but a higher-tier orchestrator (opus) must be able to escalate a review to its
- *    own tier or above — pinning review strictly below the orchestrator inverts the
- *    "review >= orchestrator" invariant the harness otherwise enforces via
- *    src/task/tier-router-policy.ts's tierFor() (consult/verify roles always T0).
+ * Claude Code Agent calls are controlled fail-closed against a closed set of generic types:
+ * G1 envelope without tool_name -> BLOCK (never bypassed).
+ * G2 non-Agent tools pass.
+ * G3 subagent_type outside GENERIC_SUBAGENT_TYPES -> BLOCK.
+ * G4 missing model -> BLOCK.  G5 un-normalizable / ambiguous model -> BLOCK.
+ * G6 fable -> BLOCK (apex tier stays with the judgement layer, i.e. the delegation path).
+ * There is no model floor here: the floor lives in the delegation routing (src/team/delegation-routing.ts).
+ * A subagent has no closing authority; its output is never a verdict or a merge basis.
  *
- * This module is pure. The hook shim owns stdin and filesystem access.
+ * This module is pure: no filesystem, no environment. The hook shim owns stdin and exit codes.
  */
 
 import {
   AGENT_GUARD_BYPASS_HINT,
   AGENT_TOOL_NAMES,
   CLAUDE_MODEL_FAMILY_CATALOG,
-  SUBAGENT_ALLOWLIST,
+  GENERIC_SUBAGENT_TYPES,
 } from "./agent-guard-policy.ts";
 
 export type ModelFamily = keyof typeof CLAUDE_MODEL_FAMILY_CATALOG;
 
-/** Capability floor ordering. Higher rank = strictly more capable, never a valid "downgrade" target. */
-const FAMILY_RANK: Record<ModelFamily, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 3 };
 const MODEL_FAMILY_CATALOG = Object.entries(CLAUDE_MODEL_FAMILY_CATALOG) as Array<
   [ModelFamily, string]
 >;
 const MODEL_FAMILIES = MODEL_FAMILY_CATALOG.map(([family]) => family);
 const MODEL_FAMILY_TEXT = MODEL_FAMILIES.join(" / ");
-
-// PLAN-L7-414: fable is an apex tier reserved for judgement gates, never worker consumption.
-const FABLE_QUALITY_CHECK_SUBAGENTS = new Set([
-  "blind-reviewer",
-  "code-reviewer",
-  "ut-tdd-tl",
-  "security-audit",
-  "qa-test",
-]);
-
-export { SUBAGENT_ALLOWLIST } from "./agent-guard-policy.ts";
+const GENERIC_TYPES_TEXT = [...GENERIC_SUBAGENT_TYPES].join(" / ");
 
 export interface AgentGuardInput {
   tool_name?: string;
@@ -58,10 +42,7 @@ export interface AgentGuardInput {
   } | null;
 }
 
-export type ResolvedFamily = ModelFamily | "missing" | "unknown";
-
 export interface AgentGuardContext {
-  resolveAgentFamily: (subagentType: string) => ResolvedFamily;
   allowRaw: boolean;
 }
 
@@ -84,17 +65,25 @@ export function normalizeModelFamily(raw: string | null | undefined): ModelFamil
   return hits.size === 1 ? [...hits][0] : null;
 }
 
-const ALLOWLIST_TEXT = [...SUBAGENT_ALLOWLIST].join(" ");
-
 function firstString(...values: Array<string | undefined>): string {
   return values.find((value) => typeof value === "string" && value.trim().length > 0)?.trim() ?? "";
 }
 
 export function evaluateAgentGuard(input: AgentGuardInput, ctx: AgentGuardContext): GuardDecision {
-  if (!AGENT_TOOL_NAMES.has(input.tool_name ?? "")) return { code: 0 };
+  // G1: an envelope without tool_name (empty stdin parsed as {}) cannot be verified: fail closed.
+  if (typeof input.tool_name !== "string" || input.tool_name.length === 0) {
+    return {
+      code: 2,
+      message: "[ut-tdd-guard] BLOCK: hook envelope has no tool_name (fail-close).",
+    };
+  }
+  // G2
+  if (!AGENT_TOOL_NAMES.has(input.tool_name)) return { code: 0 };
 
   const ti = input.tool_input ?? {};
-  const subagentType = firstString(ti.subagent_type, ti.agent_type, ti.agent, ti.role, ti.name);
+  // An empty type resolves to general-purpose (the Claude Code default).
+  const subagentType =
+    firstString(ti.subagent_type, ti.agent_type, ti.agent, ti.role, ti.name) || "general-purpose";
   const model = firstString(ti.model, ti.model_family);
 
   const blockOrBypass = (message: string): GuardDecision =>
@@ -102,65 +91,42 @@ export function evaluateAgentGuard(input: AgentGuardInput, ctx: AgentGuardContex
       ? {
           code: 0,
           bypassed: true,
-          message: `[ut-tdd-guard] WARN: UT_TDD_ALLOW_RAW_AGENT=1 bypassed.\n${message}`,
+          message: `[ut-tdd-guard] WARN: UT_TDD_ALLOW_RAW_AGENT=1 bypassed.
+${message}`,
         }
       : { code: 2, message };
 
-  if (!subagentType) {
+  // G3
+  if (!GENERIC_SUBAGENT_TYPES.has(subagentType)) {
     return blockOrBypass(
-      `[ut-tdd-guard] BLOCK: Agent call is missing subagent_type.\nAllowed: ${ALLOWLIST_TEXT}\n${AGENT_GUARD_BYPASS_HINT}`,
+      `[ut-tdd-guard] BLOCK: subagent_type=${subagentType} is not an allowed generic type.
+` +
+        `Allowed types: ${GENERIC_TYPES_TEXT}.
+${AGENT_GUARD_BYPASS_HINT}`,
     );
   }
-
-  if (!SUBAGENT_ALLOWLIST.has(subagentType)) {
-    return blockOrBypass(
-      `[ut-tdd-guard] BLOCK: subagent_type=${subagentType} is not allowlisted.\n` +
-        `Allowed: ${ALLOWLIST_TEXT}\n` +
-        `Use an approved subagent or route provider work through ut-tdd codex --role ...\n${AGENT_GUARD_BYPASS_HINT}`,
-    );
-  }
-
-  const family = ctx.resolveAgentFamily(subagentType);
-  if (family === "missing") {
-    return {
-      code: 2,
-      message: `[ut-tdd-guard] BLOCK: .claude/agents/${subagentType}.md is missing.`,
-    };
-  }
-  if (family === "unknown") {
-    return {
-      code: 2,
-      message: `[ut-tdd-guard] BLOCK: ${subagentType} frontmatter does not declare ${MODEL_FAMILY_TEXT} model family.`,
-    };
-  }
-
+  // G4
   if (!model) {
     return blockOrBypass(
-      `[ut-tdd-guard] BLOCK: subagent_type=${subagentType} call is missing model.\n` +
-        `Use model: "${family}".\n${AGENT_GUARD_BYPASS_HINT}`,
+      `[ut-tdd-guard] BLOCK: subagent_type=${subagentType} call is missing model.
+` +
+        `Pass an explicit model (${MODEL_FAMILY_TEXT}).
+${AGENT_GUARD_BYPASS_HINT}`,
     );
   }
-
+  // G5
   const requested = normalizeModelFamily(model);
   if (requested === null) {
     return blockOrBypass(
       `[ut-tdd-guard] BLOCK: model=${model} cannot be normalized to ${MODEL_FAMILY_TEXT}.`,
     );
   }
-  if (requested === "fable" && !FABLE_QUALITY_CHECK_SUBAGENTS.has(subagentType)) {
+  // G6
+  if (requested === "fable") {
     return blockOrBypass(
-      `[ut-tdd-guard] BLOCK: apex-tier policy reserves fable for quality-check subagents ` +
-        `(blind-reviewer / code-reviewer / ut-tdd-tl / security-audit / qa-test); ${subagentType} is not eligible.`,
+      `[ut-tdd-guard] BLOCK: Agent tool では fable を使えない (apex tier は判断の層 = 委譲経路に残す)。
+subagent_type=${subagentType}`,
     );
   }
-  if (FAMILY_RANK[requested] < FAMILY_RANK[family]) {
-    return blockOrBypass(
-      `[ut-tdd-guard] BLOCK: model downgrade detected.\n` +
-        `  subagent_type: ${subagentType}\n` +
-        `  declared floor: ${family}\n` +
-        `  requested model: ${model} (family: ${requested})\n${AGENT_GUARD_BYPASS_HINT}`,
-    );
-  }
-
   return { code: 0 };
 }

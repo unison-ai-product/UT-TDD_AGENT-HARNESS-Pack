@@ -1,11 +1,14 @@
 /**
  * codex-hook-adapter — repo-root `hooks.json` (Codex CLI orchestrator) が Claude
  * `.claude/settings.json` のガード hook と **同一 entrypoint** を、Codex の実 tool 名で配線して
- * いることを fail-close 検査する (PLAN-L7-139, orchestrator-rule parity)。
+ * いることを静的に検査する (PLAN-L7-139, orchestrator-rule parity)。
  *
  * 背景: Codex 0.128.0 は Claude 互換の hook 機構を持つ (`hooks.json`,
  * `PreToolUse`/`PostToolUse`/`SessionStart`/`Stop`, payload `tool_name`/`tool_input`/`file_path`,
- * `blockOnFailure`, `permissionDecision: deny`)。ただし **tool 名が Claude と異なる**ため、matcher の
+ * `permissionDecision: deny`)。Codex の command hook は `blockOnFailure` 非対応。
+ * 実行時の fail-close はガードが確定 deny を返した場合に限る。
+ * 起動失敗・timeout・exit 1・不正出力は未実測で、fail-open の可能性がある。
+ * **tool 名が Claude と異なる**ため、matcher の
  * 字面コピーは「hooks.json はあるが一度も発火しない偽パリティ」を生む (coverage≠substance)。実機
  * `codex.exe` 文字列で確定した写像:
  *   - 編集系: Claude `Edit|Write|MultiEdit` → Codex `apply_patch|write_file`
@@ -17,8 +20,8 @@
  *
  * SSoT: 各ガードの entrypoint (どの TS スクリプトを呼ぶか) は project-hook.ts の `REQUIRED`
  * (Claude 側) と共有する。本 lint は Codex 側が「Claude と同じ entrypoint を、Codex の matcher で」
- * 宣言しているかを突合し、entrypoint がどちらかにしか無ければ `entrypoint_drift` として fail-close
- * する (Claude/Codex adapter が黙って分岐しない双方向健全性)。純関数 (analyze) + I/O loader 分離。
+ * 宣言しているかを突合し、entrypoint がどちらかにしか無ければ `entrypoint_drift` で拒否する。
+ * 純関数 (analyze) + I/O loader 分離。
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

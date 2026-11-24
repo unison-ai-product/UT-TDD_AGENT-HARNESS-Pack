@@ -23,11 +23,10 @@ triggers: "Vモデル・ドキュメントジェネレータ(vmodel-docgen)で�
 # vmodel-workflow
 
 > 移植元: zip `.claude/skills/vmodel-workflow/SKILL.md` (Apache-2.0、PLAN-L7-676 PR-T3)。
-> これは移植元 `vmodel-docgen` (別ツール) 自身の作業手順であり、本ハーネスの Forward/Reverse
-> workflow (`docs/plans/`、`ut-tdd plan lint`、gate G1〜G14) を置き換えるものではない。
+> これは移植元 `vmodel-docgen` の作業手順である。本ハーネスの Forward/Reverse は GitHub Issue、設計文書、各ゲートの規律に従う。
 > 同種の判断 (正本はどこか・ゲートを通す・生成物を直接編集しない) の**考え方**を読むための参照。
 > 本ハーネスでの対応する手順は [[vmodel-stage-upstream]] 〜 [[vmodel-stage-integration-acceptance-ops]]
-> の V-model stage skill 群、および `ut-tdd vmodel template` / `ut-tdd doctor` / `ut-tdd plan lint` である。
+> の V-model stage skill 群、および `ut-tdd vmodel template` と該当する `ut-tdd doctor` の検査を参照する。
 >
 > 注記 (PLAN-L7-676 PR-T3): 本文中の `python tools/build.py ...` は移植元 `vmodel-docgen` (別ツール) のコマンドであり、`tools/*.py` 自体は本リポジトリへ同梱しない (ADR-001)。UT-TDD harness では実行対象ではなく、対応する判断は `ut-tdd vmodel template` / `vmodel lint` / gate (G1〜G14) が担う。
 

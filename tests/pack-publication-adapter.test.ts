@@ -173,7 +173,7 @@ function input(plan = stagingPlan()): PackPublicationIntentInput {
     releaseVersion: "0.2.0-canary.1",
     tagName: "v0.2.0-canary.1",
     remote: {
-      repository: "RetryYN/UT-TDD_AGENT-HARNESS-Pack",
+      repository: "example-org/UT-TDD_AGENT-HARNESS-Pack",
       publicationBranch: "publication/op-1",
       expectedMainSha: "1".repeat(40),
       expectedMainStateDigest: `sha256:${"2".repeat(64)}`,

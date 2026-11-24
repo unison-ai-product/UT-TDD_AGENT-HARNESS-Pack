@@ -16,8 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { parse, stringify } from "yaml";
-import { TRACKED_RECEIPT_SCHEMA } from "../../src/plan-admission/tracked-receipt-projection.ts";
+import { parse as parseYaml, stringify } from "yaml";
 import {
   deriveArtifactInventoryDigest,
   deriveReleaseId,
@@ -31,11 +30,13 @@ import {
   releaseArtifactFileNames,
   transformCleanDistributionArtifact,
 } from "../../src/setup/index.ts";
+import { selectPackBuildInputs } from "../../src/setup/pack-build-inputs.ts";
 import {
   createLocalGitObjectReader,
   resolveReleaseArtifacts,
 } from "../../src/setup/release-artifact-resolver.ts";
 import { materializeReleaseArtifacts } from "../../src/setup/release-materializer.ts";
+import { writeSyntheticPrivacyDenylist } from "./privacy-denylist-home.ts";
 import { removeTestTree } from "./temp-tree.ts";
 
 export const CANARY_FIXTURE_TAG = "v0.0.0-canary.0";
@@ -54,7 +55,30 @@ export interface CanaryFixture {
   readonly alternateCwd: string;
   readonly anchor: string;
   readonly wrapper: string;
-  readonly planTemplate: string;
+  readonly designTemplate: string;
+}
+
+export function writeCanaryIssueDesignDocument(fixture: CanaryFixture): string {
+  const destination = join(fixture.consumerRoot, "docs", "design", "canary-function-spec.md");
+  const authoredDesign = fixture.designTemplate.replace(
+    /^issue:\s*<Issue 番号>\s*$/m,
+    "issue: 418",
+  );
+  if (authoredDesign === fixture.designTemplate)
+    throw new Error("shipped Issue-linked design template has no replaceable Issue placeholder");
+  mkdirSync(dirname(destination), { recursive: true });
+  writeFileSync(destination, authoredDesign, "utf8");
+  return destination;
+}
+
+export function readCanaryIssueDesignDocument(path: string): {
+  readonly text: string;
+  readonly frontmatter: Record<string, unknown>;
+} {
+  const text = readFileSync(path, "utf8");
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
+  if (!match) throw new Error("authored Issue-linked design document has no frontmatter");
+  return { text, frontmatter: parseYaml(match[1] ?? "") as Record<string, unknown> };
 }
 
 export interface CanaryReviewStubPaths {
@@ -100,27 +124,13 @@ function materializeProducerRoot(root: string): void {
     }
   }
 
-  // These are explicit tagged-source build inputs, not Pack entries or runtime fallbacks.
-  for (const sourcePath of [
-    "docs/governance/node-toolchain-provenance.json",
-    "tsconfig.node.json",
-  ]) {
-    const destination = join(root, sourcePath);
-    mkdirSync(dirname(destination), { recursive: true });
-    cpSync(join(SOURCE_ROOT, sourcePath), destination);
-  }
-  const sourceTreePaths = trackedPaths();
-  const vmodelBuildInputs = sourceTreePaths.filter(
-    (path) =>
-      path === "docs/governance/vmodel-document-catalog.md" ||
-      (path.startsWith("docs/templates/vmodel/") &&
-        path.endsWith(".md") &&
-        !path.startsWith("docs/templates/vmodel/review-examples/")),
+  // Explicit tagged-source build inputs, not Pack entries or runtime fallbacks.
+  const buildInputs = selectPackBuildInputs(trackedPaths(), (path) =>
+    existsSync(join(SOURCE_ROOT, path)),
   );
-  if (vmodelBuildInputs.length === 0)
-    throw new Error("tracked Node build input inventory is empty");
-  for (const path of vmodelBuildInputs) {
-    if (!sourceTreePaths.includes(path)) throw new Error(`untracked Node build input: ${path}`);
+  if (!buildInputs.ok)
+    throw new Error(`Node build input selection failed: ${JSON.stringify(buildInputs)}`);
+  for (const path of buildInputs.paths) {
     const destination = join(root, path);
     mkdirSync(dirname(destination), { recursive: true });
     cpSync(join(SOURCE_ROOT, path), destination);
@@ -210,10 +220,9 @@ function assertFixtureTree(root: string): void {
   const visit = (path: string): void => {
     for (const entry of readdirSync(path, { withFileTypes: true })) {
       const child = join(path, entry.name);
-      const info = lstatSync(child);
       // Do not follow a symlink/junction while checking our owned tree. `rmSync` unlinks it as
       // an entry; it never recursively traverses the target.
-      if (info.isSymbolicLink()) continue;
+      if (lstatSync(child).isSymbolicLink()) continue;
       if (entry.isDirectory()) visit(child);
     }
   };
@@ -224,8 +233,7 @@ function makeFixtureDirectoriesWritable(root: string): void {
   if (process.platform === "win32") return;
   const visit = (path: string): void => {
     const info = lstatSync(path);
-    if (info.isSymbolicLink()) return;
-    if (!info.isDirectory()) return;
+    if (info.isSymbolicLink() || !info.isDirectory()) return;
     chmodSync(path, info.mode | 0o700);
     for (const entry of readdirSync(path, { withFileTypes: true }))
       if (entry.isDirectory()) visit(join(path, entry.name));
@@ -449,10 +457,8 @@ export async function createCanaryFixture(): Promise<CanaryFixture> {
     const releaseDir = join(root, "release");
     const consumerRoot = join(root, "consumer");
     const alternateCwd = join(root, "alternate-cwd");
-    mkdirSync(producerRoot, { recursive: true });
-    mkdirSync(releaseDir, { recursive: true });
-    mkdirSync(consumerRoot, { recursive: true });
-    mkdirSync(alternateCwd, { recursive: true });
+    for (const dir of [producerRoot, releaseDir, consumerRoot, alternateCwd])
+      mkdirSync(dir, { recursive: true });
 
     materializeProducerRoot(producerRoot);
     git(producerRoot, ["init", "--quiet"]);
@@ -468,6 +474,7 @@ export async function createCanaryFixture(): Promise<CanaryFixture> {
     git(producerRoot, ["tag", CANARY_FIXTURE_TAG]);
 
     runNpmCi(producerRoot);
+    const producerHome = writeSyntheticPrivacyDenylist(join(root, "producer-home"));
     const producer = runNode(
       producerRoot,
       [
@@ -480,7 +487,7 @@ export async function createCanaryFixture(): Promise<CanaryFixture> {
         releaseDir,
         "--json",
       ],
-      isolatedCanaryEnv(root),
+      { ...isolatedCanaryEnv(root), HOME: producerHome, USERPROFILE: producerHome },
       undefined,
       // The real producer performs a second isolated npm ci from the tagged Git tree.
       // Keep a finite bound, but do not apply the short CLI bound to that nested build.
@@ -511,14 +518,15 @@ export async function createCanaryFixture(): Promise<CanaryFixture> {
     const anchor = `sha256:${createHash("sha256").update(checksumBytes).digest("hex")}`;
     const names = releaseArtifactFileNames(CANARY_FIXTURE_TAG);
     const wrapper = join(releaseDir, names.compiledEsm);
-    const planTemplate = execFileSync(
+    const designTemplate = execFileSync(
       "tar",
       // The deterministic Pack serializer stores the canonical destinationPath
       // without a leading `./`.
-      ["-xOf", names.tarball, "docs/templates/plan/design/template.md"],
+      ["-xOf", names.tarball, "docs/templates/design/L6-function-spec-template.md"],
       { cwd: releaseDir, encoding: "utf8", windowsHide: true },
     );
-    if (!planTemplate.includes("kind: design")) throw new Error("shipped PLAN template is missing");
+    if (!/^issue:\s*\S+/m.test(designTemplate))
+      throw new Error("shipped Issue-linked design template is missing");
     return {
       root,
       producerRoot,
@@ -527,73 +535,12 @@ export async function createCanaryFixture(): Promise<CanaryFixture> {
       alternateCwd,
       anchor,
       wrapper,
-      planTemplate,
+      designTemplate,
     };
   } catch (error) {
     removeCanaryFixtureTree(root);
     throw error;
   }
-}
-
-/** Author a consumer-owned draft from the actual shipped template; receipts are CLI-produced. */
-export function writeCanaryPlanManifest(fixture: CanaryFixture): {
-  manifest: string;
-  planPath: string;
-} {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/.exec(fixture.planTemplate);
-  if (!match) throw new Error("shipped PLAN template frontmatter is invalid");
-  const planId = "PLAN-L2-999-canary-authoring";
-  const frontmatter = {
-    ...parse(match[1]),
-    plan_id: planId,
-    title: "Canary consumer の設計起票",
-    drive: "agent",
-    created: "2026-09-29",
-    owner: "Canary consumer",
-    route_signal: "forward",
-    route_mode: "forward",
-    sub_doc: "screen-list",
-    generates: [],
-    related_docs: [],
-  };
-  const body = match[2].replaceAll(
-    "(本 PLAN でどの範囲の設計を凍結するかを 1-2 段落で記述)",
-    "配布された PLAN テンプレートから consumer 固有の draft を正規 CLI で起票する。",
-  );
-  const planPath = `docs/plans/${planId}.md`;
-  const manifest = join(fixture.consumerRoot, "canary-plan-draft.json");
-  const projection = "docs/governance/plan-admission-receipts.json";
-  // The product repository owns its PLAN directory; the Pack does not ship
-  // source-side PLAN files into a fresh consumer.
-  mkdirSync(join(fixture.consumerRoot, "docs", "plans"), { recursive: true });
-  mkdirSync(join(fixture.consumerRoot, "docs", "governance"), { recursive: true });
-  // Empty fixture ledger projection, never an authored PASS/admission receipt.
-  writeFileSync(
-    join(fixture.consumerRoot, projection),
-    JSON.stringify({ schema_version: TRACKED_RECEIPT_SCHEMA, records: [] }),
-  );
-  writeFileSync(
-    manifest,
-    JSON.stringify({
-      version: 2,
-      command_id: "canary:plan-authoring",
-      plan_id: planId,
-      recorded_at: "2026-09-29T00:00:00.000Z",
-      admission: {
-        route_signal: "forward",
-        route_mode: "forward",
-        kind: "design",
-        layer: "L2",
-        drive: "agent",
-        branch: "work/forward-canary",
-        status: "draft",
-        sub_doc: "screen-list",
-      },
-      source: { path: planPath, content: `---\n${stringify(frontmatter)}---\n${body}` },
-      projection: { path: projection },
-    }),
-  );
-  return { manifest, planPath };
 }
 
 export function installCanaryFixture(fixture: CanaryFixture, env: NodeJS.ProcessEnv) {

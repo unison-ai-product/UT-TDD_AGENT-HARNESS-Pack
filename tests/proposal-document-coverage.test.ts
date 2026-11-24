@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import {
   PROPOSAL_ROUTING_DOC_PATH,
 } from "../src/lint/proposal-document-coverage-policy.ts";
 import { classifyProposalDocumentCoverage } from "../src/task/classify.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 describe("proposal document coverage lint", () => {
   it("passes for the real repo routing doc and representative coverage scenarios", () => {
@@ -60,7 +61,7 @@ describe("proposal document coverage lint", () => {
         "missing-required-doc",
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -88,7 +89,7 @@ describe("proposal document coverage lint", () => {
         "missing-routing-marker",
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 

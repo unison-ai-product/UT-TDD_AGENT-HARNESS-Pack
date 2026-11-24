@@ -20,10 +20,10 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { stringify } from "yaml";
 import { projectTrackedTeamBlob } from "../src/setup/authoring-template-inventory.ts";
 import * as setupApi from "../src/setup/index.ts";
+import { describe, expect, heavyAfterAll, heavyBeforeAll, it } from "./support/hook-bounds.ts";
 
 const installerExecutionRoot = resolve(process.cwd());
 
@@ -65,6 +65,10 @@ import {
   resolveReleaseArtifacts,
 } from "../src/setup/release-artifact-resolver.ts";
 import { materializeReleaseArtifacts } from "../src/setup/release-materializer.ts";
+import { copyPackBuildInputs, copyPackFiles } from "./support/pack-build-input-fixture.ts";
+import { useSyntheticPrivacyHome } from "./support/privacy-denylist-home.ts";
+
+const privacyHome = useSyntheticPrivacyHome();
 
 const revision = "a".repeat(40);
 const digest = digestMaterializedReleaseEntries([
@@ -299,10 +303,7 @@ function releaseManifestForFixture(artifactSourceCommit: string): Record<string,
   };
 }
 
-function createReleaseBindingFixture(
-  variant: "normal" | "tag-at-c1" | "side-branch" | "second-parent" | "src-mutation" | "schema",
-): { root: string; tag: string; c1: string; c2: string | null; side?: string } {
-  const root = mkdtempSync(join(tmpdir(), "ut-tdd-packrt-011-"));
+function commitFixtureArtifact(root: string): void {
   mkdirSync(join(root, "src"), { recursive: true });
   writeFileSync(join(root, "src", "artifact.ts"), "export const fixture = true;\n", "utf8");
   fixtureGit(root, ["init", "--quiet"]);
@@ -310,6 +311,13 @@ function createReleaseBindingFixture(
   fixtureGit(root, ["config", "user.name", "UT test"]);
   fixtureGit(root, ["add", "--", "."]);
   fixtureGit(root, ["commit", "--quiet", "-m", "fixture artifact"]);
+}
+
+function createReleaseBindingFixture(
+  variant: "normal" | "tag-at-c1" | "side-branch" | "second-parent" | "src-mutation" | "schema",
+): { root: string; tag: string; c1: string; c2: string | null; side?: string } {
+  const root = mkdtempSync(join(tmpdir(), "ut-tdd-packrt-011-"));
+  commitFixtureArtifact(root);
   const c1 = fixtureGit(root, ["rev-parse", "HEAD"]);
   const tag = "v0.2.0-canary.2";
   if (variant === "tag-at-c1") {
@@ -394,32 +402,13 @@ async function createProducerFixture(
     ".node-version",
     "src/cli.ts",
     "src/setup/index.ts",
+    "docs/governance/oracle-test-trace-baseline.json",
     "docs/templates/adapter/AGENTS.md",
     "docs/templates/adapter/CLAUDE.md",
     "docs/templates/adapter/.codex/config.toml",
     "docs/templates/adapter/.codex/hooks.json",
     "docs/templates/adapter/.claude/CLAUDE.md",
     "docs/templates/adapter/.claude/settings.json",
-    "docs/templates/adapter/.claude/agents/be-api.md",
-    "docs/templates/adapter/.claude/agents/be-logic.md",
-    "docs/templates/adapter/.claude/agents/blind-reviewer.md",
-    "docs/templates/adapter/.claude/agents/code-reviewer.md",
-    "docs/templates/adapter/.claude/agents/db-schema.md",
-    "docs/templates/adapter/.claude/agents/devops-deploy.md",
-    "docs/templates/adapter/.claude/agents/pdm-innovation-manager.md",
-    "docs/templates/adapter/.claude/agents/pdm-marketing-innovation.md",
-    "docs/templates/adapter/.claude/agents/pdm-tech-innovation.md",
-    "docs/templates/adapter/.claude/agents/pmo-haiku.md",
-    "docs/templates/adapter/.claude/agents/pmo-project-explorer.md",
-    "docs/templates/adapter/.claude/agents/pmo-project-scout.md",
-    "docs/templates/adapter/.claude/agents/pmo-sonnet.md",
-    "docs/templates/adapter/.claude/agents/pmo-tech-docs.md",
-    "docs/templates/adapter/.claude/agents/pmo-tech-fork.md",
-    "docs/templates/adapter/.claude/agents/pmo-tech-news.md",
-    "docs/templates/adapter/.claude/agents/qa-test.md",
-    "docs/templates/adapter/.claude/agents/refactor-scout.md",
-    "docs/templates/adapter/.claude/agents/security-audit.md",
-    "docs/templates/adapter/.claude/agents/ut-tdd-tl.md",
     "docs/templates/adapter/.claude/commands/build.md",
     "docs/templates/adapter/.claude/commands/code-simplify.md",
     "docs/templates/adapter/.claude/commands/sdd-plan.md",
@@ -431,22 +420,10 @@ async function createProducerFixture(
     "docs/templates/adapter/.claude/commands/ut-tdd-test.md",
     ...AUTHORING_TEMPLATE_ARTIFACT_PATHS,
   ];
-  const sourcePathSet = sourcePaths;
-  for (const artifactPath of artifactPaths) {
-    const sourcePath = cleanDistributionSourcePath(artifactPath, sourcePathSet);
-    const from = join(repositoryRoot, ...sourcePath.split("/"));
-    const to = join(root, ...artifactPath.split("/"));
-    mkdirSync(dirname(to), { recursive: true });
-    cpSync(from, to, { recursive: true });
-  }
+  copyPackFiles(repositoryRoot, root, artifactPaths, sourcePaths);
+  copyPackBuildInputs(repositoryRoot, root, sourcePaths);
   rmSync(join(root, ".github", "workflows", "harness-check.yml"), { force: true });
-  mkdirSync(join(root, "src"), { recursive: true });
-  writeFileSync(join(root, "src", "artifact.ts"), "export const fixture = true;\n", "utf8");
-  fixtureGit(root, ["init", "--quiet"]);
-  fixtureGit(root, ["config", "user.email", "test@example.invalid"]);
-  fixtureGit(root, ["config", "user.name", "UT test"]);
-  fixtureGit(root, ["add", "--", "."]);
-  fixtureGit(root, ["commit", "--quiet", "-m", "fixture artifact"]);
+  commitFixtureArtifact(root);
   const fixturePlan = buildCleanDistributionPlan({
     paths: collectDistributionCandidatePaths(root),
     sourceTag: "fixture",
@@ -476,7 +453,7 @@ async function createProducerFixture(
         if (item.mode !== "100644" && item.mode !== "100755")
           throw new Error("publication fixture mode is not supported");
         return {
-          sourcePath: cleanDistributionSourcePath(item.path, sourcePathSet),
+          sourcePath: cleanDistributionSourcePath(item.path, sourcePaths),
           destinationPath: item.path,
           mode: item.mode,
           size: item.content.length,
@@ -1103,7 +1080,7 @@ describe("Pack consumer runtime release producer contract", () => {
             repoRoot: fixture.root,
             tag: fixture.tag,
             outDir,
-            homeDirectory: join(fixture.root, "synthetic-home"),
+            homeDirectory: privacyHome.path,
             installDependencies: () => {
               throw new Error("must fail before dependency installation");
             },
@@ -1125,12 +1102,11 @@ describe("Pack consumer runtime release producer contract", () => {
 
   describe("CANDIDATE-U-PACKRT-012: binds producer channel selection to the tag and rejects v1", () => {
     let fixture: Awaited<ReturnType<typeof createPackrt012Fixture>> | undefined;
-
-    beforeAll(async () => {
+    heavyBeforeAll("pack", async () => {
       fixture = await createPackrt012Fixture();
     });
 
-    afterAll(() => {
+    heavyAfterAll("teardown", () => {
       if (fixture) rmSync(fixture.root, { recursive: true, force: true });
     });
 
@@ -1163,7 +1139,7 @@ describe("Pack consumer runtime release producer contract", () => {
           repoRoot: sharedFixture.root,
           tag: expected.tag,
           outDir,
-          homeDirectory: join(sharedFixture.root, "synthetic-home"),
+          homeDirectory: privacyHome.path,
           installDependencies: () => undefined,
           buildGeneration: fakeGenerationBuilder(),
         });
@@ -1210,7 +1186,7 @@ describe("Pack consumer runtime release producer contract", () => {
             repoRoot: v1Fixture.root,
             tag: v1Fixture.tags[0],
             outDir,
-            homeDirectory: join(v1Fixture.root, "synthetic-home"),
+            homeDirectory: privacyHome.path,
             installDependencies: () => {
               dependencyInstallCalls += 1;
             },
@@ -1335,11 +1311,11 @@ describe("Pack consumer runtime release producer contract", () => {
 describe("Pack consumer runtime release producer byte and fail-close oracles", () => {
   let fixture: ProducerFixture;
 
-  beforeAll(async () => {
+  heavyBeforeAll("pack", async () => {
     fixture = await createProducerFixture();
   });
 
-  afterAll(() => {
+  heavyAfterAll("teardown", () => {
     if (fixture) rmSync(fixture.root, { recursive: true, force: true });
   });
 
@@ -1354,7 +1330,7 @@ describe("Pack consumer runtime release producer byte and fail-close oracles", (
       repoRoot: fixture.root,
       tag: fixture.tag,
       outDir,
-      homeDirectory: join(fixture.root, "synthetic-home"),
+      homeDirectory: privacyHome.path,
       installDependencies: () => undefined,
       buildGeneration: options.buildGeneration ?? fakeGenerationBuilder(),
       ...(options.moveStagedAssets ? { moveStagedAssets: options.moveStagedAssets } : {}),
@@ -1410,7 +1386,7 @@ describe("Pack consumer runtime release producer byte and fail-close oracles", (
           repoRoot: packrt013.root,
           tag: packrt013.tag,
           outDir,
-          homeDirectory: join(packrt013.root, "synthetic-home"),
+          homeDirectory: privacyHome.path,
           installDependencies: () => undefined,
           buildGeneration: async (input) => {
             if (typeof input === "string")
@@ -1527,12 +1503,10 @@ describe("Pack consumer runtime release producer byte and fail-close oracles", (
       const userHome = process.env.USERPROFILE ?? process.env.HOME ?? "";
       const username = process.env.USERNAME ?? process.env.USER ?? "";
       const forbidden = [
-        fixture.root,
-        fixture.root.replaceAll("\\", "/"),
-        process.cwd(),
-        process.cwd().replaceAll("\\", "/"),
-        join(fixture.root, "synthetic-home"),
-        join(fixture.root, "synthetic-home").replaceAll("\\", "/"),
+        ...[fixture.root, process.cwd(), privacyHome.path].flatMap((path) => [
+          path,
+          path.replaceAll("\\", "/"),
+        ]),
         userHome,
         userHome.replaceAll("\\", "/"),
         username,
@@ -1606,11 +1580,11 @@ describe("Pack consumer runtime release producer byte and fail-close oracles", (
 describe("Pack consumer runtime release installer", () => {
   let fixture: RuntimeInstallerFixture;
 
-  beforeAll(async () => {
+  heavyBeforeAll(["pack", 120_000], async () => {
     fixture = await createRuntimeInstallerFixture();
-  }, 120_000);
+  });
 
-  afterAll(() => {
+  heavyAfterAll("teardown", () => {
     if (fixture) removeInstallerFixtureTree(fixture.root);
   });
 
@@ -1630,7 +1604,7 @@ describe("Pack consumer runtime release installer", () => {
           repoRoot: producer.root,
           tag: producer.tag,
           outDir: testCase.releaseDir,
-          homeDirectory: join(producer.root, "synthetic-home"),
+          homeDirectory: privacyHome.path,
           installDependencies: () => undefined,
           buildGeneration: fakeGenerationBuilder({ compiledBytes: fixture.compiledBytes }),
         });
@@ -2010,7 +1984,7 @@ describe("Pack consumer runtime release installer", () => {
       const originalDigest = hashHex(fixture.compiledBytes);
       const compiledText = fixture.compiledBytes.toString("utf8");
       const anchorGuard =
-        /if\s*\(\s*`sha256:\$\{digestHex\w*\(checksumBytes\)\}`\s*!==\s*input\.expectedConsumerDigest\s*\)/g;
+        /if\s*\(\s*`sha256:\$\{digestHex\w*\(checksumBytes\)\}`\s*!==\s*input\d*\.expectedConsumerDigest\s*\)/g;
       expect([...compiledText.matchAll(anchorGuard)]).toHaveLength(1);
       const mutantModule = Buffer.from(compiledText.replace(anchorGuard, "if (false)"));
       const unsignedReceipt = JSON.parse(

@@ -24,7 +24,7 @@ decision_points:
     choose: "populate every applicable L5 chapter (functional detail, API detail, table/physical detail, screen detail, batch detail where batches exist) plus decision tables for every non-trivial branch, and require the paired L6 unit-test design, test plan, and verification design to be fully populated (verification matrix, coverage criteria, risk-based allocation, entry/exit criteria) before pair-freeze"
     over: "trimming any of these chapters for speed because the PoC/Standard paths trim them"
     because: "the scale-conditional trim that is legitimate at PoC or Standard is not legitimate once blast radius is high — the same chapters that are optional at smaller scale are what let a reviewer and a machine gate catch a tenant-isolation or billing defect before it reaches L7."
-  - when: "The module or PLAN under L5 detailed design has no batch/async processing at all."
+  - when: "The module or Issue under L5 detailed design has no batch/async processing at all."
     choose: "omit the batch design chapter entirely"
     over: "filling in a placeholder or 'N/A' batch design chapter to make the document set look complete"
     because: "the batch design chapter exists specifically to detail BT-xxx jobs already declared in the basic design; a module with zero async jobs has nothing for that chapter to detail, and a placeholder row is exactly the false-completeness a doctor-style completeness check should not be satisfied by."
@@ -40,8 +40,8 @@ decision_points:
     choose: "assign the requirement a method chosen by its nature — test-execution for behavioural requirements, analysis (or analysis+test) for requirements whose target is a computed estimate such as a performance SLO, inspection for structural/static properties, demonstration for requirements only confirmable in a live environment"
     over: "assuming every requirement is verified purely by running a test"
     because: "the verification design's own method catalog treats test-execution as one of four methods, not the only one; forcing a performance-class requirement into 'test only' leaves it formally test-planned but not actually verifiable until an environment exists that can produce the load — an analysis pass is what makes it verifiable before implementation exists."
-  - when: "A PLAN whose scope touches L5 is at the pair-freeze gate."
-    choose: "block pair-freeze until L5 (its adopted chapters), the paired L6 unit-test design, and — where the PLAN's requirement needs it — the corresponding L8 GWT scenario or L9 verification-matrix row all exist and resolve"
+  - when: "An Issue whose scope touches L5 is at the pair-freeze gate."
+    choose: "block pair-freeze until L5 (its adopted chapters), the paired L6 unit-test design, and — where the Issue's requirement needs it — the corresponding L8 GWT scenario or L9 verification-matrix row all exist and resolve"
     over: "treating L5 completion alone as sufficient on the reasoning that 'the tests will be written during L7 implementation'"
     because: "this stage's own shift-left declaration pairs test design with descending design (L4-L5), not with L7 implementation; deferring test-design authorship to implementation time abandons the shift-left this stage exists to enforce and reproduces the exact anti-pattern spec-driven-development already forbids (spec/test written after the fact to justify what was built)."
 ---
@@ -49,7 +49,7 @@ decision_points:
 # vmodel stage detailed design
 
 What the detailed-design stage (L5, paired with L6 unit-test design) must
-produce and verify before a PLAN can cross pair-freeze into implementation.
+produce and verify before an Issue can cross pair-freeze into implementation.
 This stage is where the V-model's descending design side meets its own
 shift-left test-design obligation: the unit-test design, the overall test
 plan, and the verification design are all **authored here**, even though
@@ -65,8 +65,8 @@ which belong to other skills (see Boundary section).
 - Authoring or reviewing the L6 unit-test design, the overall test plan, or
   the verification design that pair with an L5 doc.
 - Deciding whether a decision table, batch design chapter, or full
-  verification-design chapter set is warranted for a given PLAN's scale.
-- A PLAN is approaching pair-freeze and its L5/L6/test-plan/verification-design
+  verification-design chapter set is warranted for a given Issue's scale.
+- An Issue is approaching pair-freeze and its L5/L6/test-plan/verification-design
   completeness needs a structured check.
 
 ## What detailed design (L5) must fix
@@ -90,7 +90,7 @@ batch ID) forward into implementable detail. Each adopted chapter fixes:
   column and note where it is enforced.
 - **Screen detail** — for each screen ID: the field list (item, type,
   required, check/behaviour) and the event list (event, processing, which
-  API it calls). Only produce this chapter for a PLAN that touches UI.
+  API it calls). Only produce this chapter for an Issue that touches UI.
 - **Batch/async detail** — only where the basic design already declares an
   async job (a BT-xxx ID). For each: trigger condition, processing steps as
   a numbered sequence, and an explicit abnormal-handling table (failure mode,
@@ -119,7 +119,7 @@ Three artifacts are **written** during this stage even though their
 2. **Overall test plan** — the full V-model test strategy (which test level
    pairs with which design level, environment/data plan, schedule, entry/
    exit criteria per level, defect-severity definitions). Authored once per
-   product/PLAN scope at this stage; execution and result reporting happen
+   product or Issue scope at this stage; execution and result reporting happen
    across the later test levels.
 3. **Verification design** — the verification matrix (requirement → method →
    test level → technique → case ID), the test-design technique catalog
@@ -161,7 +161,7 @@ runs, not written independently.
 
 ## Stage exit criteria (before pair-freeze)
 
-- [ ] L5 exists with all chapters the PLAN's scope adopts; no adopted
+- [ ] L5 exists with all chapters the Issue's scope adopts; no adopted
   chapter has a blank required row.
 - [ ] Every input/output/check table entry has an explicit error-path row
   where the function accepts untrusted input.
@@ -172,11 +172,11 @@ runs, not written independently.
 - [ ] L6 unit-test design exists with at least one case per L5 output/error
   condition, each case carrying a trace-from reference.
 - [ ] The overall test plan's V-model strategy table and entry/exit criteria
-  are filled for every test level this PLAN's scope reaches.
+  are filled for every test level this change's scope reaches.
 - [ ] The verification design's verification matrix covers every requirement
-  this PLAN traces to, with a method chosen by the requirement's nature
+  this change traces to, with a method chosen by the requirement's nature
   (not defaulted to "test" for every row).
-- [ ] `ut-tdd doctor` / `ut-tdd plan lint` resolve all L5↔L6 pairing links.
+- [ ] The relevant `ut-tdd doctor` checks resolve all L5↔L6 pairing links.
 
 ## Boundary with existing skills
 

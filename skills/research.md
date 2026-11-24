@@ -21,15 +21,15 @@ decision_points:
     choose: "Confirm it from a WebFetch-verified primary source"
     over: "Asserting it from a search snippet alone"
     because: "This is explicitly prohibited: snippet-only version claims are unverified and can be stale or out of scope"
-  - when: "Selecting which source to use as decision evidence in an ADR or PLAN"
+  - when: "Selecting which source to use as decision evidence in an ADR or Issue"
     choose: "Use a primary source (vendor docs, standard spec, official repo) as the citation of record"
     over: "Using a secondary source (aggregation/repost/summary) as the sole citation"
-    because: "Secondary sources lack original methodology and must not be a sole citation in an ADR or PLAN"
+    because: "Secondary sources lack original methodology and must not be a sole citation in an ADR or Issue"
   - when: "A previously cited URL now 404s or redirects"
     choose: "Re-fetch it and re-confirm the claim before continuing to cite it"
     over: "Keeping the old citation because it was valid at an earlier point"
     because: "Content behind a URL can change; an unconfirmed stale citation is unverifiable evidence"
-  - when: "A multi-source research sweep is delegated to pmo-haiku"
+  - when: "A multi-source research sweep is delegated to docs"
     choose: "Verify at least one returned source yourself before recording it as authoritative"
     over: "Recording the delegated output directly as authoritative research"
     because: "Delegated output is a claim, not evidence, until independently checked"
@@ -48,10 +48,10 @@ primary-source URL, and no URL cited without a WebFetch body confirmation.
 
 ## When to load this skill
 
-- A Discovery PLAN (S1 plan / S2 PoC) needs external technology comparison.
+- A Discovery Issue (S1 plan / S2 PoC) needs external technology comparison.
 - An ADR's Context section cites external evidence.
 - A task routes to a `pmo-tech-docs` / `pmo-tech-news` subagent.
-- A PLAN depends on an external API, library, or standard that must be confirmed
+- An Issue depends on an external API, library, or standard that must be confirmed
   before pair-freeze.
 
 ## Two-tool protocol
@@ -75,9 +75,9 @@ source.
 | secondary | Aggregation / repost / summary without original methodology |
 
 Decision evidence must be `primary`; `first-hand` may supplement; `secondary` is
-background only and must not be a sole citation in an ADR or PLAN.
+background only and must not be a sole citation in an ADR or Issue.
 
-## Output format (recorded in a PLAN / ADR / `.ut-tdd/audit/`)
+## Output format (recorded in an Issue / ADR / `.ut-tdd/audit/`)
 
 ```
 Research summary: [2-5 sentences]
@@ -90,7 +90,7 @@ Unresolved / requires-further-investigation:
 
 ## Integration with Discovery / Scrum
 
-- Discovery S1: findings feed the PLAN `evidence` before `ut-tdd plan lint`.
+- Discovery S1: link the findings and decision evidence in the Issue.
 - Scrum S2: the chosen technology cites at least one `primary` source.
 - Scrum S3: a PoC result that contradicts prior research is recorded in
   `.ut-tdd/audit/` before S4 decide.
@@ -98,7 +98,7 @@ Unresolved / requires-further-investigation:
 ## Cost-aware delegation
 
 For multi-source sweeps, delegate to the lightweight research role via
-`ut-tdd claude --role pmo-haiku --task "..."` (inspect the prompt first with
+`ut-tdd claude --role docs --task "..."` (inspect the prompt first with
 `--dry-run`). Require: objective, minimum 2 primary sources, the output format
 above, and WebFetch confirmation per URL. Verify at least one returned source
 yourself before recording it as authoritative — delegated output is a claim, not

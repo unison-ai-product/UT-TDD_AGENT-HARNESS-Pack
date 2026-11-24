@@ -50,7 +50,6 @@ describe("db-projection-coverage detector", () => {
 
     expect(result.ok).toBe(true);
     expect(requirements.tables.map((item) => item.table)).toEqual([
-      "plan_registry",
       "artifact_registry",
       "model_runs",
       "trace_edges",
@@ -103,21 +102,15 @@ describe("db-projection-coverage detector", () => {
       "screen_trace",
       "spec_defs",
       "spec_relations",
-      "schedule_entries",
-      "activation_entries",
-      "activation_schedule_reviews",
       "document_catalog_entries",
       "spec_rag_closure_entries",
       "detector_route_candidates",
       "agent_contracts",
-      "github_review_lane_receipts",
-      "execution_readiness_projection",
       "github_project_item_projection",
       "github_object_bindings",
       "github_projection_outbox",
     ]);
     expect(requirements.indexes.map((item) => item.name)).toEqual([
-      "idx_plan_layer_drive_status",
       "idx_trace_from_to",
       "idx_findings_subject_status",
       "idx_hook_session_plan",
@@ -161,12 +154,6 @@ describe("db-projection-coverage detector", () => {
       "idx_spec_defs_plan",
       "idx_spec_relations_from_kind",
       "idx_spec_relations_to_kind",
-      "idx_schedule_plan_status",
-      "idx_schedule_layer_subdoc_status",
-      "idx_activation_profile_status",
-      "idx_activation_version_status",
-      "idx_activation_schedule_plan_profile",
-      "idx_activation_schedule_scope_rag",
       "idx_document_catalog_layer_subdoc",
       "idx_document_catalog_doc_type",
       "idx_spec_rag_closure_rag_status",

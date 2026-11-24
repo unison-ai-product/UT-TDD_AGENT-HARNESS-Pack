@@ -42,9 +42,6 @@ export function analyzeGateRunCoverage(stats: GateRunCoverageStats | null): Gate
   if (stats.orphanGateRuns > 0) {
     violations.push({ reason: "orphan_gate_run", count: stats.orphanGateRuns });
   }
-  if (stats.blankPlanGateRuns > 0) {
-    violations.push({ reason: "blank_plan_gate_run", count: stats.blankPlanGateRuns });
-  }
   if (stats.invalidEvidenceFindings > 0) {
     violations.push({
       reason: "invalid_gate_run_evidence",

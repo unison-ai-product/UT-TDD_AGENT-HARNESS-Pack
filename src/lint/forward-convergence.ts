@@ -14,13 +14,9 @@
  * FORWARD_CONVERGENCE_LEGACY_DEBT で grandfather し、allowlist↔audit doc 一致を別 hard check で担保。
  * version_target (PLAN-DISCOVERY-09 version-up) 付き draft は将来版へ保全 = deferred(version-up) 種別。
  *
- * 純関数 (analyzeForwardConvergence) + I/O loader (loadConvergenceDocs) を分離 (lint 共通様式)。
+ * 純関数 (analyzeForwardConvergence) と関連 parser/analyzer の synthetic 単体検査を維持する。
  */
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { parseRequires } from "./backfill-pairing.ts";
-import { loadRoadmaps } from "./roadmap-registry.ts";
-import { parseLinks } from "./scrum-reverse.ts";
 import { fmValue } from "./shared.ts";
 
 /** 本 analyzer が収束義務を判定する kind。poc/add-impl 等は別 SSoT が担うため対象外 (二重計上防止)。 */
@@ -235,12 +231,6 @@ export function analyzeForwardConvergence(
   };
 }
 
-export interface ConvergenceDocs {
-  plans: ConvergencePlan[];
-  roadmapSpanIds: Set<string>;
-  reverseReferencedIds: Set<string>;
-}
-
 /** PLAN を ConvergencePlan へ parse (SSoT: requires は backfill-pairing.parseRequires を再利用)。 */
 export function parseConvergencePlan(file: string, content: string): ConvergencePlan {
   return {
@@ -253,34 +243,6 @@ export function parseConvergencePlan(file: string, content: string): Convergence
     backpropDecisionReason: fmValue(content, "backprop_decision_reason") ?? "",
     versionTarget: fmValue(content, "version_target") ?? null,
   };
-}
-
-/** 末尾 `/id.md` / `id.md` / `id` を plan_id へ正規化。 */
-function normalizeRef(ref: string): string {
-  const base = ref.replaceAll("\\", "/").split("/").at(-1) ?? ref;
-  return base.endsWith(".md") ? base.slice(0, -3) : base;
-}
-
-export function loadConvergenceDocs(repoRoot: string = process.cwd()): ConvergenceDocs {
-  const plansDir = join(repoRoot, "docs", "plans");
-  const plans: ConvergencePlan[] = [];
-  const reverseReferencedIds = new Set<string>();
-  for (const f of readdirSync(plansDir)) {
-    if (!f.endsWith(".md")) continue;
-    const content = readFileSync(join(plansDir, f), "utf8");
-    const plan = parseConvergencePlan(f, content);
-    if (plan.status === "archived") continue;
-    plans.push(plan);
-    // reverse PLAN が requires/references で指す plan_id を集約 (SSoT: scrum-reverse.parseLinks)。
-    if (plan.kind === "reverse") {
-      for (const link of parseLinks(content)) reverseReferencedIds.add(normalizeRef(link));
-    }
-  }
-  const roadmapSpanIds = new Set<string>();
-  for (const rec of loadRoadmaps(repoRoot)) {
-    for (const span of rec.roadmap.spans) roadmapSpanIds.add(span.plan_id);
-  }
-  return { plans, roadmapSpanIds, reverseReferencedIds };
 }
 
 /** doctor / CLI 向け surface (fail-close: NEW 違反で ok=false。legacy debt は grandfather だが常時 surface)。 */
@@ -328,20 +290,6 @@ export function analyzeLegacyAuditDrift(
 /** audit doc (markdown table) から `PLAN-...` 行頭セルを抽出 (backfill-pairing と同方式)。 */
 export function parseLegacyAuditPlanIds(content: string): Set<string> {
   return new Set([...content.matchAll(/^\|\s*(PLAN-[A-Za-z0-9-]+)\s*\|/gm)].map((m) => m[1]));
-}
-
-export function loadLegacyAuditDrift(repoRoot: string = process.cwd()): LegacyAuditDriftResult {
-  let audited = new Set<string>();
-  try {
-    const content = readFileSync(
-      join(repoRoot, "docs", "governance", "forward-convergence-legacy-debt-audit.md"),
-      "utf8",
-    );
-    audited = parseLegacyAuditPlanIds(content);
-  } catch {
-    // audit doc 不在 = allowlist 全件 missing として drift surface (無音 OK にしない)。
-  }
-  return analyzeLegacyAuditDrift(audited);
 }
 
 export function legacyAuditDriftMessages(result: LegacyAuditDriftResult): string[] {

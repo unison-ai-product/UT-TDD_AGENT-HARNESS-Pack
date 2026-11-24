@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import { parseIssueUrl } from "../../shared/issue-ref.ts";
 
 export type Disposition = "adopt" | "merge" | "reference" | "defer" | "not_applicable" | "reject";
-export type TargetKind = "artifact_path" | "artifact_family" | "plan_alias" | "target_slot";
+export type TargetKind = "artifact_path" | "artifact_family" | "target_slot";
 export type ItemTargetStatus = Disposition | "pending_review";
 
 export interface DeclaredCounts {
@@ -75,7 +76,7 @@ export interface ItemTargetEdge {
   sourceDigest: string;
   targetKind?: TargetKind;
   targetRef?: string;
-  planId?: string;
+  issue?: string;
 }
 
 export interface CatalogInput {
@@ -219,7 +220,7 @@ function validate(input: CatalogInput): CatalogViolation[] {
     "not_applicable",
     "reject",
   ]);
-  const targetKinds = new Set(["artifact_path", "artifact_family", "plan_alias", "target_slot"]);
+  const targetKinds = new Set(["artifact_path", "artifact_family", "target_slot"]);
   const itemStatuses = new Set([...dispositions, "pending_review"]);
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(input.manifestIdentity.auditedOn) ||
@@ -473,14 +474,13 @@ function validate(input: CatalogInput): CatalogViolation[] {
       );
     }
     const hasTarget = Boolean(edge.targetKind && edge.targetRef?.trim());
-    const isPending = edge.targetStatus === "pending_review";
     const finalNeedsTarget = ["adopt", "merge", "reference", "defer"].includes(edge.targetStatus);
     if (
       !edge.reason.trim() ||
       !isDigest(edge.sourceDigest) ||
-      (isPending && Boolean(edge.targetKind || edge.targetRef)) ||
+      (edge.targetStatus === "pending_review" && Boolean(edge.targetKind || edge.targetRef)) ||
       (finalNeedsTarget && !hasTarget) ||
-      (edge.targetStatus === "defer" && !edge.planId)
+      (edge.targetStatus === "defer" && !parseIssueUrl(edge.issue ?? ""))
     ) {
       findings.push(
         violation("catalog-item-target-incomplete", edge.itemId, {

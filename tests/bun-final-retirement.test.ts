@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -24,6 +24,7 @@ import {
   NodeOnlyProcessObserver,
 } from "../src/runtime/runtime-image-observer.ts";
 import { gitObjectIdSchema } from "../src/schema/node-slice-admission.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const BUN_RUNTIME = ["b", "un"].join("");
 const subject = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -83,6 +84,32 @@ const lanes = ["linux", "windows"].map((lane) => ({
   run_attempt: f0c.run_attempt,
   conclusion: "success" as const,
 }));
+const syntheticProbeOutcome = () => ({
+  stdout: JSON.stringify({
+    schema: "node-invocation-probe-result/v1",
+    candidate_id: "CAND-NODEBOOT-201",
+    probe_id: "CAND-NODEBOOT-201/P1",
+    test_source: "src/cli.ts#audit node-invocation-probe",
+    production_target: "src/runtime/node-bootstrap.ts#createNodeInvocation",
+    generation_id: f0b.generation_id,
+    subject_revision: f0b.subject_revision,
+    compiled_cli_sha256: f0b.artifact_digest.slice("sha256:".length),
+    executed: 1,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    checks: [
+      { id: "invocation-options", result: "passed" },
+      { id: "compiled-cli-argv0", result: "passed" },
+      { id: "node-path-absolute", result: "passed" },
+      { id: "compiled-cli-path-absolute", result: "passed" },
+    ],
+  }),
+  stderr: "",
+  status: 0,
+  spawnError: null,
+  timedOut: false,
+});
 const documents = (): NodeBanDocuments => ({
   runtime: [
     {
@@ -131,7 +158,7 @@ const documents = (): NodeBanDocuments => ({
       packageManager:
         "npm@11.6.2+sha512-7iKzNfy8lWYs3zq4oFPa8EXZz5xt9gQNKJZau3B1ErLBb6bF7sBJ00x09485DOvRT2l5Gerbl3VlZNT57MxJVA==",
       engines: { node: "24.13.0", npm: "11.6.2" },
-      devDependencies: { "@biomejs/biome": "2.4.15", esbuild: "0.21.5" },
+      devDependencies: { "@biomejs/biome": "2.4.15", esbuild: "0.28.2" },
       utTdd: {
         nodeToolchain: {
           phase: "node_production",
@@ -144,7 +171,7 @@ const documents = (): NodeBanDocuments => ({
     packageLock: JSON.stringify({
       lockfileVersion: 3,
       packages: {
-        "": { devDependencies: { "@biomejs/biome": "2.4.15", esbuild: "0.21.5" } },
+        "": { devDependencies: { "@biomejs/biome": "2.4.15", esbuild: "0.28.2" } },
       },
     }),
     nodeVersion: "24.13.0",
@@ -165,7 +192,8 @@ function q0Receipt() {
     );
   observer.proveNoFallback("descendant", "none");
   observer.proveNoFallback("download", "none");
-  const result = runNodeBanAudit({
+  // This synthetic result only preserves the consumer fixture; it is not probe evidence.
+  const auditInput = {
     repoRoot: process.cwd(),
     subjectRevision: predecessorSubject,
     f0c,
@@ -173,9 +201,11 @@ function q0Receipt() {
     f0cLanes: lanes,
     documents: documents(),
     processObservations: observer.snapshot(),
-    observedScopes: ["status", "doctor", "test", "hook", "descendant", "download"],
+    observedScopes: ["status", "doctor", "test", "hook", "descendant", "download"] as const,
     classifyProcess: classifyRuntimeImageProcess,
-  });
+    testProbeOutcome: syntheticProbeOutcome(),
+  };
+  const result = runNodeBanAudit(auditInput);
   return result.receipt;
 }
 function cleanInput(overrides: Partial<BunRetirementInput> = {}): BunRetirementInput {
@@ -320,7 +350,7 @@ describe("CAND-NODEBOOT-023/027/028/208 final Bun retirement", () => {
         new BunRetirementError("reachable_bun_surface"),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -342,7 +372,7 @@ describe("CAND-NODEBOOT-023/027/028/208 final Bun retirement", () => {
         new BunRetirementError("indeterminate_bun_surface"),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 

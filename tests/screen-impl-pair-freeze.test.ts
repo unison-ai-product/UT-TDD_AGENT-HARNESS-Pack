@@ -1,6 +1,6 @@
 // screen-impl-pair-freeze gate: 画面実装宣言 (implemented_screens) が検証ペア (next_pair_freeze) の
 // 段階順を破っていないか fail-close で検査する。純関数 (analyze) + loader (fs fixture) + 実 repo 整合。
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import {
   type ScreenImplPairFreezeInput,
   screenImplPairFreezeMessages,
 } from "../src/lint/screen-impl-pair-freeze.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 describe("screen-impl-pair-freeze", () => {
   it("passes while screen implementation has not been declared", () => {
@@ -95,7 +96,7 @@ describe("loadScreenImplPairFreezeInput (fs fixture) U-SIPF-005..007", () => {
     root = mkdtempSync(join(tmpdir(), "sipf-"));
   });
   afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+    removeTestTree(root);
   });
 
   function writeScreenList(fm: string): void {

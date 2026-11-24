@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { linkSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { ensureDir } from "../shared/fs.ts";
 
@@ -61,6 +61,12 @@ export interface WrittenGateRunEvidence {
   path: string;
 }
 
+interface GateRunPublishBoundary {
+  beforeLink?: (stagedPath: string, finalPath: string) => void;
+  link?: (stagedPath: string, finalPath: string) => void;
+  pathDigest?: (gateRunId: string) => string;
+}
+
 function compactSlug(value: string): string {
   return (
     value
@@ -78,16 +84,20 @@ export function gateRunEvidenceDir(repoRoot: string): string {
   return join(repoRoot, ".ut-tdd", "gate_runs");
 }
 
+export function gateRunEvidenceFilename(
+  gateRunId: string,
+  pathDigest?: (gateRunId: string) => string,
+): string {
+  const digest = pathDigest
+    ? pathDigest(gateRunId)
+    : createHash("sha256").update(gateRunId, "utf8").digest("hex");
+  return `${digest}.json`;
+}
+
 export function buildGateRunEvidence(input: GateRunEvidenceInput): GateRunEvidence {
   const checkedAt = input.checkedAt ?? new Date().toISOString();
   const planId = input.planId?.trim() ? input.planId.trim() : null;
-  const runSeed = [
-    planId ?? "no-plan",
-    input.gateId,
-    checkedAt,
-    input.sessionId ?? "",
-    process.pid,
-  ].join(":");
+  const runSeed = [input.gateId, checkedAt, input.sessionId ?? "", process.pid].join(":");
   return {
     schema_version: 1,
     gate_run_id: `gate-run:${compactSlug(input.gateId)}:${shortHash(runSeed)}`,
@@ -116,14 +126,48 @@ export function buildGateRunEvidence(input: GateRunEvidenceInput): GateRunEviden
   };
 }
 
-export function writeGateRunEvidence(input: GateRunEvidenceInput): WrittenGateRunEvidence {
+function assertGateRunIdAvailable(dir: string, gateRunId: string): void {
+  const existingFiles = readdirSync(dir).filter((name) => name.endsWith(".json"));
+  for (const name of existingFiles) {
+    const existingPath = join(dir, name);
+    const existing = JSON.parse(readFileSync(existingPath, "utf8")) as {
+      gate_run_id?: unknown;
+    };
+    if (existing.gate_run_id === gateRunId) {
+      const error = Object.assign(new Error("EEXIST: gate run evidence ID already exists"), {
+        code: "EEXIST",
+      });
+      throw error;
+    }
+  }
+}
+
+export function writeGateRunEvidence(
+  input: GateRunEvidenceInput,
+  boundary?: GateRunPublishBoundary,
+): WrittenGateRunEvidence {
   const evidence = buildGateRunEvidence(input);
   const dir = gateRunEvidenceDir(input.repoRoot);
   ensureDir(dir, { recursive: true });
-  const timestamp = compactSlug(evidence.checked_at.replace(/[:.]/g, "-"));
-  const suffix = shortHash(evidence.gate_run_id);
-  const absolutePath = join(dir, `${compactSlug(evidence.gate_id)}-${timestamp}-${suffix}.json`);
-  writeFileSync(absolutePath, `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
+  assertGateRunIdAvailable(dir, evidence.gate_run_id);
+
+  const absolutePath = join(
+    dir,
+    gateRunEvidenceFilename(evidence.gate_run_id, boundary?.pathDigest),
+  );
+  const temporaryPath = join(dir, `.tmp-${randomUUID()}`);
+  writeFileSync(temporaryPath, `${JSON.stringify(evidence, null, 2)}\n`, {
+    encoding: "utf8",
+    flag: "wx",
+  });
+  boundary?.beforeLink?.(temporaryPath, absolutePath);
+  const link = boundary?.link ?? linkSync;
+  link(temporaryPath, absolutePath);
+  try {
+    unlinkSync(temporaryPath);
+  } catch {
+    // The complete final record is already published; readers ignore leftover temps.
+  }
   return {
     evidence,
     path: relative(input.repoRoot, absolutePath).replace(/\\/g, "/"),

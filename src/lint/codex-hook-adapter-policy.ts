@@ -7,7 +7,6 @@ interface CodexRequiredHook {
   commandParts: readonly string[];
   sourceArgs: readonly string[];
   wrapperArgs: readonly string[];
-  blockOnFailure?: boolean;
 }
 
 interface CodexDeferredSurface {
@@ -33,7 +32,6 @@ export const CODEX_REQUIRED = [
     commandParts: [".claude/hooks/agent-guard.ts"],
     sourceArgs: codexSourceArgs("agent-guard"),
     wrapperArgs: wrapperHookArgs("agent-guard"),
-    blockOnFailure: true,
   },
   {
     id: "work-guard",
@@ -42,7 +40,6 @@ export const CODEX_REQUIRED = [
     commandParts: [".claude/hooks/work-guard.ts"],
     sourceArgs: codexSourceArgs("work-guard"),
     wrapperArgs: wrapperHookArgs("work-guard"),
-    blockOnFailure: true,
   },
   {
     id: "session-start",

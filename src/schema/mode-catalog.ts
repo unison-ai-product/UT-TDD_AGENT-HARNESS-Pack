@@ -7,8 +7,8 @@
  * plan_id prefix 4 分岐のみの旧導出 (Forward 落ち) はこの module で置換された。
  *
  * mode カタログの doc 正本は docs/process/modes/ (README 台帳 + 1 ファイル 1 mode)。
- * `MODE_CATALOG_DOC_FILES` はその機械側写像で、drive-db-registration lint が
- * doc ↔ 写像の差分を fail-close 検出する (新 mode doc 追加時の取りこぼし防止)。
+ * `MODE_CATALOG_DOC_FILES` はその機械側写像で、`unmappedModeCatalogDocs` が
+ * 未登録の mode doc を返す。mode catalog のテストが実 repo の doc ↔ 写像の差分を検出する。
  */
 
 /** route_mode token (src/schema/route-map.ts の mode 値) → drive_runs.mode 表示値。 */

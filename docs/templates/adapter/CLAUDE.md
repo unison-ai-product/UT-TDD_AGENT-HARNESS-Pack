@@ -6,7 +6,8 @@ Use repository-local UT-TDD commands for harness state and delegation.
 - `ut-tdd status` reports the local runtime mode.
 - `ut-tdd doctor --profile consumer-setup-smoke` runs consumer-safe setup and hook checks.
 - `ut-tdd doctor --profile consumer-toolchain` runs consumer-safe toolchain checks.
-- Full `ut-tdd doctor` is for source/governance repositories with PLAN/design/test-design artifacts.
+- Claude Code 2.1.295 or newer is required because older versions can ignore guard hooks' `onFailure: "block"` setting.
+- Full `ut-tdd doctor` is for source/governance repositories with governance/design/test-design artifacts.
 - `ut-tdd handover` reads and writes cross-runtime handover state.
 - `ut-tdd codex --role <role> --task "..."` delegates to Codex.
 - `ut-tdd claude --role <role> --task "..."` delegates to Claude.

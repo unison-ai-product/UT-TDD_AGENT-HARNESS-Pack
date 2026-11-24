@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ import {
 } from "../src/lint/db-projection-ingestion.ts";
 import { openHarnessDb } from "../src/state-db/index.ts";
 import { rebuildHarnessDb } from "../src/state-db/projection-writer.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const populatedAutomaticProjectionCounts = {
   graph_nodes: 1,
@@ -30,10 +31,6 @@ const populatedAutomaticProjectionCounts = {
   artifact_progress: 1,
   spec_defs: 1,
   spec_relations: 1,
-  schedule_entries: 1,
-  execution_readiness_projection: 1,
-  activation_entries: 1,
-  activation_schedule_reviews: 1,
   document_catalog_entries: 1,
   document_scale_profile_entries: 1,
   document_scale_profile_reviews: 1,
@@ -57,10 +54,6 @@ describe("db projection ingestion detector", () => {
       expect(result.rowCounts.test_cases).toBeGreaterThan(0);
       expect(result.rowCounts.spec_defs).toBeGreaterThan(0);
       expect(result.rowCounts.spec_relations).toBeGreaterThan(0);
-      expect(result.rowCounts.schedule_entries).toBeGreaterThan(0);
-      expect(result.rowCounts.execution_readiness_projection).toBeGreaterThan(0);
-      expect(result.rowCounts.activation_entries).toBeGreaterThan(0);
-      expect(result.rowCounts.activation_schedule_reviews).toBeGreaterThan(0);
       expect(result.rowCounts.document_catalog_entries).toBeGreaterThan(0);
       expect(result.rowCounts.document_scale_profile_entries).toBeGreaterThan(0);
       expect(result.rowCounts.document_scale_profile_reviews).toBeGreaterThan(0);
@@ -78,9 +71,9 @@ describe("db projection ingestion detector", () => {
 
       expect(rebuilt.ok).toBe(true);
       expect(rebuilt.rowCounts.graph_nodes).toBeGreaterThan(0);
-      expect(rebuilt.timings?.map((timing) => timing.id)).toEqual(
-        expect.arrayContaining(["plans", "graph-impact", "row-counts"]),
-      );
+      const timingIds = rebuilt.timings?.map((timing) => timing.id);
+      expect(timingIds).toEqual(expect.arrayContaining(["migrate", "graph-impact", "row-counts"]));
+      expect(timingIds).not.toContain("plans");
       expect(rebuilt.timings?.every((timing) => timing.duration_ms >= 0)).toBe(true);
     } finally {
       db.close();
@@ -103,12 +96,10 @@ describe("db projection ingestion detector", () => {
 
       expect(result.ok).toBe(true);
       expect(result.messages.join("\n")).not.toContain("db-projection-ingestion profile");
-      expect(result.timingSubsteps?.map((timing) => timing.id)).toEqual(
-        expect.arrayContaining(["plans", "graph-impact"]),
-      );
-      expect(result.timingSubsteps?.map((timing) => timing.id)).not.toContain(
-        "runtime-model-telemetry",
-      );
+      const timingIds = result.timingSubsteps?.map((timing) => timing.id);
+      expect(timingIds).toEqual(expect.arrayContaining(["migrate", "graph-impact"]));
+      expect(timingIds).not.toContain("plans");
+      expect(timingIds).not.toContain("runtime-model-telemetry");
     } finally {
       if (previousClaude === undefined) {
         delete process.env.UT_TDD_CLAUDE_SESSIONS_DIR;
@@ -120,7 +111,7 @@ describe("db projection ingestion detector", () => {
       } else {
         process.env.UT_TDD_CODEX_SESSIONS_DIR = previousCodex;
       }
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -137,14 +128,32 @@ describe("db projection ingestion detector", () => {
     );
   });
 
+  it("U-DBPROJ-ING-001: covers the registered automatic projection tables", () => {
+    const result = analyzeDbProjectionIngestion(populatedAutomaticProjectionCounts);
+
+    expect(result.ok).toBe(true);
+    expect(result.missingRows).toEqual([]);
+    expect(AUTOMATIC_DB_PROJECTION_REQUIREMENTS.map((item) => item.table).sort()).toEqual(
+      Object.keys(populatedAutomaticProjectionCounts).sort(),
+    );
+  });
+
+  it("U-DBPROJ-ING-002: rejects another empty automatic table", () => {
+    const result = analyzeDbProjectionIngestion({
+      ...populatedAutomaticProjectionCounts,
+      mcp_server_profiles: 0,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.missingRows.map((row) => row.table).sort()).toEqual(["mcp_server_profiles"]);
+  });
+
   it("treats trace_edges as automatic and telemetry-only tables as explicit evidence-gated zeros", () => {
     expect(AUTOMATIC_DB_PROJECTION_REQUIREMENTS.map((item) => item.table)).toContain("trace_edges");
     expect(AUTOMATIC_DB_PROJECTION_REQUIREMENTS.map((item) => item.table)).toEqual(
       expect.arrayContaining([
         "spec_defs",
         "spec_relations",
-        "schedule_entries",
-        "activation_entries",
         "document_catalog_entries",
         "document_scale_profile_entries",
         "document_scale_profile_reviews",
@@ -153,12 +162,7 @@ describe("db projection ingestion detector", () => {
       ]),
     );
     expect(EVIDENCE_GATED_DB_PROJECTION_TABLES).toEqual(
-      expect.arrayContaining([
-        "model_evaluations",
-        "retry_events",
-        "detector_route_candidates",
-        "github_review_lane_receipts",
-      ]),
+      expect.arrayContaining(["model_evaluations", "retry_events", "detector_route_candidates"]),
     );
   });
 

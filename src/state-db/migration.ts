@@ -120,6 +120,13 @@ function rebuildVersion26ProjectionTables(db: HarnessDb, fromVersion: number): b
   return changed;
 }
 
+function rebuildVersion30ProjectionTables(db: HarnessDb, fromVersion: number): boolean {
+  if (fromVersion >= 30) return false;
+  if (!tableNames(db).includes("vmodel_item_target_edges")) return false;
+  db.exec("DROP TABLE vmodel_item_target_edges");
+  return true;
+}
+
 /**
  * schema を現行 SCHEMA_VERSION まで適用する。
  * user_version < SCHEMA_VERSION のときのみ DDL を流し、適用後に user_version を更新する。
@@ -131,6 +138,9 @@ export function migrate(db: HarnessDb): MigrationResult {
     () => {
       const fromVersion = db.userVersion();
       const rebuiltProjectionTables = rebuildVersion26ProjectionTables(db, fromVersion);
+      const rebuiltIssueTargetTable = rebuildVersion30ProjectionTables(db, fromVersion);
+      // v31 は旧 CHECK を持つ投影表を再作成し、行は source から再投影する。
+      if (fromVersion < 31) db.exec("DROP TABLE IF EXISTS document_scale_profile_entries");
       const ddls = schemaDdl();
       for (const ddl of ddls.filter((s) => s.startsWith("CREATE TABLE"))) db.exec(ddl);
       const addedColumns = addMissingColumns(db);
@@ -141,7 +151,11 @@ export function migrate(db: HarnessDb): MigrationResult {
       return {
         fromVersion,
         toVersion,
-        applied: fromVersion < SCHEMA_VERSION || addedColumns > 0 || rebuiltProjectionTables,
+        applied:
+          fromVersion < SCHEMA_VERSION ||
+          addedColumns > 0 ||
+          rebuiltProjectionTables ||
+          rebuiltIssueTargetTable,
         tables: tableNames(db),
       };
     },

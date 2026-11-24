@@ -3,7 +3,6 @@ import {
   mkdtempSync,
   readFileSync,
   renameSync,
-  rmSync,
   statSync,
   symlinkSync,
   unlinkSync,
@@ -11,34 +10,34 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { createNodePlanRevisionRunner } from "../src/plan-admission/node-plan-revision-runner.ts";
-import { buildLegacyPlanInventory } from "../src/plan-asset/adapters/legacy-plan-inventory.ts";
 import {
   canonicalProjectIdentityBytes,
   loadProjectIdentityFromHead,
-} from "../src/plan-asset/adapters/project-identity-loader.ts";
+} from "../src/kernel/project-identity.ts";
 import { resolveProjectMemoryRoot } from "../src/runtime/project-memory-root.ts";
 import {
   bootstrapProjectIdentity,
   repositoryIdentityFromOrigin,
 } from "../src/setup/project-identity-bootstrap.ts";
+import { describe, expect, heavyAfterEach, it } from "./support/hook-bounds.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 import { headSnapshotRoot } from "./support/workspace-roots.ts";
 
+const snapshotRoot = headSnapshotRoot(),
+  identity = "unison-ai-product/UT-TDD_AGENT-HARNESS";
 const fixtures: string[] = [];
 const win = process.platform === "win32";
 const expectedCandidateIds = new Set([
   ...Array.from(
     { length: 41 },
     (_, index) => `CANDIDATE-U-PROJID-${String(index + 1).padStart(3, "0")}`,
-  ),
+  ).filter((_, index) => index + 1 !== 36 && index + 1 !== 37),
   "CANDIDATE-P-PROJID-001",
   "CANDIDATE-P-PROJID-002",
   "CANDIDATE-P-PROJID-003",
 ]);
-
-afterEach(() => {
-  for (const root of fixtures.splice(0)) rmSync(root, { recursive: true, force: true });
+heavyAfterEach("teardown", () => {
+  for (const root of fixtures.splice(0)) removeTestTree(root);
 });
 
 function fixture(remote = "git@github.com:acme/widget.git"): string {
@@ -79,7 +78,7 @@ function windowsShortPath(path: string): string {
 describe("project identity bootstrap", () => {
   it("candidate inventory is exact and duplicate-free", () => {
     const source = readFileSync(
-      join(headSnapshotRoot(), "tests/setup-project-identity-bootstrap.test.ts"),
+      join(snapshotRoot, "tests/setup-project-identity-bootstrap.test.ts"),
       "utf8",
     );
     const ids = [...source.matchAll(/it\("((?:CANDIDATE-U|CANDIDATE-P)-PROJID-\d{3}):/g)].map(
@@ -87,6 +86,12 @@ describe("project identity bootstrap", () => {
     );
     expect(ids).toHaveLength(expectedCandidateIds.size);
     expect(new Set(ids)).toEqual(expectedCandidateIds);
+  });
+
+  it("U-PA-008: reads the real identity from the tracked HEAD blob", () => {
+    expect(
+      loadProjectIdentityFromHead({ repoRoot: snapshotRoot, expectedRepositoryIdentity: identity }),
+    ).toMatchObject({ ok: true, value: { repositoryIdentity: identity } });
   });
 
   it("bootstrap creates deterministic canonical bytes without committing", () => {
@@ -571,22 +576,6 @@ describe("project identity bootstrap", () => {
     expect(loadProjectIdentityFromHead({ repoRoot: root })).toMatchObject({
       ok: false,
       error: { ruleId: "identity_noncanonical_bytes" },
-    });
-  });
-
-  it("CANDIDATE-U-PROJID-036: node revision runner's direct identity reader is origin-bound", () => {
-    const root = trackedFixture("other/repo", "git@github.com:acme/widget.git");
-    const runner = createNodePlanRevisionRunner(root) as unknown as {
-      deps: { repositoryIdentity: () => string };
-    };
-    expect(() => runner.deps.repositoryIdentity()).toThrow("identity_repository_unbound");
-  });
-
-  it("CANDIDATE-U-PROJID-037: legacy inventory direct caller denies stale identity", () => {
-    const root = trackedFixture("other/repo", "git@github.com:acme/widget.git");
-    expect(buildLegacyPlanInventory(root)).toMatchObject({
-      ok: false,
-      error: { ruleId: "identity_repository_unbound" },
     });
   });
 

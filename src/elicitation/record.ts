@@ -1,11 +1,10 @@
 /**
  * 設計判断の採択記録 (append-only JSONL、PLAN-L7-428)。
  *
- * 正本は PLAN 設計判断節 / ADR (governance 正本 =
+ * 正本は設計文書 / ADR (governance 正本 =
  * docs/governance/design-decision-elicitation.md §共通ルール 7)。この log は
  * feedback lifecycle と同じ「append-only log を episodic 正本、DB は projection」
- * 方針の記録面で、聞いた/採択した事実をステージ (plan_id + current_location)
- * 付きで残す。
+ * 方針の記録面で、Issue に紐づく採択内容と現在の設計位置を残す。
  */
 
 import { appendFileSync } from "node:fs";
@@ -16,7 +15,7 @@ export const DESIGN_DECISION_LOG_PATH = ".ut-tdd/logs/design-decisions.jsonl";
 
 export interface DesignDecisionRecord {
   recorded_at: string;
-  plan_id: string;
+  issue_number: number;
   current_location: string;
   topic: string;
   options: string[];
@@ -26,7 +25,7 @@ export interface DesignDecisionRecord {
 }
 
 export interface DesignDecisionInput {
-  planId: string;
+  issueNumber: number;
   currentLocation?: string;
   topic: string;
   options?: string[];
@@ -42,7 +41,7 @@ export function appendDesignDecision(
 ): DesignDecisionRecord {
   const record: DesignDecisionRecord = {
     recorded_at: input.recordedAt ?? new Date().toISOString(),
-    plan_id: input.planId.trim(),
+    issue_number: input.issueNumber,
     current_location: (input.currentLocation ?? "").trim(),
     topic: input.topic.trim(),
     options: (input.options ?? []).map((option) => option.trim()).filter(Boolean),
@@ -50,7 +49,9 @@ export function appendDesignDecision(
     reason: input.reason.trim(),
     session_id: (input.sessionId ?? "").trim(),
   };
-  if (!record.plan_id) throw new Error("plan_id is required");
+  if (!Number.isSafeInteger(record.issue_number) || record.issue_number < 1) {
+    throw new Error("issue_number must be a positive integer");
+  }
   if (!record.topic) throw new Error("topic is required");
   if (!record.chosen) throw new Error("chosen is required");
   if (!record.reason) throw new Error("reason is required");

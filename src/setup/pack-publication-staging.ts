@@ -20,7 +20,7 @@ export interface PackPublicationCommitEntry {
   readonly mode: "100644" | "100755";
   readonly size: number;
   readonly contentDigest: string;
-  readonly kind: "artifact" | "control-manifest";
+  readonly kind: "artifact" | "build-input" | "control-manifest";
   readonly bytes: Uint8Array;
 }
 
@@ -45,6 +45,8 @@ export interface PackPublicationStagingInput {
   readonly releaseId: string;
   readonly controlManifestBytes: Uint8Array;
   readonly entries: readonly SealedPublicationEntry[];
+  /** Build inputs of C1 (`selectPackBuildInputs` paths) with their source-commit bytes. */
+  readonly buildInputs?: readonly { readonly path: string; readonly bytes: Uint8Array }[];
 }
 
 export type PackPublicationStagingError =
@@ -130,7 +132,7 @@ function utf8Compare(left: string, right: string): number {
 function immutableCommitEntry(input: {
   readonly path: string;
   readonly mode: "100644" | "100755";
-  readonly kind: "artifact" | "control-manifest";
+  readonly kind: "artifact" | "build-input" | "control-manifest";
   readonly bytes: Uint8Array;
   readonly contentDigest: string;
 }): PackPublicationCommitEntry {
@@ -220,11 +222,13 @@ function exactSealedEntries(
   });
 }
 
-function packCommitEntries(
-  release: PublicationReleaseIdentity,
-  entries: readonly SealedPublicationEntry[],
-  controlManifestBytes: Uint8Array,
-): readonly PackPublicationCommitEntry[] | null {
+function packCommitEntries(input: {
+  readonly release: PublicationReleaseIdentity;
+  readonly entries: readonly SealedPublicationEntry[];
+  readonly controlManifestBytes: Uint8Array;
+  readonly buildInputs: readonly { readonly path: string; readonly bytes: Uint8Array }[];
+}): readonly PackPublicationCommitEntry[] | null {
+  const { release, entries, controlManifestBytes, buildInputs } = input;
   if (!exactSealedEntries(release, entries)) return null;
   if (release.artifacts.some((artifact) => artifact.destinationPath === CONTROL_MANIFEST_PATH))
     return null;
@@ -237,6 +241,19 @@ function packCommitEntries(
       contentDigest: artifact.contentDigest,
     }),
   );
+  const artifactPaths = new Set(release.artifacts.map((artifact) => artifact.destinationPath));
+  for (const input of buildInputs) {
+    if (artifactPaths.has(input.path)) continue;
+    output.push(
+      immutableCommitEntry({
+        path: input.path,
+        mode: "100644",
+        kind: "build-input",
+        bytes: input.bytes,
+        contentDigest: sha256(input.bytes),
+      }),
+    );
+  }
   const sidecar = Buffer.from(controlManifestBytes);
   output.push(
     immutableCommitEntry({
@@ -306,7 +323,12 @@ export function buildPackPublicationStagingPlan(
   const controlManifest = parseControlManifest(input.controlManifestBytes);
   if (!controlManifest || !sameSemanticManifest(manifest, controlManifest))
     return { ok: false, phase: "preflight", error: "control_manifest_mismatch" };
-  const commitEntries = packCommitEntries(release, input.entries, input.controlManifestBytes);
+  const commitEntries = packCommitEntries({
+    release,
+    entries: input.entries,
+    controlManifestBytes: input.controlManifestBytes,
+    buildInputs: input.buildInputs ?? [],
+  });
   if (!commitEntries) return { ok: false, phase: "preflight", error: "commit_entry_mismatch" };
   const assets = buildPackPublicationAssets({ release, entries: input.entries });
   if (!assets.ok) return { ok: false, phase: "preflight", error: assets.error };

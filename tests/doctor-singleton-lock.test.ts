@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import {
   doctorLockClaimsPath,
   isStaleDoctorLock,
 } from "../src/doctor/singleton-lock.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const NOW = Date.parse("2026-07-16T12:00:00+09:00");
 
@@ -32,7 +33,7 @@ describe("doctor singleton lock (PLAN-L7-442)", () => {
   });
 
   afterEach(() => {
-    rmSync(repoRoot, { recursive: true, force: true });
+    removeTestTree(repoRoot);
   });
 
   it("U-DOCLOCK-001: first acquisition wins and writes pid/started_at record", () => {

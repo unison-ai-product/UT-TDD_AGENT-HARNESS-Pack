@@ -30,7 +30,7 @@ decision_points:
     over: "Treating it as a low-severity environmental hiccup"
     because: "A forced stop is explicitly classified as Incident-level Recovery regardless of apparent technical severity"
   - when: "The same subject (file, gate, or test) has failed 3 consecutive times"
-    choose: "Stop fixing and escalate one level up (design/contract/baseline) or open a Recovery PLAN"
+    choose: "Stop fixing and escalate one level up (design/contract/baseline) or open a Recovery Issue"
     over: "Attempting a 4th tweak based on the same working hypothesis"
     because: "Three failed attempts mean the working hypothesis or architecture is wrong, not that the next tweak will land (Iron Law / 3-attempt escalation, mechanized by evaluateAttemptEscalation)"
   - when: "ut-tdd doctor exits 0"
@@ -56,7 +56,7 @@ decision_points:
 Detection-to-routing protocol for defects and failures in UT-TDD (FR-L1-08
 defect detection, FR-L1-10 recovery routing, FR-L1-16 incident classification).
 This skill covers the triage and routing phase — once root cause is confirmed
-and a PLAN is open, apply the error-fix skill for the fix itself.
+and an Issue is open, apply the error-fix skill for the fix itself.
 
 ## When to load this skill
 
@@ -89,8 +89,8 @@ Determine whether the failure is:
 
 - **Environmental** — PATH, missing runtime, `.ut-tdd/` directory permissions,
   `CLAUDE_PROJECT_DIR` not set. Check `ut-tdd doctor` environment checks first.
-- **Governance** — orphaned PLAN, missing design doc, broken dependency link,
-  schema mismatch. Check `ut-tdd doctor` governance checks and `ut-tdd plan lint`.
+- **Governance** — missing design doc, broken dependency link,
+  schema mismatch. Check `ut-tdd doctor` for the applicable governance checks.
 - **Implementation** — a logic error in `src/`. Confirm with `npm run test` and
   a targeted test run.
 - **Test oracle** — a test is asserting the wrong thing, or a false-green was
@@ -99,21 +99,21 @@ Determine whether the failure is:
 Do not move to Step 2 until the class is clear. Misclassifying environmental
 as implementation is a common source of wasted work.
 
-### Step 2 — route to the correct PLAN type
+### Step 2 — route to the appropriate work type
 
 | Class | Route |
 |-------|-------|
-| Environmental | Recovery PLAN; fix environment, add a `ut-tdd doctor` check for future detection |
-| Governance | Recovery PLAN or inline fix depending on severity; update the relevant design doc |
-| Implementation defect | Recovery PLAN (if severity warrants) or error-fix skill inline |
-| Incident (production / user-visible) | Incident PLAN; priority over all other work |
+| Environmental | Recovery Issue; fix environment, add a `ut-tdd doctor` check for future detection |
+| Governance | Recovery Issue or inline fix depending on severity; update the relevant design doc |
+| Implementation defect | Recovery Issue (if severity warrants) or error-fix skill inline |
+| Incident (production / user-visible) | Incident Issue; priority over all other work |
 
 A forced stop by the user is classified as Incident-level Recovery regardless
 of apparent technical severity.
 
 ### Step 3 — reproduce before routing
 
-Before opening a PLAN, confirm the failure is reproducible:
+Before opening an Issue, confirm the failure is reproducible:
 
 ```
 npm run typecheck
@@ -124,16 +124,16 @@ ut-tdd status
 ```
 
 Record the exact failing command, the first error line, and the HEAD SHA in the
-PLAN's `review_evidence` field. "It failed earlier but I can't reproduce it"
-is not a valid PLAN basis — diagnose the flakiness first.
+Issue or linked PR evidence. "It failed earlier but I can't reproduce it"
+is not a valid basis for opening an Issue — diagnose the flakiness first.
 
 ## Recovery routing checklist
 
 - [ ] Failure class identified (environmental / governance / implementation /
   oracle).
 - [ ] Failure is reproducible on current HEAD.
-- [ ] Failing command and first error line recorded in PLAN or `.ut-tdd/audit/`.
-- [ ] Correct PLAN type opened (Recovery / Incident / inline fix).
+- [ ] Failing command and first error line recorded in the Issue or `.ut-tdd/audit/`.
+- [ ] Correct work type selected (Recovery / Incident / inline fix).
 - [ ] Root cause documented — what condition allowed the defect, not only what
   the symptom was.
 - [ ] Prevention measure identified for after the fix (see error-fix skill).
@@ -155,7 +155,7 @@ front of the fix*, not only a post-hoc note.
 gate, or test) fails **3 consecutive times**, STOP fixing. Three failed attempts
 mean the working hypothesis — or the architecture — is wrong, not that the next
 tweak will land. Escalate: re-run the root-cause pass one level up (design /
-contract / baseline), or open a Recovery PLAN. A success on the subject resets
+contract / baseline), or open a Recovery Issue. A success on the subject resets
 the streak.
 
 This is mechanized by `src/runtime/attempt-escalation.ts`
@@ -174,7 +174,7 @@ surface (PLAN-L7-110) on the next session start — feedback from the DB, not pr
 
 Common `ut-tdd doctor` non-zero causes and their meaning:
 
-- **plan-governance**: orphaned PLAN, missing `requires` target, broken pair.
+- **Design and trace checks**: missing pairs or broken design references.
   Read the full governance output; each line is a separate violation.
 - **readability**: mojibake marker (`U+FFFD`, half-width kana) detected in a
   doc. Do not attempt to reconstruct from a lossy conversion — restore from
@@ -191,7 +191,7 @@ Common `ut-tdd doctor` non-zero causes and their meaning:
   co-exist with a real defect.
 - Fixing the symptom without identifying root cause — the Recovery exit contract
   requires a prevention measure, not only a symptom removal.
-- Opening a new PLAN without a reproducible failure — creates governance noise
+- Opening a new Issue without a reproducible failure — creates governance noise
   and makes future triage harder.
 - Diagnosing from agent narrative output — always verify with `git status`,
   file reads, and `ut-tdd status` against actual harness state.

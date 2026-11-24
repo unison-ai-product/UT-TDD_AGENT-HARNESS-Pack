@@ -205,13 +205,45 @@ function violatesMachineSurfaceLanguage(text: string): boolean {
   return !ASCII_DECISION_TOKEN_PATTERN.test(text);
 }
 
+function isTestTitleReceiver(expression: ts.Expression): boolean {
+  return ts.isIdentifier(expression) && ["describe", "it", "test"].includes(expression.text);
+}
+
+function isTestTitleModifier(expression: ts.Expression): boolean {
+  return (
+    ts.isPropertyAccessExpression(expression) &&
+    isTestTitleReceiver(expression.expression) &&
+    ["fails", "skip", "only", "todo"].includes(expression.name.text)
+  );
+}
+
+function isTestTitleEachCall(expression: ts.Expression): boolean {
+  if (
+    !ts.isCallExpression(expression) ||
+    expression.arguments.length !== 1 ||
+    !ts.isPropertyAccessExpression(expression.expression) ||
+    expression.expression.name.text !== "each"
+  ) {
+    return false;
+  }
+  const receiver = expression.expression.expression;
+  return (
+    isTestTitleReceiver(receiver) ||
+    (ts.isPropertyAccessExpression(receiver) &&
+      receiver.name.text === "fails" &&
+      ts.isIdentifier(receiver.expression) &&
+      receiver.expression.text === "it")
+  );
+}
+
 function isTestTitleLiteral(node: ts.Node): boolean {
   if (!ts.isStringLiteral(node) && !ts.isNoSubstitutionTemplateLiteral(node)) return false;
   const parent = node.parent;
   if (!ts.isCallExpression(parent) || parent.arguments[0] !== node) return false;
   return (
-    ts.isIdentifier(parent.expression) &&
-    ["describe", "it", "test"].includes(parent.expression.text)
+    isTestTitleReceiver(parent.expression) ||
+    isTestTitleModifier(parent.expression) ||
+    isTestTitleEachCall(parent.expression)
   );
 }
 

@@ -6,10 +6,7 @@ import {
 import type { HarnessDb } from "../state-db/index.ts";
 import { upsertRow } from "../state-db/index.ts";
 
-// The invariant logic + decision types live in state-db (single source of truth,
-// shared with the projection advisory path) to avoid a guardrail <-> state-db
-// module cycle. Re-exported here so existing guardrail/ledger consumers and
-// tests keep their import path.
+// Re-export the invariant logic and decision types for ledger consumers.
 export type {
   GuardrailDecisionInput,
   GuardrailDecisionValue,

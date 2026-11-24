@@ -17,7 +17,7 @@ export interface ProviderHandoverPackage {
   handover_id: string;
   from: ProviderRuntime;
   to: ProviderRuntime;
-  active_plan: string;
+  active_plan: string | null;
   budget: string | null;
   context: ProviderHandoverContext;
   created_at: string;
@@ -26,7 +26,6 @@ export interface ProviderHandoverPackage {
 export interface ProviderHandoverInput {
   from: ProviderRuntime;
   to: ProviderRuntime;
-  activePlan: string;
   budget?: string | null;
   summary: string;
   nextActions?: string[];
@@ -47,15 +46,6 @@ export function providerHandoverPath(repoRoot: string, handoverId: string): stri
   return join(repoRoot, PROVIDER_DIR, `${handoverId}.json`);
 }
 
-function normalizeToken(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-}
-
 export function buildProviderHandover(
   input: ProviderHandoverInput,
   now: string,
@@ -63,22 +53,18 @@ export function buildProviderHandover(
   if (input.from === input.to) {
     throw new Error("provider handover requires different from/to runtimes");
   }
-  if (!input.activePlan.trim()) {
-    throw new Error("provider handover requires activePlan");
-  }
   if (!input.summary.trim()) {
     throw new Error("provider handover requires summary");
   }
-  const plan = sanitize(input.activePlan.trim());
   const timeToken = now.replace(/[^0-9]/g, "").slice(0, 14) || "unknown-time";
-  const handoverId = `${timeToken}-${input.from}-to-${input.to}-${normalizeToken(plan)}`;
+  const handoverId = `${timeToken}-${input.from}-to-${input.to}`;
   return {
     schema_version: "provider-handover.v1",
     handover_kind: "mechanical",
     handover_id: handoverId,
     from: input.from,
     to: input.to,
-    active_plan: plan,
+    active_plan: null,
     budget: input.budget ? sanitize(input.budget.trim()) : null,
     context: {
       summary: sanitize(input.summary.trim()),

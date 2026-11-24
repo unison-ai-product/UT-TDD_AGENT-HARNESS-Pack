@@ -1,9 +1,11 @@
-import { releaseArtifactFileNames } from "../setup/distribution.ts";
+import { releaseArtifactFileNames } from "./release-artifact-names.ts";
 
 export type GithubOpsGuardCode =
   | "poc-no-main-merge"
   | "hotfix-postmortem-missing"
-  | "commitlint-invalid";
+  | "commitlint-invalid"
+  | "commit-file-unavailable"
+  | "commit-range-unavailable";
 
 export interface GithubOpsGuardFinding {
   code: GithubOpsGuardCode;
@@ -84,6 +86,16 @@ export function evaluateGithubOpsGuard(input: GithubOpsGuardInput): GithubOpsGua
         message: "hotfix/* PRs to main must include a Postmortem section or marker",
       });
     }
+  }
+
+  const prTitle = input.prTitle?.trim();
+  if (prTitle && !CONVENTIONAL_COMMIT_RE.test(prTitle)) {
+    findings.push({
+      code: "commitlint-invalid",
+      severity: "error",
+      evidence: prTitle,
+      message: "PR title must follow Conventional Commits",
+    });
   }
 
   for (const subject of input.commitSubjects ?? []) {

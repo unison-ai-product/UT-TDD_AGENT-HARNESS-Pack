@@ -19,7 +19,7 @@ decision_points:
     over: "leaving it as an empty `todo` stub that nobody fills in"
     because: "`na` is only valid when the concern is structurally absent from the project; leaving a genuinely absent concern as an unfillable todo just clutters the doc set without adding traceability"
   - when: "A design-doc topic applies to the project but is not yet decided, or feels tedious to write up"
-    choose: "keep it `todo` and push the open question into the risk register / debt register (`docs/plans/PLAN-*` debt entry, per [[debt-register]]) or the doc's own TBD section"
+    choose: "keep it `todo` and push the open question into the risk register / debt register (link a GitHub Issue as described in [[debt-register]]) or the doc's own TBD section"
     over: "marking it `na` to make a coverage gate go green"
     because: "changing status to `na` for a concern that structurally exists is a false-green — it hides an undecided risk instead of tracking it, and PO rules treat gate-green-by-relabeling as a claim-discipline violation"
   - when: "Deciding whether a given design topic needs its own doc at all"
@@ -35,7 +35,7 @@ decision_points:
     over: "keeping the compound sentence under one ID because the behaviours are related"
     because: "one requirement ID must map to one test case; a compound requirement cannot be traced 1:1 to a single test and breaks the traceability the ID exists to guarantee"
   - when: "A decision is made about architecture, technology choice, or a scope tradeoff — including which parts of the work to delegate to an AI agent"
-    choose: "record it as an ADR (`docs/adr/ADR-NNN-*.md`) with a one-line entry in the PLAN decision log, even for the AI-delegation boundary itself"
+    choose: "record it as an ADR (`docs/adr/ADR-NNN-*.md`) with a one-line entry in the linked Issue, even for the AI-delegation boundary itself"
     over: "leaving the rationale only in chat, a code comment, or an unlinked design-doc paragraph"
     because: "architecture/tradeoff decisions and AI-delegation boundaries are exactly the class of decision a successor agent or auditor needs a durable, indexed record of — an ADR is the recording target this skill's map assigns to that class"
   - when: "Multiple tailoring options remain and there is a genuine cost/risk tradeoff between them"
@@ -54,7 +54,7 @@ been scoped is written and frozen.
 
 ## When to load this skill
 
-- Starting a new project, PLAN family, or Add-feature slice and no design-doc
+- Starting a new project, design family, or Add-feature slice and no design-doc
   set has been scoped yet.
 - Someone asks "which design docs does this need?" or "how far should this go?".
 - A design-doc coverage check (or a `ut-tdd doctor` gap report) shows a topic
@@ -88,7 +88,7 @@ no batch jobs has no batch-design doc to write.
 - it is "tedious to write up".
 
 Both of these stay `todo`. The undecided part goes into the risk register /
-debt register (see [[debt-register]] for the PLAN-linked TTL discipline) or
+debt register (see [[debt-register]] for the Issue-linked TTL discipline) or
 the doc's own TBD section — never left as a dangling, unlinked `TBD`.
 
 **Changing a topic's status to `na` purely to make a coverage gate turn green
@@ -124,7 +124,7 @@ because one ID must trace 1:1 to one test case.
 
 | What was decided | Record it here |
 |---|---|
-| Architecture, technology choice, or a decision with a cost/risk tradeoff | `docs/adr/ADR-NNN-*.md`, plus a one-line entry in the PLAN decision log (see [[documentation-and-adrs]] for ADR procedure) |
+| Architecture, technology choice, or a decision with a cost/risk tradeoff | `docs/adr/ADR-NNN-*.md`, plus a one-line entry in the linked Issue (see [[documentation-and-adrs]] for ADR procedure) |
 | A requirement itself | The requirements doc (F-/NF- IDs) plus the requirements ledger |
 | A term or data-item definition | `docs/design/L0-glossary.md` — other docs reference it; never redefine it locally |
 | Naming or coding conventions | The project's standards/conventions doc |

@@ -1,42 +1,7 @@
 import type { TableDef } from "./harness-db.ts";
-import { col, pk, requiredCol } from "./harness-db-table-builders.ts";
+import { pk, requiredCol } from "./harness-db-table-builders.ts";
 
 export const HARNESS_DB_GITHUB_TABLES: TableDef[] = [
-  {
-    name: "github_review_lane_receipts",
-    columns: [
-      pk("review_lane_receipt_id"),
-      requiredCol("plan_id"),
-      requiredCol("plan_revision"),
-      requiredCol("lane"),
-      requiredCol("subject_head"),
-      requiredCol("verdict"),
-      requiredCol("reviewed_at"),
-      requiredCol("tests_green_at"),
-      requiredCol("worker_model"),
-      requiredCol("reviewer_model"),
-      requiredCol("attack_trials", "INTEGER"),
-      requiredCol("citations_json"),
-      requiredCol("source"),
-    ],
-    unique: [["plan_id", "plan_revision", "lane", "subject_head"]],
-  },
-  {
-    name: "execution_readiness_projection",
-    columns: [
-      pk("plan_id"),
-      requiredCol("plan_revision"),
-      requiredCol("readiness"),
-      requiredCol("current_gate"),
-      col("implementation_order", "INTEGER"),
-      requiredCol("predecessor_plan_ids"),
-      requiredCol("blocked_reason"),
-      requiredCol("unlock_condition"),
-      requiredCol("next_plan_ids"),
-      requiredCol("unlocked_plan_ids"),
-      requiredCol("computed_at"),
-    ],
-  },
   {
     name: "github_project_item_projection",
     columns: [

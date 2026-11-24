@@ -1,7 +1,7 @@
 export const REFACTOR_SCAN_ROOTS = ["src"] as const;
 
 export const REFACTOR_CANDIDATE_THRESHOLDS = {
-  splitModuleLines: 700,
+  splitModuleLines: 400,
   splitModuleExports: 24,
   extractHelperLines: 120,
   dedupeFunctionMinLines: 10,

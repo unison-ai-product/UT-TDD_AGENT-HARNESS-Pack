@@ -1,11 +1,11 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { findStaleModelIdLiterals } from "../src/lint/model-id-doc-drift.ts";
 import { normalizeModelFamily } from "../src/runtime/agent-guard.ts";
 import {
   CLAUDE_MODEL_FAMILY_CATALOG,
-  SUBAGENT_ALLOWLIST,
+  GENERIC_SUBAGENT_TYPES,
 } from "../src/runtime/agent-guard-policy.ts";
 import { BUILTIN_GITHUB_TEMPLATES } from "../src/setup/templates.ts";
 import { MODEL_IDS } from "../src/team/model-policy.ts";
@@ -35,34 +35,14 @@ import { MODEL_IDS } from "../src/team/model-policy.ts";
 import { headSnapshotRoot } from "./support/workspace-roots.ts";
 
 const repoRoot = headSnapshotRoot();
-const CLAUDE_CATALOG = new Set<string>(Object.values(MODEL_IDS.claude));
 // PLAN-RECOVERY-12 (issue #85): これらは L6 function-spec.md の model routing addendum に
 // 実際に残留していた stale literal (gpt-5.5 / claude-sonnet-4-6 / gpt-5.4)。現行 doc からは
 // 是正済みだが、負例 regression 用の fixture corpus として保持する。
 const KNOWN_STALE_LITERALS = ["gpt-5.5", "claude-sonnet-4-6", "gpt-5.4"];
 
 describe("U-MODELID-SSOT: model ID single source of truth", () => {
-  it("(a) .claude/agents frontmatter models are all in the MODEL_IDS catalog", () => {
-    const dir = join(repoRoot, ".claude", "agents");
-    if (!existsSync(dir)) {
-      // Clean Pack artifacts intentionally omit source-local active Claude agents.
-      expect(dir.includes(".claude")).toBe(true);
-      return;
-    }
-    const offenders: string[] = [];
-    for (const name of readdirSync(dir)) {
-      if (!name.endsWith(".md")) continue;
-      const text = readFileSync(join(dir, name), "utf8");
-      const match = text.match(/^model:\s*(\S+)\s*$/m);
-      if (!match) {
-        offenders.push(`${name}: model frontmatter missing`);
-        continue;
-      }
-      if (!CLAUDE_CATALOG.has(match[1])) {
-        offenders.push(`${name}: ${match[1]} not in MODEL_IDS.claude`);
-      }
-    }
-    expect(offenders).toEqual([]);
+  it("(a) .claude/agents definitions no longer exist (U-AGBOUND-028 owns the absence check)", () => {
+    expect(existsSync(join(repoRoot, ".claude", "agents"))).toBe(false);
   });
 
   it("(b) docs/templates/adapter mirror matches BUILTIN_GITHUB_TEMPLATES", () => {
@@ -84,19 +64,7 @@ describe("U-MODELID-SSOT: model ID single source of truth", () => {
     expect(mismatches).toEqual([]);
   });
 
-  it("(c) generated agent templates carry only catalog model IDs", () => {
-    const offenders: string[] = [];
-    for (const [name, content] of Object.entries(BUILTIN_GITHUB_TEMPLATES)) {
-      if (!name.startsWith("adapter/.claude/agents/")) continue;
-      const match = content.match(/^model:\s*(\S+)\s*$/m);
-      if (!match || !CLAUDE_CATALOG.has(match[1])) {
-        offenders.push(`${name}: ${match?.[1] ?? "missing"}`);
-      }
-    }
-    expect(offenders).toEqual([]);
-  });
-
-  it("(d) .claude/CLAUDE.md allowlist doc matches SUBAGENT_ALLOWLIST", () => {
+  it("(d) .claude/CLAUDE.md allowlist doc matches GENERIC_SUBAGENT_TYPES", () => {
     const docPath = join(repoRoot, ".claude", "CLAUDE.md");
     if (!existsSync(docPath)) {
       // Clean Pack artifacts intentionally omit the source-local Claude runtime policy.
@@ -109,8 +77,8 @@ describe("U-MODELID-SSOT: model ID single source of truth", () => {
     const documented = new Set(
       [...(section as RegExpMatchArray)[1].matchAll(/- `([^`]+)`/g)].map((m) => m[1]),
     );
-    const missingInDoc = [...SUBAGENT_ALLOWLIST].filter((name) => !documented.has(name)).sort();
-    const extraInDoc = [...documented].filter((name) => !SUBAGENT_ALLOWLIST.has(name)).sort();
+    const missingInDoc = [...GENERIC_SUBAGENT_TYPES].filter((name) => !documented.has(name)).sort();
+    const extraInDoc = [...documented].filter((name) => !GENERIC_SUBAGENT_TYPES.has(name)).sort();
     expect({ missingInDoc, extraInDoc }).toEqual({ missingInDoc: [], extraInDoc: [] });
   });
 

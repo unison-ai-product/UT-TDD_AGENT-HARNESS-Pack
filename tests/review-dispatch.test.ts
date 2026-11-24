@@ -1141,3 +1141,55 @@ describe("review dispatch analyzer (U-RVDISP)", () => {
     expect(entry(result).breaches).toEqual([]);
   });
 });
+
+describe("refactor judgement receipt validation candidates", () => {
+  const at = "2026-07-31T00:05:00.000Z";
+  const analyzeRefactorReceipt = (value: Record<string, unknown>) =>
+    analyzeReviewDispatch({
+      requests: [request()],
+      receipts: [value as never],
+      prs: [pr()],
+      now: at,
+    });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-059: 不正な verdict 判定値を拒否する", () => {
+    const invalid = analyzeRefactorReceipt({
+      ...receipt("verdict", { verdict: "PASS" }),
+      refactorJudgement: "maybe",
+    });
+    expect(invalid.entries[0].reasons).toContain("invalid_refactor_judgement");
+    expect(invalid.entries[0].state).not.toBe("merge_ready");
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-059: verdict 以外に判定欄があるreceiptを拒否する", () => {
+    const unexpected = analyzeRefactorReceipt({
+      ...receipt("in_review"),
+      refactorJudgement: "none-ok",
+    });
+    expect(unexpected.entries[0].reasons).toContain("unexpected_verdict_fields");
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-060: 判定欄だけ異なる receipt は競合として保持する", () => {
+    const first = { ...receipt("verdict", { verdict: "PASS" }), refactorJudgement: "none-ok" };
+    const second = {
+      ...receipt("verdict", { verdict: "PASS" }),
+      refactorJudgement: "none-rejected",
+    };
+    const result = analyzeReviewDispatch({
+      requests: [request()],
+      receipts: [first, second] as never,
+      prs: [pr()],
+      now: at,
+    });
+    expect(result.entries[0].reasons).toContain("duplicate_receipt_conflict");
+    expect(result.entries[0].state).not.toBe("merge_ready");
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-061: 有効な判定欄を dispatch entry に写す", () => {
+    const result = analyzeRefactorReceipt({
+      ...receipt("verdict", { verdict: "PASS" }),
+      refactorJudgement: "commit-ok",
+    });
+    expect(result.entries[0]).toMatchObject({ refactorJudgement: "commit-ok" });
+  });
+});

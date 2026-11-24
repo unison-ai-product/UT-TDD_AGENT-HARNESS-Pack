@@ -10,19 +10,19 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { loadTemplates, nodeSetupDeps, runSetup } from "../src/setup/index.ts";
 import { defaultHarnessDbPath, openHarnessDb } from "../src/state-db/index.ts";
 import { harnessDbStatus } from "../src/state-db/maintenance.ts";
 import * as projectionWriter from "../src/state-db/projection-writer.ts";
 import * as tokenTracker from "../src/state-db/token-tracker.ts";
+import { heavyAfterEach } from "./support/hook-bounds.ts";
 import { removeTestTree } from "./support/temp-tree.ts";
 
 const cliPath = resolve("src/cli.ts");
 const fixtures: string[] = [];
 const COMMITLINT_INSTALL = "npm install --save-dev @commitlint/cli @commitlint/config-conventional";
-const ACTIVATION_POINTER = ".ut-tdd/runtime/activation/active.json";
 
 function fixture(options: { packageType?: "module"; configJs?: string } = {}): string {
   const root = mkdtempSync(join(tmpdir(), "ut-tdd-rcdev-setup-artifacts-"));
@@ -112,31 +112,8 @@ function hasFileGuard(step: Record<string, unknown>, path: string): boolean {
   return guard.includes(path) && /if\s*\[|test\s+-[ef]|hashFiles\(/.test(guard);
 }
 
-function assertWorkflowConsumerConditions(source: string): void {
+function assertWorkflowConsumerPackageGuards(source: string): void {
   const { steps } = parseWorkflow(source);
-  const launcherSteps = steps.filter((step) => /\.ut-tdd\/bin\/ut-tdd\.mjs/.test(stepRun(step)));
-  expect(launcherSteps.length).toBeGreaterThan(0);
-  for (const step of launcherSteps) {
-    const condition = String(step.if ?? "");
-    const body = stepRun(step);
-    expect(`${condition}\n${body}`).toContain(ACTIVATION_POINTER);
-    expect(condition.includes(ACTIVATION_POINTER) || /if\s+\[/.test(body)).toBe(true);
-  }
-
-  const noticeSteps = steps.filter((step) => /::notice::/.test(stepRun(step)));
-  expect(noticeSteps.length).toBeGreaterThan(0);
-  expect(
-    noticeSteps.some((step) => {
-      const body = stepRun(step);
-      return (
-        body.includes(ACTIVATION_POINTER) &&
-        /if\s+\[\s+!\s+-f/.test(body) &&
-        /echo\s+["']?::notice::/.test(body) &&
-        !/exit\s+78|exit\s+1\b/.test(body)
-      );
-    }),
-  ).toBe(true);
-
   for (const step of steps) {
     const body = stepRun(step);
     const isConditional = (path: string) => hasFileGuard(step, path);
@@ -164,7 +141,7 @@ function assertWorkflowConsumerConditions(source: string): void {
   }
 }
 
-afterEach(() => {
+heavyAfterEach("teardown", () => {
   vi.restoreAllMocks();
   for (const root of fixtures.splice(0)) removeTestTree(root);
 });
@@ -221,22 +198,21 @@ describe("U-RCDEV PR-3: generated setup artifacts", () => {
     expect(hasGateRunsTable(root)).toBe(true);
   });
 
-  it("CANDIDATE-U-RCDEV-017: generated and source-mirrored workflow gates activation and consumer files", () => {
+  it("CANDIDATE-U-RCDEV-017: generated and source-mirrored workflow guards consumer npm checks", () => {
     const root = fixture();
     const generated = setup(root);
     expect(generated.status, generated.stderr).toBe(0);
     expect(existsSync(join(root, "package.json"))).toBe(false);
     expect(existsSync(join(root, "package-lock.json"))).toBe(false);
-    expect(existsSync(join(root, ACTIVATION_POINTER))).toBe(false);
     const workflowPath = join(root, ".github", "workflows", "harness-check.yml");
     expect(existsSync(workflowPath)).toBe(true);
-    assertWorkflowConsumerConditions(readFileSync(workflowPath, "utf8"));
+    assertWorkflowConsumerPackageGuards(readFileSync(workflowPath, "utf8"));
 
     // The source-repo template overrides the built-in fallback during normal setup.
     // Keep both render inputs on the same consumer-safety contract.
     const mirrored = loadTemplates(process.cwd())["common/harness-check.yml"];
     expect(mirrored).toBeDefined();
-    assertWorkflowConsumerConditions(mirrored as string);
+    assertWorkflowConsumerPackageGuards(mirrored as string);
   }, 90_000);
 
   it("CANDIDATE-U-RCDEV-018: CJS commitlint config loads in ESM and CommonJS consumers", () => {

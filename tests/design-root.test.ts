@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,9 +7,9 @@ import { loadGateConfirmDocs } from "../src/lint/gate-confirm.ts";
 import { loadL6CompletionInputs } from "../src/lint/l6-completion.ts";
 import { loadL7CompletionDocs } from "../src/lint/l7-completion.ts";
 import { loadScreenImplPairFreezeInput } from "../src/lint/screen-impl-pair-freeze.ts";
-import { lintPlanWithGate } from "../src/plan/lint.ts";
 import { resolveAuthoringSourcePath, resolveVModelRoots } from "../src/shared/design-root.ts";
 import { lintVmodel, loadPairDocs } from "../src/vmodel/lint.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 import { headSnapshotRoot } from "./support/workspace-roots.ts";
 
 function fixtureRoot(): string {
@@ -43,7 +43,7 @@ describe("release consumer design root (PLAN-L7-676 PR-2b)", () => {
         "docs/design/harness/L6/x.md",
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -66,29 +66,7 @@ describe("release consumer design root (PLAN-L7-676 PR-2b)", () => {
       expect(loadL7CompletionDocs(root)).toEqual([]);
       expect(loadScreenImplPairFreezeInput(root).screenDesignPresent).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("U-RCDEV-013: plan lint treats a missing docs/plans directory as zero plans", () => {
-    const root = fixtureRoot();
-    try {
-      const absent = lintPlanWithGate(undefined, root, "schedule");
-      expect(absent.ok).toBe(true);
-      expect(absent.messages[0]).toContain("checked=0");
-
-      mkdirSync(join(root, "docs", "plans"), { recursive: true });
-      writeFileSync(
-        join(root, "docs", "plans", "PLAN-L7-fixture.md"),
-        "---\nplan_id: PLAN-L7-fixture\n---\n",
-        "utf8",
-      );
-      const present = lintPlanWithGate(undefined, root, "schedule");
-      expect(present.ok).toBe(true);
-      expect(present.messages[0]).toContain("checked=1");
-      expect(existsSync(join(root, "docs", "plans"))).toBe(true);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,13 +26,14 @@ import {
   installCanaryFixture,
   isolatedCanaryEnv,
   observedForbiddenPaths,
+  readCanaryIssueDesignDocument,
   removeCanaryFixtureChild,
   removeCanaryFixtureTree,
   runNode,
   selectExactCanaryAssets,
   setupSourcePaths,
   writeAccessTrace,
-  writeCanaryPlanManifest,
+  writeCanaryIssueDesignDocument,
   writeCanaryReviewEnvelope,
 } from "./support/pack-internal-canary.ts";
 
@@ -247,25 +249,19 @@ describe("#418 Pack-only internal canary boundary (PR-1 / first layer)", () => {
       const setupEnv = isolatedCanaryEnv(fixture.root);
       const readme = join(fixture.consumerRoot, "README.md");
       writeFileSync(readme, "# Isolated consumer fixture\n", "utf8");
-      execFileSync("git", ["init", "--quiet"], { cwd: fixture.consumerRoot, windowsHide: true });
-      execFileSync("git", ["config", "user.email", "test@example.invalid"], {
-        cwd: fixture.consumerRoot,
-      });
-      execFileSync("git", ["config", "user.name", "UT canary consumer"], {
-        cwd: fixture.consumerRoot,
-      });
-      execFileSync(
-        "git",
-        ["remote", "add", "origin", "https://github.com/example/canary-consumer.git"],
-        {
-          cwd: fixture.consumerRoot,
-          windowsHide: true,
-        },
-      );
-      execFileSync("git", ["add", "README.md"], { cwd: fixture.consumerRoot });
-      execFileSync("git", ["commit", "--quiet", "-m", "consumer fixture"], {
-        cwd: fixture.consumerRoot,
-      });
+      // origin は実在するローカルの bare repo にし、その origin を network URL にする (identity の 1 hop 解決。§6.2 の fetch を実際に成功させる)。
+      const originRepo = join(fixture.root, "canary-origin.git");
+      const sh = (cwd: string, ...args: string[]) =>
+        execFileSync("git", args, { cwd, windowsHide: true });
+      sh(fixture.root, "init", "--quiet", "--bare", "-b", "main", originRepo);
+      sh(originRepo, "remote", "add", "origin", "https://github.com/example/canary-consumer.git");
+      sh(fixture.consumerRoot, "init", "--quiet", "-b", "main");
+      sh(fixture.consumerRoot, "config", "user.email", "test@example.invalid");
+      sh(fixture.consumerRoot, "config", "user.name", "UT canary consumer");
+      sh(fixture.consumerRoot, "remote", "add", "origin", originRepo);
+      sh(fixture.consumerRoot, "add", "README.md");
+      sh(fixture.consumerRoot, "commit", "--quiet", "-m", "consumer fixture");
+      sh(fixture.consumerRoot, "push", "--quiet", "origin", "HEAD:main");
 
       const commands = selectExactCanaryAssets(CANARY_FIXTURE_TAG, readdirSync(fixture.releaseDir));
       expect(commands).toEqual(CANARY_ASSET_NAMES);
@@ -422,16 +418,13 @@ describe("#418 Pack-only internal canary boundary (PR-1 / first layer)", () => {
       const doctor = wrapperRun(["doctor", "--profile", "consumer-setup-smoke"]);
       expect(doctor.status, processDiagnostic(doctor)).toBe(0);
 
-      const authored = writeCanaryPlanManifest(fixture);
-      const planAuthoring = wrapperRun(["plan", "draft", "--manifest", authored.manifest]);
-      expect(planAuthoring.status, processDiagnostic(planAuthoring)).toBe(0);
-      expect(existsSync(join(fixture.consumerRoot, authored.planPath))).toBe(true);
-      const authoredPlan = readFileSync(join(fixture.consumerRoot, authored.planPath), "utf8");
-      expect(authoredPlan).toContain("admission_receipt:");
-      expect(authoredPlan).toContain("Canary consumer の設計起票");
-
-      const planLint = wrapperRun(["plan", "lint"]);
-      expect(planLint.status, processDiagnostic(planLint)).toBe(0);
+      const authoredDesignPath = writeCanaryIssueDesignDocument(fixture);
+      const authoredDesign = readCanaryIssueDesignDocument(authoredDesignPath);
+      const authoredFrontmatter = authoredDesign.frontmatter;
+      expect(authoredFrontmatter.issue).toBe(418);
+      expect(Number.isSafeInteger(authoredFrontmatter.issue)).toBe(true);
+      expect(Object.hasOwn(authoredFrontmatter, "plan")).toBe(false);
+      expect(authoredDesign.text).not.toContain("<Issue 番号>");
 
       const dbRebuild = wrapperRun(["db", "rebuild", "--json"]);
       expect(dbRebuild.status, processDiagnostic(dbRebuild)).toBe(0);
@@ -633,33 +626,28 @@ describe("#418 Pack-only internal canary boundary (PR-1 / first layer)", () => {
         expect(`${forbidden.stderr}\n${forbidden.stdout}`).toContain("[ut-tdd-work-guard] BLOCK:");
       }
 
-      const claudeSettingsPath = join(fixture.consumerRoot, ".claude", "settings.json");
-      const claudeSettings = JSON.parse(readFileSync(claudeSettingsPath, "utf8")) as {
-        hooks: { PreToolUse: { hooks: { command: string; args: string[] }[] }[] };
-      };
-      const claudeHook = claudeSettings.hooks.PreToolUse.flatMap((item) => item.hooks).find(
-        (hook) => hook.args.includes("work-guard"),
-      );
-      if (!claudeHook) throw new Error("generated Claude work-guard hook is missing");
-      const originalClaudeRegistration = JSON.stringify(claudeHook);
-      claudeHook.args = claudeHook.args.map((arg) =>
-        arg.replace(".ut-tdd/bin/ut-tdd.mjs", ".ut-tdd/bin/removed-ut-tdd.mjs"),
-      );
-      expect(JSON.stringify(claudeHook)).not.toBe(originalClaudeRegistration);
-      writeFileSync(claudeSettingsPath, `${JSON.stringify(claudeSettings, null, 2)}\n`, "utf8");
-      const missingClaudeLauncher = runRegisteredWorkGuard(
-        { command: claudeHook.command, args: claudeHook.args },
-        fixture.consumerRoot,
-        env,
-        normalPayload,
-      );
-      // A missing launcher exits 1, which is not a hook block (exit 2).
-      // The generated registration above must instead pass the normal 0/2
-      // assertions; replacing that registration with this mutant makes it Red.
-      expect(missingClaudeLauncher.status, processDiagnostic(missingClaudeLauncher)).toBe(1);
-      expect(`${missingClaudeLauncher.stderr}\n${missingClaudeLauncher.stdout}`).not.toContain(
-        "[ut-tdd-work-guard] BLOCK:",
-      );
+      const claudeLauncher = join(fixture.consumerRoot, ".ut-tdd", "bin", "ut-tdd.mjs");
+      const savedClaudeLauncher = join(fixture.consumerRoot, ".ut-tdd", "bin", "saved-ut-tdd.mjs");
+      expect(existsSync(claudeLauncher)).toBe(true);
+      expect(existsSync(savedClaudeLauncher)).toBe(false);
+      renameSync(claudeLauncher, savedClaudeLauncher);
+      try {
+        expect(existsSync(claudeLauncher)).toBe(false);
+        const missingClaudeLauncher = runRegisteredWorkGuard(
+          hookCommands.claude,
+          fixture.consumerRoot,
+          env,
+          normalPayload,
+        );
+        expect(missingClaudeLauncher.status, processDiagnostic(missingClaudeLauncher)).toBe(2);
+        expect(missingClaudeLauncher.stderr).toContain("consumer_runtime_absent");
+        expect(missingClaudeLauncher.stderr).toContain("setup --worktree");
+        expect(missingClaudeLauncher.stderr).not.toContain("MODULE_NOT_FOUND");
+        expect(missingClaudeLauncher.stdout).toBe("");
+        expect(missingClaudeLauncher.stderr).not.toContain("[ut-tdd-work-guard] BLOCK:");
+      } finally {
+        renameSync(savedClaudeLauncher, claudeLauncher);
+      }
 
       const codexHooksPath = join(fixture.consumerRoot, ".codex", "hooks.json");
       const codexSettings = JSON.parse(readFileSync(codexHooksPath, "utf8")) as {

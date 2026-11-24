@@ -1,15 +1,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { satisfies, valid, validRange } from "semver";
 
 export const NODE_TOOLCHAIN_POLICY = {
   phase: "node_production",
   nodeAuthority: "sealed",
   executableReceipt: "required",
-  nodeVersion: "24.13.0",
-  npmVersion: "11.6.2",
+  nodeVersion: "24.22.3",
+  npmVersion: "11.19.1",
   npmIntegrity:
-    "sha512-7iKzNfy8lWYs3zq4oFPa8EXZz5xt9gQNKJZau3B1ErLBb6bF7sBJ00x09485DOvRT2l5Gerbl3VlZNT57MxJVA==",
-  esbuildVersion: "0.21.5",
+    "sha512-ztsxKxt/kkIaAs+2i0GU6I+DRmUdrNasxTZKJe9TCdSjKxlhah/4r/hl5ygMD6XAg1qZ9c2TNomR4qgOydp10g==",
+  esbuildVersion: "0.28.2",
   lockfileVersion: 3,
 } as const;
 
@@ -140,10 +141,13 @@ export function analyzeToolchainPin(docs: ToolchainPinDocs): ToolchainPinResult 
 
   const nodeFile = docs.nodeVersion?.trim() ?? "";
   const engineNode = manifest?.engines?.node;
+  const nodeRange =
+    typeof engineNode === "string" && engineNode.trim() !== "" ? validRange(engineNode) : null;
   if (
     nodeFile !== NODE_TOOLCHAIN_POLICY.nodeVersion ||
-    engineNode !== NODE_TOOLCHAIN_POLICY.nodeVersion ||
-    nodeFile !== engineNode
+    !nodeRange ||
+    !valid(nodeFile) ||
+    !satisfies(nodeFile, nodeRange)
   ) {
     violations.push({
       rule: "node-version-mismatch",
@@ -166,9 +170,14 @@ export function analyzeToolchainPin(docs: ToolchainPinDocs): ToolchainPinResult 
       rule: "npm-package-manager-integrity-mismatch",
       detail: managerMatch[2],
     });
+  const engineNpm = manifest?.engines?.npm;
+  const npmRange =
+    typeof engineNpm === "string" && engineNpm.trim() !== "" ? validRange(engineNpm) : null;
   if (
-    manifest?.engines?.npm !== NODE_TOOLCHAIN_POLICY.npmVersion ||
-    managerMatch?.[1] !== manifest?.engines?.npm
+    managerMatch?.[1] !== NODE_TOOLCHAIN_POLICY.npmVersion ||
+    !npmRange ||
+    !managerMatch?.[1] ||
+    !satisfies(managerMatch[1], npmRange)
   )
     violations.push({
       rule: "npm-version-mismatch",

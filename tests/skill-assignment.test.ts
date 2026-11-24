@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import {
   loadSkillAssignmentDocs,
   type SkillAssignmentDoc,
 } from "../src/lint/skill-assignment.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const doc = (metadata: Record<string, unknown>): SkillAssignmentDoc => ({
   path: "skills/example.yaml",
@@ -106,7 +107,7 @@ describe("skill-assignment lint", () => {
 
       expect(docs.map((d) => d.path)).toEqual(["skills/root.md"]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 

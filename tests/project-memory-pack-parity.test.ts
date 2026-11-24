@@ -2,7 +2,8 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { heavyAfterEach } from "./support/hook-bounds.ts";
 import {
   createCleanPack,
   createConsumerProject,
@@ -18,7 +19,7 @@ import {
 
 const HOOK_INPUT = JSON.stringify({
   tool_name: "Agent",
-  tool_input: { subagent_type: "pmo-haiku", model: "haiku" },
+  tool_input: { subagent_type: "general-purpose", model: "haiku" },
 });
 
 const HOOK_ENV = (root: string) => ({
@@ -83,7 +84,7 @@ function removeInput(inputPath: string): void {
   rmSync(inputPath, { force: true });
 }
 
-afterEach(() => {
+heavyAfterEach("teardown", () => {
   stopConsumerWakeProcesses();
   for (const root of fixtureRoots.splice(0)) removeFixtureTree(root);
 });

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -20,6 +20,7 @@ import {
   type UpdateCheckDeps,
   updateCheckDisabled,
 } from "../src/setup/update-check.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const ROOT = "/harness";
 const EXECUTION_ROOT = process.env.UT_TDD_TEST_EXECUTION_ROOT;
@@ -304,6 +305,137 @@ describe("checkForUpdate", () => {
     expect(checkForUpdate(moved)).toMatchObject({ latestVersion: "v0.1.6", source: "remote" });
   });
 
+  it("U-CMDINPUT-012: rejects an option-like remote override before git or cache write", () => {
+    const deps = mockDeps({
+      version: "0.1.4",
+      remoteOverride: () => "--upload-pack=touch pwned",
+    });
+    let writeCalls = 0;
+    deps.writeText = (path, content) => {
+      writeCalls += 1;
+      deps.files.set(path, content);
+    };
+
+    const result = checkForUpdate(deps);
+    expect(result).toEqual({
+      checked: false,
+      localVersion: "0.1.4",
+      latestVersion: null,
+      updateAvailable: false,
+      source: "none",
+      detail: 'remote rejected: starts with "-"',
+    });
+    expect(deps.remoteCalls).toEqual([]);
+    expect(writeCalls).toBe(0);
+    expect(result.detail).not.toContain("upload-pack");
+  });
+
+  it("U-CMDINPUT-013: rejects a package repository remote after git+ normalization", () => {
+    const deps = mockDeps({
+      version: "0.1.4",
+      repository: { type: "git", url: "git+-oProxyCommand=x" },
+    });
+    let writeCalls = 0;
+    deps.writeText = (path, content) => {
+      writeCalls += 1;
+      deps.files.set(path, content);
+    };
+
+    expect(checkForUpdate(deps)).toEqual({
+      checked: false,
+      localVersion: "0.1.4",
+      latestVersion: null,
+      updateAvailable: false,
+      source: "none",
+      detail: 'remote rejected: starts with "-"',
+    });
+    expect(deps.remoteCalls).toEqual([]);
+    expect(writeCalls).toBe(0);
+  });
+
+  it("U-CMDINPUT-014: rejects before reading a fresh cache for the same remote", () => {
+    const deps = mockDeps({ version: "0.1.4", remoteOverride: () => "-x" });
+    const cachePath = join(ROOT, UPDATE_CHECK_CACHE_PATH);
+    const packagePath = join(ROOT, "package.json");
+    deps.files.set(
+      cachePath,
+      JSON.stringify({
+        checkedAtMs: 1_000_000 - UPDATE_CHECK_TTL_MS + 1,
+        latestVersion: "v0.1.5",
+        remote: "-x",
+      }),
+    );
+    const readCalls: string[] = [];
+    const writeCalls: string[] = [];
+    deps.readText = (path) => {
+      readCalls.push(path);
+      return deps.files.get(path) ?? null;
+    };
+    deps.writeText = (path, content) => {
+      writeCalls.push(path);
+      deps.files.set(path, content);
+    };
+
+    expect(checkForUpdate(deps)).toEqual({
+      checked: false,
+      localVersion: "0.1.4",
+      latestVersion: null,
+      updateAvailable: false,
+      source: "none",
+      detail: 'remote rejected: starts with "-"',
+    });
+    expect(deps.remoteCalls).toEqual([]);
+    expect(writeCalls).toEqual([]);
+    expect(readCalls.filter((path) => path === packagePath)).toHaveLength(1);
+    expect(readCalls.filter((path) => path === cachePath)).toHaveLength(0);
+  });
+
+  it("U-CMDINPUT-015: preserves remotes with an internal hyphen and the origin fallback", () => {
+    const repository = mockDeps({
+      version: "0.1.4",
+      repository: "https://example.invalid/a-b.git",
+      tags: ["v0.1.5"],
+    });
+    const origin = mockDeps({ version: "0.1.4", tags: ["v0.1.5"], hasOwnGit: () => true });
+
+    expect(checkForUpdate(repository)).toEqual({
+      checked: true,
+      localVersion: "0.1.4",
+      latestVersion: "v0.1.5",
+      updateAvailable: true,
+      source: "remote",
+      detail: null,
+    });
+    expect(repository.remoteCalls).toEqual(["https://example.invalid/a-b.git"]);
+    expect(checkForUpdate(origin)).toEqual({
+      checked: true,
+      localVersion: "0.1.4",
+      latestVersion: "v0.1.5",
+      updateAvailable: true,
+      source: "remote",
+      detail: null,
+    });
+    expect(origin.remoteCalls).toEqual(["origin"]);
+  });
+
+  it("U-CMDINPUT-016: does not trim the resolved remote before checking or dispatch", () => {
+    const deps = mockDeps({
+      version: "0.1.4",
+      tags: ["v0.1.5"],
+      remoteOverride: () => " -x",
+    });
+
+    expect(checkForUpdate(deps)).toEqual({
+      checked: true,
+      localVersion: "0.1.4",
+      latestVersion: "v0.1.5",
+      updateAvailable: true,
+      source: "remote",
+      detail: null,
+    });
+    expect(deps.remoteCalls).toEqual([" -x"]);
+  });
+
   it("U-UPDCHK-018: explicit remote override supports forks and mirrors", () => {
     const deps = mockDeps({
       version: "0.1.4",
@@ -369,7 +501,7 @@ describe("gitLsRemoteInvocation (PLAN-L7-462 step 2 .cmd shim 対応)", () => {
       expect(inner).toContain(" ls-remote --tags https://example.com/pack.git");
       expect(inner).not.toContain('"ls-remote"');
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      removeTestTree(tmp);
     }
   });
 
@@ -383,7 +515,7 @@ describe("gitLsRemoteInvocation (PLAN-L7-462 step 2 .cmd shim 対応)", () => {
       expect(inv.args).toEqual(["ls-remote", "--tags", "https://x/y.git"]);
       expect(inv.windowsVerbatimArguments).toBeUndefined();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      removeTestTree(tmp);
     }
   });
 
@@ -397,7 +529,7 @@ describe("gitLsRemoteInvocation (PLAN-L7-462 step 2 .cmd shim 対応)", () => {
         args: ["ls-remote", "--tags", "https://x/%PATH%.git"],
       });
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      removeTestTree(tmp);
     }
   });
 });
@@ -473,7 +605,7 @@ describe("status CLI wiring", () => {
       expect(logText).toContain(remote);
       expect(logText).not.toContain("origin");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      removeTestTree(tmp);
     }
   });
 });

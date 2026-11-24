@@ -1,3 +1,4 @@
+import "../src/runtime/windows-hide.ts";
 import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -7,8 +8,8 @@ const root = resolve(process.env.UT_TDD_REPO_ROOT ?? process.cwd());
 const output = resolve(process.argv[2] ?? resolve(root, "dist/node-generations/manual/ut-tdd.mjs"));
 const metafile = resolve(process.argv[3] ?? `${output}.metafile.json`);
 
-if (process.version !== "v24.13.0") {
-  throw new Error(`reviewed Node required: v24.13.0 (got ${process.version})`);
+if (process.version !== "v24.22.3") {
+  throw new Error(`reviewed Node required: v24.22.3 (got ${process.version})`);
 }
 const trackedSkillPaths = execFileSync("git", ["ls-files", "--", "skills"], {
   cwd: root,
@@ -31,6 +32,10 @@ const gateAssetPaths = [
 const gateAliases = Object.fromEntries(
   gateAssetPaths.map((path) => [`ut-tdd-gate-assets/${path}`, resolve(root, path)]),
 );
+const oracleBaselinePath = "docs/governance/oracle-test-trace-baseline.json";
+const oracleBaselineAliases = {
+  "ut-tdd-oracle-test-trace-baseline": resolve(root, oracleBaselinePath),
+};
 const vmodelTemplatePaths = execFileSync(
   "git",
   ["ls-files", "-z", "--", "docs/templates/vmodel", "docs/governance/vmodel-document-catalog.md"],
@@ -61,8 +66,8 @@ try {
     platform: "node",
     format: "esm",
     target: "node24",
-    loader: { ".md": "text", ".yaml": "text", ".yml": "text" },
-    alias: { ...skillAliases, ...gateAliases, ...vmodelTemplateAliases },
+    loader: { ".md": "text", ".yaml": "text", ".yml": "text", ".json": "text" },
+    alias: { ...skillAliases, ...gateAliases, ...oracleBaselineAliases, ...vmodelTemplateAliases },
     define: { __UT_TDD_BUNDLED__: "true" },
     // commander is CommonJS and uses a dynamic builtin require. Provide the
     // Node ESM bridge so the sealed output is executable by the Node authority.

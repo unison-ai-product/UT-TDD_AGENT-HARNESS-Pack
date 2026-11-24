@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -8,12 +8,7 @@ import {
   collectSpecIrProjection,
   deriveSpecRagClosureEntries,
 } from "../src/state-db/spec-ir-projections.ts";
-
-function writePlan(root: string, name: string, body: string): void {
-  const dir = join(root, "docs", "plans");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, name), body, "utf8");
-}
+import { removeTestTree } from "./support/temp-tree.ts";
 
 function writeGovernanceDoc(root: string, name: string, body: string): void {
   const dir = join(root, "docs", "governance");
@@ -31,25 +26,22 @@ describe("spec IR projections", () => {
   it("builds deterministic spec IR rows and routes orphan findings as non-ready candidates", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-"));
     try {
-      writePlan(
+      writeMarkdown(
         root,
-        "PLAN-L6-999-spec-ir-fixture.md",
+        "docs/design/harness/L6-function-design/function-spec.md",
         [
           "---",
-          "plan_id: PLAN-L6-999-spec-ir-fixture",
-          "title: Spec IR fixture",
-          "kind: add-design",
           "layer: L6",
           "sub_doc: function-spec",
-          "drive: db",
-          "status: confirmed",
-          "route_mode: add-feature",
-          "dependencies:",
-          "  requires:",
-          "    - PLAN-L5-999-missing-parent",
           "---",
-          "",
           "# Spec IR fixture",
+          "```yaml",
+          "spec:",
+          "  defines:",
+          "    - id: FUNC-ORPHAN",
+          "      kind: function",
+          "      traces_from: [REQUIREMENT-MISSING]",
+          "```",
         ].join("\n"),
       );
 
@@ -58,29 +50,10 @@ describe("spec IR projections", () => {
       expect(projection.spec_defs).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            plan_id: "PLAN-L6-999-spec-ir-fixture",
+            owner_path: "docs/design/harness/L6-function-design/function-spec.md",
             layer: "L6",
             sub_doc: "function-spec",
             source_hash: expect.stringMatching(/^sha256:/),
-          }),
-        ]),
-      );
-      expect(projection.schedule_entries).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            plan_id: "PLAN-L6-999-spec-ir-fixture",
-            plan_revision: expect.stringMatching(/^legacy:sha256:/),
-            v_pair: "L7",
-            rag: "green",
-          }),
-        ]),
-      );
-      expect(projection.activation_entries).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            plan_id: "PLAN-L6-999-spec-ir-fixture",
-            profile_id: "drive:db:mode:add-feature",
-            enabled: 1,
           }),
         ]),
       );
@@ -88,7 +61,7 @@ describe("spec IR projections", () => {
         expect.arrayContaining([
           expect.objectContaining({
             kind: "spec-ir-orphan-relation",
-            evidence_path: "docs/plans/PLAN-L6-999-spec-ir-fixture.md",
+            evidence_path: "docs/design/harness/L6-function-design/function-spec.md",
           }),
         ]),
       );
@@ -104,234 +77,7 @@ describe("spec IR projections", () => {
         ]),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("prefers the V-model schedule authoring source over plan-frontmatter fallback rows", () => {
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-schedule-"));
-    try {
-      writePlan(
-        root,
-        "PLAN-L7-999-schedule-fixture.md",
-        [
-          "---",
-          "plan_id: PLAN-L7-999-schedule-fixture",
-          "title: Schedule fixture",
-          "kind: add-impl",
-          "layer: L7",
-          "drive: db",
-          "status: confirmed",
-          "route_mode: add-feature",
-          "---",
-          "",
-          "# Schedule fixture",
-        ].join("\n"),
-      );
-      writeGovernanceDoc(
-        root,
-        "vmodel-upgrade-schedule.md",
-        [
-          "# V-model schedule",
-          "",
-          "| plan_id | layer | sub_doc | v_pair | predecessor_plan_ids | current_location | rag | status | blocked_reason |",
-          "|---|---|---|---|---|---|---|---|---|",
-          "| PLAN-L7-999-schedule-fixture | L7 |  | L6 | PLAN-L6-998-parent | U5: schedule source drives current location | yellow | active | CI gate |",
-        ].join("\n"),
-      );
-
-      const projection = collectSpecIrProjection(root, "2026-07-08T00:00:00.000Z");
-
-      const schedule = projection.schedule_entries.find(
-        (row) => row.plan_id === "PLAN-L7-999-schedule-fixture",
-      );
-      expect(schedule).toMatchObject({
-        current_location: "U5: schedule source drives current location",
-        rag: "yellow",
-        status: "active",
-        blocked_reason: "CI gate",
-        predecessor_plan_ids: "PLAN-L6-998-parent",
-        source_path: "docs/governance/vmodel-upgrade-schedule.md",
-        plan_revision: expect.stringMatching(/^legacy:sha256:/),
-      });
-      expect(
-        projection.schedule_entries.filter((row) => row.plan_id === "PLAN-L7-999-schedule-fixture"),
-      ).toHaveLength(1);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("U-GHPROJ-042: legacy revision excludes review evidence and remains distinct from source hash", () => {
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-legacy-revision-"));
-    try {
-      const planPath = "PLAN-L7-998-legacy-revision.md";
-      const source = [
-        "---",
-        "plan_id: PLAN-L7-998-legacy-revision",
-        "title: Legacy revision fixture",
-        "kind: add-impl",
-        "layer: L7",
-        "status: confirmed",
-        "review_evidence: []",
-        "---",
-        "",
-        "# Stable body",
-      ];
-      writePlan(root, planPath, source.join("\n"));
-      const before = collectSpecIrProjection(root, "2026-07-31T00:00:00.000Z").schedule_entries[0];
-      expect(before?.plan_revision).toMatch(/^legacy:sha256:[0-9a-f]{64}$/);
-      expect(before?.plan_revision).not.toBe(before?.source_hash);
-
-      source.splice(6, 1, "review_evidence:", "  - plan_revision: self-reference-free");
-      writePlan(root, planPath, source.join("\n"));
-      const after = collectSpecIrProjection(root, "2026-07-31T00:01:00.000Z").schedule_entries[0];
-      expect(after?.plan_revision).toBe(before?.plan_revision);
-      expect(after?.source_hash).not.toBe(before?.source_hash);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("U-GHPROJ-051: invalid or untracked admission receipts never enter the Forward schedule", () => {
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-invalid-admission-"));
-    try {
-      writePlan(
-        root,
-        "PLAN-L7-996-partial.md",
-        "---\nplan_id: PLAN-L7-996-partial\nadmission_receipt:\n  binding:\n    revision: 1\n---\n",
-      );
-      const digest = `sha256:${"a".repeat(64)}`;
-      writePlan(
-        root,
-        "PLAN-L7-997-untracked.md",
-        [
-          "---",
-          "plan_id: PLAN-L7-997-untracked",
-          "admission_receipt:",
-          "  schema_version: v2",
-          "  receipt_id: certificate:untracked",
-          "  command_id: command:untracked",
-          "  admitted_at: 2026-07-31T00:00:00.000Z",
-          `  source_digest: ${digest}`,
-          `  decision_digest: ${digest}`,
-          `  receipt_digest: ${digest}`,
-          "  binding:",
-          "    path: docs/plans/PLAN-L7-997-untracked.md",
-          "    plan_id: PLAN-L7-997-untracked",
-          "    asset_id: plan:test-untracked",
-          "    revision: 1",
-          `    content_digest: ${digest}`,
-          "  route:",
-          "    signal: forward",
-          "    mode: forward",
-          "---",
-        ].join("\n"),
-      );
-      writePlan(root, "PLAN-L7-998-legacy.md", "---\nplan_id: PLAN-L7-998-legacy\n---\n");
-
-      const schedules = collectSpecIrProjection(root, "2026-08-03T00:00:00.000Z").schedule_entries;
-      expect(schedules.map((row) => row.plan_id)).toEqual(["PLAN-L7-998-legacy"]);
-      expect(schedules[0]?.plan_revision).toMatch(/^legacy:sha256:/);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("U-GHPROJ-043: schedule authoring cannot invent a revision for a missing PLAN", () => {
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-missing-plan-"));
-    try {
-      writeGovernanceDoc(
-        root,
-        "vmodel-upgrade-schedule.md",
-        [
-          "# V-model schedule",
-          "",
-          "| plan_id | layer | current_location | status |",
-          "|---|---|---|---|",
-          "| PLAN-L7-997-missing | L7 | must not project | active |",
-        ].join("\n"),
-      );
-      const projection = collectSpecIrProjection(root, "2026-07-31T00:00:00.000Z");
-      expect(projection.schedule_entries).toEqual([]);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("joins activation profile authoring rows with the V-model schedule", () => {
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-activation-"));
-    try {
-      writePlan(
-        root,
-        "PLAN-L7-999-activation-fixture.md",
-        [
-          "---",
-          "plan_id: PLAN-L7-999-activation-fixture",
-          "title: Activation fixture",
-          "kind: add-impl",
-          "layer: L7",
-          "drive: db",
-          "status: confirmed",
-          "route_mode: add-feature",
-          "---",
-          "",
-          "# Activation fixture",
-        ].join("\n"),
-      );
-      writeGovernanceDoc(
-        root,
-        "vmodel-upgrade-schedule.md",
-        [
-          "# V-model schedule",
-          "",
-          "| plan_id | layer | sub_doc | v_pair | predecessor_plan_ids | current_location | rag | status | blocked_reason |",
-          "|---|---|---|---|---|---|---|---|---|",
-          "| PLAN-L7-999-activation-fixture | L7 |  | L6 | PLAN-L6-998-parent | U7: activation profile join | yellow | planned | U6 green |",
-        ].join("\n"),
-      );
-      writeGovernanceDoc(
-        root,
-        "vmodel-activation-profiles.md",
-        [
-          "# V-model activation profiles",
-          "",
-          "| profile_id | target_kind | target_id | plan_id | scope_status | target_version | defer_reason | enabled |",
-          "|---|---|---|---|---|---|---|---|",
-          "| vmodel-clean-next | plan | PLAN-L7-999-activation-fixture | PLAN-L7-999-activation-fixture | deferred | vmodel-clean-2026-07-08 | wait for U6 review surface | false |",
-        ].join("\n"),
-      );
-
-      const projection = collectSpecIrProjection(root, "2026-07-08T00:00:00.000Z");
-
-      expect(projection.activation_entries).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            plan_id: "PLAN-L7-999-activation-fixture",
-            profile_id: "vmodel-clean-next",
-            scope_status: "deferred",
-            defer_reason: "wait for U6 review surface",
-            enabled: 0,
-            source_path: "docs/governance/vmodel-activation-profiles.md",
-          }),
-        ]),
-      );
-      expect(projection.activation_schedule_reviews).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            plan_id: "PLAN-L7-999-activation-fixture",
-            profile_id: "vmodel-clean-next",
-            scope_status: "deferred",
-            current_location: "U7: activation profile join",
-            rag: "yellow",
-            schedule_status: "planned",
-            layer: "L7",
-            v_pair: "L6",
-          }),
-        ]),
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -370,7 +116,7 @@ describe("spec IR projections", () => {
           decision: "adopt",
           detail_override: "detailed",
           status_override: "required",
-          required_plan_id: "PLAN-L4-999-report-slot",
+          required_plan_id: null,
           source_path: "docs/governance/vmodel-document-scale-profiles.md",
         }),
       ]);
@@ -388,7 +134,7 @@ describe("spec IR projections", () => {
         }),
       ]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -426,12 +172,11 @@ describe("spec IR projections", () => {
           expect.objectContaining({ kind: "document-scale-profile-detail-unknown" }),
           expect.objectContaining({ kind: "document-scale-profile-reason-missing" }),
           expect.objectContaining({ kind: "document-scale-profile-catalog-reason-missing" }),
-          expect.objectContaining({ kind: "document-scale-profile-required-plan-missing" }),
           expect.objectContaining({ kind: "document-scale-profile-catalog-missing" }),
         ]),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -693,7 +438,7 @@ describe("spec IR projections", () => {
         ]),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -753,7 +498,7 @@ describe("spec IR projections", () => {
         test_count: 0,
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -800,7 +545,7 @@ describe("spec IR projections", () => {
         ]),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -866,7 +611,7 @@ describe("spec IR projections", () => {
         ]),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -906,7 +651,7 @@ describe("spec IR projections", () => {
         ]),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -952,14 +697,14 @@ describe("spec IR projections", () => {
         ]),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
   it("projects V-model agent contracts as authoring source contracts", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-agent-contract-"));
     try {
-      writeGovernanceDoc(root, "vmodel-upgrade-schedule.md", "# V-model schedule\n");
+      writeGovernanceDoc(root, "vmodel-document-catalog.md", "# Document catalog\n");
       writeGovernanceDoc(root, "vmodel-typed-spec-definitions.md", "# Typed spec\n");
       writeGovernanceDoc(
         root,
@@ -973,7 +718,7 @@ describe("spec IR projections", () => {
           "    target_path: docs/governance/vmodel-typed-spec-definitions.md",
           "    defines: [VMS-101]",
           "    read_first:",
-          "      - docs/governance/vmodel-upgrade-schedule.md",
+          "      - docs/governance/vmodel-document-catalog.md",
           "    done_when:",
           "      - doctor:typed-spec-trace-closure",
           "```",
@@ -987,7 +732,7 @@ describe("spec IR projections", () => {
           agent_contract_id: "VAGENT-101",
           target_path: "docs/governance/vmodel-typed-spec-definitions.md",
           defines: "VMS-101",
-          read_first: "docs/governance/vmodel-upgrade-schedule.md",
+          read_first: "docs/governance/vmodel-document-catalog.md",
           done_when: "doctor:typed-spec-trace-closure",
           source_path: "docs/governance/vmodel-agent-contracts.md",
         }),
@@ -998,7 +743,7 @@ describe("spec IR projections", () => {
         ]),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -1040,7 +785,7 @@ describe("spec IR projections", () => {
         ]),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -1077,32 +822,13 @@ describe("spec IR projections", () => {
         ]),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
   it("scopes invalid sub_doc findings to design document catalog rows", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-subdoc-scope-"));
     try {
-      writePlan(
-        root,
-        "PLAN-L6-998-plan-subdoc-fixture.md",
-        [
-          "---",
-          "plan_id: PLAN-L6-998-plan-subdoc-fixture",
-          "title: Plan subdoc fixture",
-          "kind: add-design",
-          "layer: L6",
-          "sub_doc: not-a-design-subdoc",
-          "drive: db",
-          "status: confirmed",
-          "route_signal: feature_addition",
-          "route_mode: add-feature",
-          "---",
-          "",
-          "# Plan subdoc fixture",
-        ].join("\n"),
-      );
       writeMarkdown(
         root,
         "docs/design/harness/L6-function-design/not-a-design-subdoc.md",
@@ -1131,11 +857,11 @@ describe("spec IR projections", () => {
         }),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
-  it("PLAN-L7-429: excludes meta docs from sub_doc validation and evidence references from orphan relations, keeping pair_artifact self as orphan", () => {
+  it("excludes meta docs from sub_doc validation", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-detector-scope-"));
     try {
       writeMarkdown(
@@ -1158,53 +884,6 @@ describe("spec IR projections", () => {
           "# Roadmap",
         ].join("\n"),
       );
-      writePlan(
-        root,
-        "PLAN-L7-996-evidence-reference-fixture.md",
-        [
-          "---",
-          "plan_id: PLAN-L7-996-evidence-reference-fixture",
-          "title: Evidence reference fixture",
-          "kind: add-impl",
-          "layer: L7",
-          "drive: db",
-          "status: confirmed",
-          "route_signal: feature_addition",
-          "route_mode: add-feature",
-          "dependencies:",
-          "  requires:",
-          "    - src/state-db/spec-ir-projections.ts",
-          "    - tests/spec-ir-projections.test.ts",
-          "    - .ut-tdd/audit/A-000-fixture-audit.md",
-          "    - docs/research/fixture-research.md",
-          "    - skills/SKILL_MAP.md",
-          "    - CLAUDE.md",
-          "    - package.json",
-          "---",
-          "",
-          "# Evidence reference fixture",
-        ].join("\n"),
-      );
-      writePlan(
-        root,
-        "PLAN-L7-995-self-pair-fixture.md",
-        [
-          "---",
-          "plan_id: PLAN-L7-995-self-pair-fixture",
-          "title: Self pair fixture",
-          "kind: add-impl",
-          "layer: L7",
-          "drive: db",
-          "status: confirmed",
-          "route_signal: feature_addition",
-          "route_mode: add-feature",
-          "pair_artifact: self",
-          "---",
-          "",
-          "# Self pair fixture",
-        ].join("\n"),
-      );
-
       const projection = collectSpecIrProjection(root, "2026-07-13T00:00:00.000Z");
 
       expect(
@@ -1222,105 +901,58 @@ describe("spec IR projections", () => {
           }),
         ]),
       );
-
-      const orphanFindings = projection.findings.filter(
-        (finding) => finding.kind === "spec-ir-orphan-relation",
-      );
-      expect(
-        orphanFindings.filter((finding) =>
-          finding.subject_id.includes("PLAN-L7-996-evidence-reference-fixture"),
-        ),
-      ).toEqual([]);
-      expect(
-        projection.spec_relations.filter(
-          (relation) => relation.plan_id === "PLAN-L7-996-evidence-reference-fixture",
-        ),
-      ).toEqual([]);
-      // PLAN-REVERSE-12 規定: pair_artifact self は unresolved orphan として発火し続ける。
-      expect(
-        orphanFindings.filter(
-          (finding) =>
-            finding.subject_id.includes("PLAN-L7-995-self-pair-fixture") &&
-            finding.subject_id.endsWith(":pairs:self"),
-        ),
-      ).toHaveLength(1);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
-  it("resolves short-form plan IDs and reference docs without orphan relation noise", () => {
+  it("resolves document references from typed relations and ignores retired sources", () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-relation-scope-"));
     try {
-      writePlan(
-        root,
-        "PLAN-L7-65-deterministic-model-policy.md",
-        [
-          "---",
-          "plan_id: PLAN-L7-65-deterministic-model-policy",
-          "title: Deterministic model policy",
-          "kind: add-impl",
-          "layer: L7",
-          "drive: db",
-          "status: confirmed",
-          "route_signal: feature_addition",
-          "route_mode: add-feature",
-          "---",
-          "",
-          "# Deterministic model policy",
-        ].join("\n"),
-      );
-      writePlan(
-        root,
-        "PLAN-L7-66-existing-repo-onboarding-readme.md",
-        [
-          "---",
-          "plan_id: PLAN-L7-66-existing-repo-onboarding-readme",
-          "title: Existing repo onboarding README",
-          "kind: add-impl",
-          "layer: L7",
-          "drive: db",
-          "status: confirmed",
-          "route_signal: feature_addition",
-          "route_mode: add-feature",
-          "parent_design: docs/adr/ADR-001-ut-tdd-harness-redesign-and-language.md",
-          "dependencies:",
-          "  parent: PLAN-L7-65",
-          "---",
-          "",
-          "# Existing repo onboarding README",
-        ].join("\n"),
-      );
+      const referencePath = "docs/governance/reference-fixture.md";
+      const schedulePath = "docs/governance/vmodel-upgrade-schedule.md";
+      const activationPath = "docs/governance/vmodel-activation-profiles.md";
+      const planPath = "docs/plans/PLAN-L7-66-reference-fixture.md";
+      for (const path of [referencePath, schedulePath, activationPath, planPath]) {
+        writeMarkdown(root, path, "# Reference fixture");
+      }
       writeMarkdown(
         root,
-        "docs/adr/ADR-001-ut-tdd-harness-redesign-and-language.md",
-        "# ADR-001\n",
+        "docs/design/harness/L6-function-design/function-spec.md",
+        [
+          "# Function fixture",
+          "```yaml",
+          "spec:",
+          "  defines:",
+          "    - id: FUNC-REFERENCE",
+          "      kind: function",
+          "      traces_from:",
+          ...[referencePath, schedulePath, activationPath, planPath].map(
+            (path) => "        - " + path,
+          ),
+          "```",
+        ].join("\n"),
       );
 
       const projection = collectSpecIrProjection(root, "2026-07-09T00:00:00.000Z");
-
-      expect(projection.spec_relations).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            relation_kind: "requires",
-            evidence_path: "PLAN-L7-65",
-          }),
-          expect.objectContaining({
-            relation_kind: "requires",
-            evidence_path: "docs/adr/ADR-001-ut-tdd-harness-redesign-and-language.md",
-          }),
-        ]),
-      );
+      const reference = projection.spec_defs.find((def) => def.owner_path === referencePath);
+      expect(reference?.spec_kind).toBe("reference_doc");
+      expect(projection.spec_relations).toEqual([
+        expect.objectContaining({
+          from_spec_id: "FUNC-REFERENCE",
+          to_spec_id: reference?.spec_id,
+          relation_kind: "traces_from",
+          evidence_path: referencePath,
+        }),
+      ]);
       expect(
-        projection.findings.filter(
-          (finding) =>
-            finding.kind === "spec-ir-orphan-relation" &&
-            (finding.subject_id.includes("PLAN-L7-65") ||
-              finding.subject_id.includes("docs/adr/ADR-001")),
-        ),
-      ).toEqual([]);
+        projection.findings.filter((finding) => finding.kind === "spec-ir-orphan-relation"),
+      ).toHaveLength(3);
+      for (const path of [schedulePath, activationPath, planPath]) {
+        expect(projection.spec_defs.some((def) => def.owner_path === path)).toBe(false);
+      }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -1360,50 +992,7 @@ describe("spec IR projections", () => {
       expect(new Set(sectionIds).size).toBe(2);
       expect(sectionIds.every((id) => /--[a-f0-9]{12}$/.test(id))).toBe(true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("turns malformed schedule authoring rows into integrity findings", () => {
-    const root = mkdtempSync(join(tmpdir(), "ut-tdd-spec-ir-schedule-bad-"));
-    try {
-      writePlan(
-        root,
-        "PLAN-L7-999-duplicate.md",
-        [
-          "---",
-          "plan_id: PLAN-L7-999-duplicate",
-          "layer: L7",
-          "status: active",
-          "---",
-          "",
-          "# Duplicate schedule fixture",
-        ].join("\n"),
-      );
-      writeGovernanceDoc(
-        root,
-        "vmodel-upgrade-schedule.md",
-        [
-          "# V-model schedule",
-          "",
-          "| plan_id | layer | sub_doc | v_pair | predecessor_plan_ids | current_location | rag | status | blocked_reason |",
-          "|---|---|---|---|---|---|---|---|---|",
-          "| PLAN-L7-999-duplicate | L7 |  | L6 |  |  | blue | active |  |",
-          "| PLAN-L7-999-duplicate | L7 |  | L6 |  | U5: duplicate row | yellow | active |  |",
-        ].join("\n"),
-      );
-
-      const projection = collectSpecIrProjection(root, "2026-07-08T00:00:00.000Z");
-
-      expect(projection.findings).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ kind: "schedule-current-location-missing" }),
-          expect.objectContaining({ kind: "schedule-rag-unknown" }),
-          expect.objectContaining({ kind: "schedule-duplicate-plan" }),
-        ]),
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

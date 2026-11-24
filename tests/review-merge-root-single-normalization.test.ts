@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type MergeGateFacts, runPrMerge } from "../src/feedback/review-merge-gate.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const head = "a".repeat(40);
 
@@ -74,6 +75,7 @@ describe("review merge custody root normalization", () => {
         ports: {
           getPullRequest: () => facts(),
           mergePullRequest: () => undefined,
+          checkBaselineConflict: () => null,
         },
       });
 
@@ -81,7 +83,7 @@ describe("review merge custody root normalization", () => {
       expect(result.receiptPath).toContain(join(realpathSync.native(root), ".ut-tdd", "logs"));
       expect(existsSync(join(nested, ".ut-tdd", "logs"))).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

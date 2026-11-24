@@ -28,8 +28,54 @@ const root = process.cwd();
 function git(args: readonly string[], encoding: "utf8"): string;
 function git(args: readonly string[], encoding: "buffer"): Buffer;
 function git(args: readonly string[], encoding: "utf8" | "buffer"): string | Buffer {
-  const out = execFileSync("git", ["-C", root, ...args], { encoding });
+  // PR 範囲の blob 走査は、数 MB の追跡ファイル (棚卸しの JSON 等) を含みうる。既定の 1MB を超えると
+  // ENOBUFS で落ちるため上限を広げる (2026-10-13、PR #965 / #966 で実測)。
+  const out = execFileSync("git", ["-C", root, ...args], {
+    encoding,
+    maxBuffer: 256 * 1024 * 1024,
+  });
   return encoding === "utf8" ? String(out).trim() : (out as Buffer);
+}
+
+// `git ls-tree -r -z <rev> -- <dir>` を 1 回だけ流し、path -> blob oid の Map にする。
+// 行ごとの `git rev-parse` (607 行 x 2 回の子プロセス) を避けるためのバッチ化 (#1063)。
+function blobOids(rev: string, dir: string): Map<string, string> {
+  const oids = new Map<string, string>();
+  for (const entry of git(["ls-tree", "-r", "-z", rev, "--", dir], "utf8").split("\0")) {
+    const tab = entry.indexOf("\t");
+    if (tab < 0) continue;
+    const oid = entry.slice(0, tab).split(" ")[2];
+    if (oid) oids.set(entry.slice(tab + 1), oid);
+  }
+  return oids;
+}
+
+// `git cat-file --batch` を 1 プロセスだけ起動し、全 oid の type と内容をまとめて読む (#1063)。
+// 出力は `<oid> <type> <size>\n<content>\n` の繰り返し。`<oid> missing` は旧 `cat-file -t` の失敗と同じく throw する。
+function catFileBatch(oids: readonly string[]): { type: string; content: Buffer }[] {
+  const out = execFileSync("git", ["-C", root, "cat-file", "--batch"], {
+    input: `${oids.join("\n")}\n`,
+    maxBuffer: 1024 * 1024 * 1024,
+    windowsHide: true,
+  });
+  const objects: { type: string; content: Buffer }[] = [];
+  let pos = 0;
+  for (const oid of oids) {
+    const eol = out.indexOf(0x0a, pos);
+    if (eol < 0) throw new Error(`cat-file --batch: truncated output at ${oid}`);
+    const header = out.toString("utf8", pos, eol);
+    const [gotOid, type, size] = header.split(" ");
+    if (gotOid !== oid || !type || type === "missing" || size === undefined) {
+      throw new Error(`cat-file --batch: object not readable: ${oid} (${header})`);
+    }
+    const start = eol + 1;
+    const end = start + Number(size);
+    if (end > out.length) throw new Error(`cat-file --batch: truncated content at ${oid}`);
+    objects.push({ type, content: out.subarray(start, end) });
+    pos = end + 1;
+  }
+  if (pos !== out.length) throw new Error("cat-file --batch: unexpected trailing output");
+  return objects;
 }
 
 function manifestOf(): LegacyArchiveManifest {
@@ -114,10 +160,15 @@ describe("memory clean-cut PR-2: legacy corpus archive (U-MEMCUT-017..021, P-MEM
       const [status, from, to] = line.split("\t");
       if (status?.startsWith("R") && from && to) renames.set(from, to);
     }
+    const baseOids = blobOids(manifest.base_commit, LEGACY_MEMORY_SOURCE_ROOT);
+    const headOids = blobOids("HEAD", LEGACY_MEMORY_ARCHIVE_ROOT);
     let mutated = false;
     for (const row of manifest.tracked) {
-      const baseOid = git(["rev-parse", `${manifest.base_commit}:${row.source_path}`], "utf8");
-      const headOid = git(["rev-parse", `HEAD:${row.archive_path}`], "utf8");
+      const baseOid = baseOids.get(row.source_path);
+      const headOid = headOids.get(row.archive_path);
+      // 旧 `git rev-parse` は path 不在で throw した。Map では undefined 同士が一致しうるため明示的に落とす。
+      expect(baseOid, `${row.source_path} (base blob)`).toBeDefined();
+      expect(headOid, `${row.archive_path} (HEAD blob)`).toBeDefined();
       expect(headOid, row.source_path).toBe(baseOid);
       expect(renames.get(row.source_path), row.source_path).toBe(row.archive_path);
       const bytes = readFileSync(join(root, row.archive_path));
@@ -157,10 +208,9 @@ describe("memory clean-cut PR-2: legacy corpus archive (U-MEMCUT-017..021, P-MEM
       .map((line) => line.split(" ")[0])
       .filter(Boolean);
     let leaked = 0;
-    for (const oid of rangeBlobs) {
-      const type = git(["cat-file", "-t", oid], "utf8");
+    for (const { type, content } of catFileBatch(rangeBlobs)) {
       if (type !== "blob") continue;
-      if (untrackedDigests.has(sha256Hex(git(["cat-file", "-p", oid], "buffer")))) leaked += 1;
+      if (untrackedDigests.has(sha256Hex(content))) leaked += 1;
     }
     expect(leaked).toBe(0);
   });

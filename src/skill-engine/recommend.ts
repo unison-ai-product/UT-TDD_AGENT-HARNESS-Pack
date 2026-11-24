@@ -1,4 +1,3 @@
-import { workflowModeForPlan as catalogWorkflowModeForPlan } from "../schema/mode-catalog.ts";
 import {
   type SkillLearningSignals,
   type SkillScoringContext,
@@ -8,23 +7,8 @@ import {
 } from "../skill-scoring/scoring.ts";
 import { stableId } from "../stable-id.ts";
 import type { HarnessDb } from "../state-db/index.ts";
-import { upsertRow } from "../state-db/index.ts";
 import { classifyTask } from "../task/classify.ts";
 
-export interface PlanSkillContext {
-  plan_id: string;
-  layer: string;
-  drive: string;
-  kind: string;
-  status: string;
-  route_mode?: string;
-}
-
-/**
- * scoreSkill / rankSkills が要求する正規化済みスコアリング文脈。PLAN 由来 (recommendSkillsForPlan) と
- * 自由文 由来 (recommendSkillsForText) の双方が同じ文脈型へ落ちることで、`--text` を flat ranked list の
- * まま additive に足せる (A-138 ITEM-2、cross_agent TL 裏取り済: flat-list 維持 / 3-bucket は PO 残課題)。
- */
 export interface SkillRecommendation {
   skill_recommendation_id: string;
   session_id: string;
@@ -137,24 +121,9 @@ export function buildSkillInjectionSet(
   };
 }
 
-export interface SkillInvocation {
-  skill_invocation_id: string;
-  session_id: string;
-  plan_id: string;
-  skill_id: string;
-  layer: string;
-  drive: string;
-  fired_at: string;
-  source: string;
-  accepted: number;
-}
-
 function nowIso(): string {
   return new Date().toISOString();
 }
-
-// PLAN-L7-243: mode 導出は route_mode 正本 + legacy フォールバックの共有カタログ
-// (src/schema/mode-catalog.ts) を使う。plan_id 文字列推測の独自分岐は廃止。
 
 /** TaskKind → workflow drive model (自由文 suggest の drive_model 推定、A-138 ITEM-2)。 */
 function workflowModeForKind(kind: string): string {
@@ -244,40 +213,7 @@ function rankSkills(
     });
 }
 
-export function recommendSkillsForPlan(
-  db: HarnessDb,
-  planId: string,
-  options: { limit?: number; recordedAt?: string } = {},
-): SkillRecommendation[] {
-  const plan = db
-    .prepare(
-      "SELECT plan_id, layer, drive, kind, status, route_mode FROM plan_registry WHERE plan_id = ?",
-    )
-    .get(planId) as PlanSkillContext | undefined;
-  if (!plan) return [];
-  const workflowMode = catalogWorkflowModeForPlan({
-    planId: plan.plan_id,
-    routeMode: plan.route_mode,
-    kind: plan.kind,
-  });
-  return rankSkills(
-    db,
-    {
-      reference: plan.plan_id,
-      layer: plan.layer,
-      drive: plan.drive,
-      kind: plan.kind,
-      workflowMode,
-    },
-    options,
-  );
-}
-
-/**
- * 自由文タスクから skill を suggest する additive サーフェス (A-138 ITEM-2、`--text`)。`classifyTask` で
- * kind/drive/risk を導き synthetic 文脈へ落とす。PLAN registry を引かないので layer は空 (layer ボーナス無し)。
- * 出力は PLAN 版と同じ flat ranked list (3-bucket 化は PO 残課題)。未登録タスクなので DB record はしない。
- */
+/** Rank catalog skills using context derived from free-form task text. */
 export function recommendSkillsForText(
   db: HarnessDb,
   taskText: string,
@@ -299,58 +235,4 @@ export function recommendSkillsForText(
     ...row,
     reason: `source=text; ${row.reason}; risk=${c.risk_flags.join("|") || "none"}`,
   }));
-}
-
-export function recordSkillRecommendations(
-  db: HarnessDb,
-  recommendations: SkillRecommendation[],
-): void {
-  for (const recommendation of recommendations) {
-    upsertRow(db, {
-      table: "skill_recommendations",
-      primaryKey: "skill_recommendation_id",
-      row: { ...recommendation },
-    });
-  }
-}
-
-export function inferSkillInvocations(
-  db: HarnessDb,
-  recommendations: SkillRecommendation[],
-  options: { firedAt?: string } = {},
-): SkillInvocation[] {
-  const firedAt = options.firedAt ?? nowIso();
-  const invocations: SkillInvocation[] = [];
-  for (const rec of recommendations) {
-    const plan = db
-      .prepare("SELECT layer, drive FROM plan_registry WHERE plan_id = ?")
-      .get(rec.plan_id) as { layer?: string; drive?: string } | undefined;
-    const review = db
-      .prepare("SELECT has_evidence FROM review_evidence_registry WHERE plan_id = ?")
-      .get(rec.plan_id) as { has_evidence?: number } | undefined;
-    const accepted = Number(review?.has_evidence ?? 0) === 1 ? 1 : 0;
-    if (!accepted) continue;
-    invocations.push({
-      skill_invocation_id: stableId("skill-inv", `${rec.plan_id}:${rec.skill_id}:review`),
-      session_id: rec.session_id,
-      plan_id: rec.plan_id,
-      skill_id: rec.skill_id,
-      layer: String(plan?.layer ?? ""),
-      drive: String(plan?.drive ?? ""),
-      fired_at: firedAt,
-      source: "auto-projection:review-evidence",
-      accepted,
-    });
-  }
-  return invocations;
-}
-
-export function recordSkillInvocations(db: HarnessDb, invocations: SkillInvocation[]): void {
-  for (const invocation of invocations) {
-    upsertRow(db, {
-      table: "skill_invocations",
-      primaryKey: "skill_invocation_id",
-      row: { ...invocation },
-    });
-  }
 }

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -23,6 +24,10 @@ import {
 } from "../src/feedback/review-attestation.ts";
 import { analyzeReviewDispatch } from "../src/feedback/review-dispatch.ts";
 import { REVIEW_OUTPUT_CONTRACT } from "../src/feedback/review-verdict-contract.ts";
+import {
+  beginReviewAttempt,
+  REVIEW_VERDICT_SCHEMA_VERSION,
+} from "../src/feedback/review-verdict-custody.ts";
 
 const head = "a".repeat(40);
 const otherHead = "b".repeat(40);
@@ -79,7 +84,7 @@ function attestation(overrides: Partial<ReviewAttestation> = {}): ReviewAttestat
   return {
     provider: "codex",
     role: "blind-reviewer",
-    model: "gpt-5.6-sol",
+    model: "gpt-6.1-sol",
     pr: 731,
     head,
     reviewRevision: "review-rvatt-1",
@@ -90,13 +95,71 @@ function attestation(overrides: Partial<ReviewAttestation> = {}): ReviewAttestat
   };
 }
 
+function strictRefactorVerdictFixture(
+  root: string,
+  verdict: string,
+): {
+  request: ReviewAttestationRequest;
+  verdictFile: string;
+  attestation: ReviewAttestation;
+} {
+  execFileSync("git", ["init", "--quiet"], {
+    cwd: root,
+    windowsHide: true,
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  const issued = issueReviewRequest({
+    repoRoot: root,
+    request: {
+      ...request(),
+      memoryId: "memory-rvatt-refactor",
+      reviewRevision: "review-rvatt-strict",
+    },
+    strict: true,
+  });
+  if (!issued.ok) throw new Error(`strict request fixture failed: ${issued.reason}`);
+  const reviewer = { provider: "codex" as const, model: "gpt-6.1-sol" };
+  const attempt = beginReviewAttempt({
+    repoRoot: root,
+    request: issued.request,
+    ...reviewer,
+    now: "2026-07-31T01:00:00.000Z",
+  });
+  if (!attempt.ok) throw new Error(`strict attempt fixture failed: ${attempt.reason}`);
+  writeFileSync(
+    attempt.path,
+    [
+      `schema_version: ${REVIEW_VERDICT_SCHEMA_VERSION}`,
+      `request_digest: ${issued.digest}`,
+      `attempt: ${attempt.attempt}`,
+      `pr: ${issued.request.pr}`,
+      `exact_head: ${issued.request.exactHead}`,
+      `review_revision: ${issued.request.reviewRevision}`,
+      `reviewer_provider: ${reviewer.provider}`,
+      `reviewer_model: ${reviewer.model}`,
+      `invocation_nonce: ${issued.request.invocationNonce}`,
+      verdict,
+    ].join("\n"),
+    "utf8",
+  );
+  return {
+    request: issued.request,
+    verdictFile: attempt.path,
+    attestation: attestation({
+      provider: reviewer.provider,
+      model: reviewer.model,
+      reviewRevision: issued.request.reviewRevision,
+      invocationNonce: issued.request.invocationNonce,
+      attempt: attempt.attempt,
+    }),
+  };
+}
+
 function runDelegation(args: string[]): Promise<{ stdout: string; stderr: string }> {
   const program = new Command();
   registerDelegationCommands(program, {
-    gitBranch: () => "work/d3b-review-attestation",
     gitHead: () => head,
     resolveTaskText: (opts) => opts.task ?? null,
-    resolveSkillContextInjection: () => undefined,
     runSessionStartSideEffects: () => {},
     taskFileOptionDescription: "read task text from file",
     writeHandoverWarnings: () => {},
@@ -714,6 +777,53 @@ describe("review attestation (U-RVATT)", () => {
       expect(receiptFiles(root)).toHaveLength(1);
     } finally {
       rmSync(verdictFile, { force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("refactor judgement receipt projection candidates", () => {
+  it.fails("CANDIDATE-U-REFACTORGATE-056: verdict の REFACTOR を receipt に写す", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvatt-refactor-"));
+    try {
+      const fixture = strictRefactorVerdictFixture(root, "VERDICT: PASS\nREFACTOR: none-ok\n");
+      const result = projectReviewVerdict({
+        repoRoot: root,
+        ...fixture,
+      });
+      expect(result).toMatchObject({ ok: true, receipt: { refactorJudgement: "none-ok" } });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("CANDIDATE-U-REFACTORGATE-057: 判定欄なしの receipt は key 自体を持たない", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvatt-refactor-absent-"));
+    try {
+      const fixture = strictRefactorVerdictFixture(root, "VERDICT: PASS\n");
+      const result = projectReviewVerdict({
+        repoRoot: root,
+        ...fixture,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected strict receipt projection to succeed");
+      expect(Object.hasOwn(result.receipt, "refactorJudgement")).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-058: unknown 判定欄は receipt を発行しない", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvatt-refactor-invalid-"));
+    try {
+      const fixture = strictRefactorVerdictFixture(root, "VERDICT: PASS\nREFACTOR: maybe\n");
+      const result = projectReviewVerdict({
+        repoRoot: root,
+        ...fixture,
+      });
+      expect(result).toEqual({ ok: false, reason: "refactor_judgement_unknown" });
+      expect(receiptFiles(root)).toEqual([]);
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

@@ -2,30 +2,7 @@ import type { TableDef } from "./harness-db.ts";
 import { col, foreignKey, pk, requiredCol } from "./harness-db-table-builders.ts";
 
 export const HARNESS_DB_CORE_TABLES: TableDef[] = [
-  // --- §2.7 基本 7 ---
-  {
-    name: "plan_registry",
-    columns: [
-      pk("plan_id"),
-      col("kind"),
-      col("layer"),
-      col("sub_doc"),
-      col("drive"),
-      col("status"),
-      col("parent"),
-      // route_mode: PLAN frontmatter の駆動モデル宣言 (mode 第一級化、PLAN-L7-243)。
-      // legacy PLAN は "" (mode 導出は src/schema/mode-catalog.ts のフォールバックに従う)。
-      col("route_mode"),
-      col("updated_at"),
-      // decision_outcome: S4 verdict for PoC (kind=poc) PLANs.
-      // Values: "confirmed" | "rejected" | "pivot" | "" (null/unset stored as "").
-      // Source: PLAN frontmatter field `decision_outcome`. Used by projectPocEvaluations (FR-L1-43).
-      col("decision_outcome"),
-      // source_hash: sha256 of the full PLAN markdown content. Used by drive-db-registration to
-      // detect persisted harness.db staleness even when the plan count is unchanged.
-      col("source_hash"),
-    ],
-  },
+  // --- §2.7 基本 ---
   {
     name: "artifact_registry",
     columns: [

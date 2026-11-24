@@ -1,4 +1,4 @@
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   cpSync,
@@ -30,6 +30,7 @@ import {
 import { derivePackPublicationAssets } from "../../src/setup/pack-publication-assets.ts";
 import { buildPackPublicationStagingPlan } from "../../src/setup/pack-publication-staging.ts";
 import { digestMaterializedReleaseEntries } from "../../src/setup/release-materializer.ts";
+import { gitTextTrimmed as git } from "./git.ts";
 import { headSnapshotRoot } from "./workspace-roots.ts";
 
 export const fixtureRoots: string[] = [];
@@ -52,13 +53,6 @@ export function stopConsumerWakeProcesses(): void {
   for (const child of wakeProcesses.splice(0)) {
     if (!child.killed) child.kill();
   }
-}
-
-function git(cwd: string, args: readonly string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
 }
 
 function walk(root: string): string[] {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as rightArmStatic from "../src/gate/right-arm-static.ts";
 import { evaluateStaticGate } from "../src/gate/static.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const roots: string[] = [];
 
@@ -14,6 +15,8 @@ interface MutableJsonRecord extends Record<string, unknown> {
   exit_criteria?: MutableJsonRecord;
   items?: MutableJsonRecord[];
 }
+
+type FeedbackFixture = { items: Array<{ routed_to: string }> };
 
 function write(root: string, path: string, content: string): void {
   const absolute = join(root, path);
@@ -27,6 +30,8 @@ function json(value: unknown): string {
 
 function consumerFixture(): string {
   const root = mkdtempSync(join(tmpdir(), "ut-tdd-g14-"));
+  const issue13 = "https://github.com/example/consumer/issues/13";
+  const issue12 = "https://github.com/example/consumer/issues/12";
   roots.push(root);
   write(
     root,
@@ -35,8 +40,8 @@ function consumerFixture(): string {
   );
   write(
     root,
-    "docs/plans/PLAN-L0-01-consumer-charter.md",
-    "---\nplan_id: PLAN-L0-01-consumer-charter\n---\n",
+    "docs/design/L0-planning/consumer-charter.md",
+    "---\nlayer: L0\ndoc_type_id: DOC-L0-CHARTER\n---\n",
   );
   write(root, "docs/plans/PLAN-CONSUMER-01.md", "---\nplan_id: PLAN-CONSUMER-01\n---\n");
   const template = readFileSync(
@@ -48,7 +53,7 @@ function consumerFixture(): string {
     .replace("plan: docs/plans/PLAN-<id>.md", "plan: docs/plans/PLAN-CONSUMER-01.md")
     .replace(
       "| <記入> | <記入> | <記入> | <記入> | <記入> |",
-      "| OT-CONSUMER-01 | OT | 日常運用の手順 | 失敗 0 | FR-L1-01 |\n| OT-CONSUMER-02 | VALUE | 導入価値の検証 | KPI 達成 | BR-01 / PLAN-L0-01-consumer-charter |",
+      "| OT-CONSUMER-01 | OT | 日常運用の手順 | 失敗 0 | FR-L1-01 |\n| OT-CONSUMER-02 | VALUE | 導入価値の検証 | KPI 達成 | BR-01 / DOC-L0-CHARTER |",
     );
   write(root, "docs/test-design/L14-operational-test-design.md", content);
   write(root, "tests/fixtures/g14-consumer/operational-results.txt", "passed\n");
@@ -59,11 +64,8 @@ function consumerFixture(): string {
     ".ut-tdd/evidence/g14-operational/artifacts/feedback.json",
     json({
       items: [
-        { summary: "onboarding 手順の短縮", routed_to: "PLAN-CONSUMER-01" },
-        {
-          summary: "doctor 出力の整理",
-          routed_to: "https://github.com/example/consumer/issues/12",
-        },
+        { summary: "onboarding 手順の短縮", routed_to: issue13 },
+        { summary: "doctor 出力の整理", routed_to: issue12 },
       ],
     }),
   );
@@ -158,7 +160,7 @@ function requiredRecordAt(value: unknown, index: number): MutableJsonRecord {
 }
 
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) removeTestTree(root);
   vi.restoreAllMocks();
 });
 
@@ -283,35 +285,6 @@ describe("consumer G14 right-arm static gate (U-RCDEV-035)", () => {
       "invalid evidence family SMOKE for OT-CONSUMER-02",
     ],
     [
-      "VALUE without L0 citation",
-      (root: string) => {
-        const slot = join(root, "docs/test-design/L14-operational-test-design.md");
-        writeFileSync(
-          slot,
-          readFileSync(slot, "utf8").replace("BR-01 / PLAN-L0-01-consumer-charter", "BR-01"),
-          "utf8",
-        );
-      },
-      "value case OT-CONSUMER-02 does not cite L0 (file the L0 charter as docs/plans/PLAN-L0-*.md and cite its plan_id)",
-    ],
-    [
-      "missing L0 target",
-      (root: string) => rmSync(join(root, "docs/plans/PLAN-L0-01-consumer-charter.md")),
-      "trace target missing PLAN-L0-01-consumer-charter",
-    ],
-    [
-      "non-L0 PLAN citation",
-      (root: string) => {
-        const slot = join(root, "docs/test-design/L14-operational-test-design.md");
-        writeFileSync(
-          slot,
-          readFileSync(slot, "utf8").replace("PLAN-L0-01-consumer-charter", "PLAN-CONSUMER-01"),
-          "utf8",
-        );
-      },
-      "value case OT-CONSUMER-02 does not cite L0",
-    ],
-    [
       "untraced OT row",
       (root: string) => {
         const slot = join(root, "docs/test-design/L14-operational-test-design.md");
@@ -405,31 +378,6 @@ describe("consumer G14 right-arm static gate (U-RCDEV-035)", () => {
       "improvement_feedback.items[0].summary is required",
     ],
     [
-      "feedback PLAN must exist",
-      (root: string) =>
-        updateJson(feedbackPath(root), (value) => {
-          requiredRecordAt(value.items, 0).routed_to = "PLAN-L9-999-missing";
-        }),
-      "improvement_feedback.items[0] routed_to PLAN-L9-999-missing does not exist",
-    ],
-    [
-      "feedback Issue must use Issue URL form",
-      (root: string) =>
-        updateJson(feedbackPath(root), (value) => {
-          requiredRecordAt(value.items, 1).routed_to = "#12";
-        }),
-      "improvement_feedback.items[1] routed_to #12 is not a PLAN or Issue URL",
-    ],
-    [
-      "feedback Issue URL must use issue path",
-      (root: string) =>
-        updateJson(feedbackPath(root), (value) => {
-          requiredRecordAt(value.items, 1).routed_to =
-            "https://github.com/example/consumer/pull/12";
-        }),
-      "improvement_feedback.items[1] routed_to https://github.com/example/consumer/pull/12 is not a PLAN or Issue URL",
-    ],
-    [
       "feedback must be a JSON object",
       (root: string) => writeFileSync(feedbackPath(root), "not json\n", "utf8"),
       "invalid artifact improvement_feedback: JSON object required",
@@ -442,26 +390,69 @@ describe("consumer G14 right-arm static gate (U-RCDEV-035)", () => {
     else expect(result.messages.join("\n")).toContain(expected);
   });
 
-  it("keeps trace misses and the L0-specific VALUE rule distinct", () => {
-    const missingL0 = consumerFixture();
-    rmSync(join(missingL0, "docs/plans/PLAN-L0-01-consumer-charter.md"));
-    const missingL0Message = evaluate(missingL0).messages.join("\n");
-    expect(missingL0Message).toContain("trace target missing PLAN-L0-01-consumer-charter");
-    expect(missingL0Message).toContain("value case OT-CONSUMER-02 does not cite L0");
-    expect(missingL0Message).toContain(
-      "file the L0 charter as docs/plans/PLAN-L0-*.md and cite its plan_id",
-    );
+  it("fixture precondition: the PLAN document exists alongside Issue URL feedback routing", () => {
+    const root = consumerFixture();
+    const feedback = JSON.parse(readFileSync(feedbackPath(root), "utf8")) as FeedbackFixture;
+    expect(existsSync(join(root, "docs/plans/PLAN-CONSUMER-01.md"))).toBe(true);
+    expect(feedback.items[0]?.routed_to).toBe("https://github.com/example/consumer/issues/13");
+    expect(feedback.items[1]?.routed_to).toBe("https://github.com/example/consumer/issues/12");
+    expect(evaluate(root).passed).toBe(true);
+  });
 
-    const nonL0Plan = consumerFixture();
-    const slot = join(nonL0Plan, "docs/test-design/L14-operational-test-design.md");
-    writeFileSync(
-      slot,
-      readFileSync(slot, "utf8").replace("PLAN-L0-01-consumer-charter", "PLAN-CONSUMER-01"),
-      "utf8",
+  it("m-G14g: a missing PLAN ID is rejected as not an Issue URL, not as missing", () => {
+    const root = consumerFixture();
+    updateJson(feedbackPath(root), (value) => {
+      requiredRecordAt(value.items, 0).routed_to = "PLAN-L9-999-missing";
+    });
+    expect(evaluate(root).messages.join("\n")).toContain(
+      "improvement_feedback.items[0] routed_to PLAN-L9-999-missing is not an Issue URL",
     );
-    const nonL0Message = evaluate(nonL0Plan).messages.join("\n");
-    expect(nonL0Message).toContain("value case OT-CONSUMER-02 does not cite L0");
-    expect(nonL0Message).toContain("trace target missing PLAN-CONSUMER-01");
+  });
+
+  it("m-G14g: an existing PLAN ID is also rejected as not an Issue URL", () => {
+    const root = consumerFixture();
+    updateJson(feedbackPath(root), (value) => {
+      requiredRecordAt(value.items, 0).routed_to = "PLAN-CONSUMER-01";
+    });
+    expect(evaluate(root).messages.join("\n")).toContain(
+      "improvement_feedback.items[0] routed_to PLAN-CONSUMER-01 is not an Issue URL",
+    );
+  });
+
+  it("m-G14h: rejects a pull URL (the rejection is unchanged)", () => {
+    const root = consumerFixture();
+    updateJson(feedbackPath(root), (value) => {
+      requiredRecordAt(value.items, 1).routed_to = "https://github.com/example/consumer/pull/12";
+    });
+    expect(evaluate(root).passed).toBe(false);
+  });
+
+  it("m-G14h: reports that a pull URL is not an Issue URL", () => {
+    const root = consumerFixture();
+    updateJson(feedbackPath(root), (value) => {
+      requiredRecordAt(value.items, 1).routed_to = "https://github.com/example/consumer/pull/12";
+    });
+    expect(evaluate(root).messages.join("\n")).toContain(
+      "improvement_feedback.items[1] routed_to https://github.com/example/consumer/pull/12 is not an Issue URL",
+    );
+  });
+
+  it("m-G14i: rejects a number-only reference (the rejection is unchanged)", () => {
+    const root = consumerFixture();
+    updateJson(feedbackPath(root), (value) => {
+      requiredRecordAt(value.items, 1).routed_to = "#12";
+    });
+    expect(evaluate(root).passed).toBe(false);
+  });
+
+  it("m-G14i: reports that a number-only reference is not an Issue URL", () => {
+    const root = consumerFixture();
+    updateJson(feedbackPath(root), (value) => {
+      requiredRecordAt(value.items, 1).routed_to = "#12";
+    });
+    expect(evaluate(root).messages.join("\n")).toContain(
+      "improvement_feedback.items[1] routed_to #12 is not an Issue URL",
+    );
   });
 
   it("allows defined non-pair IDs without misreporting them as missing targets", () => {

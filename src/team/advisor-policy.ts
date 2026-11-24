@@ -1,4 +1,4 @@
-import type { AdapterContextInjection, AdapterPlan, AdapterProvider } from "../runtime/adapter.ts";
+import type { AdapterPlan, AdapterProvider } from "../runtime/adapter.ts";
 import { buildAdapterPlan } from "../runtime/adapter.ts";
 import type { ExecutionMode } from "../runtime/detect.ts";
 import {
@@ -75,9 +75,7 @@ export interface AdvisorInput {
   decisionKind?: AdvisorDecisionKind;
   currentModel?: string;
   reason?: string;
-  planId?: string;
   execute?: boolean;
-  contextInjection?: AdapterContextInjection;
 }
 
 /** advisor もモデル別標準 effort に従う。Sol / Fable は low。 */
@@ -288,11 +286,9 @@ export function buildAdvisorDecision(input: AdvisorInput): AdvisorDecision {
           reason,
           currentModel: input.currentModel,
         }),
-        planId: input.planId,
         model: route.model,
         effort: route.effort,
         execute: input.execute,
-        contextInjection: input.contextInjection,
       },
       input.mode,
     );

@@ -31,7 +31,7 @@ decision_points:
     choose: "verify Vitest describe/it scenario IDs match the L6 design doc"
     over: "using assertion count as a proxy for test quality"
     because: "a high assertion count can still miss the scenarios the design doc requires"
-  - when: "a PLAN has thorough unit tests at L7 but no L8 integration test-design doc"
+  - when: "an Issue has thorough unit tests at L7 but no L8 integration test-design doc"
     choose: "require the L8 test-design doc as a separate paired artifact"
     over: "skipping it because \"unit tests are sufficient\""
     because: "V-model requires paired artifacts at every boundary, not substitution across boundaries"
@@ -39,7 +39,7 @@ decision_points:
     choose: "treat the absence as a violation to be reported by ut-tdd vmodel lint"
     over: "treating the missing pair as a neutral, unflagged state"
     because: "absence-blindness is the documented root cause of descent gaps in this harness"
-  - when: "running the machine verification sequence (doctor, vmodel lint, plan lint, typecheck, lint, test)"
+  - when: "running the machine verification sequence (doctor, vmodel lint, typecheck, lint, test)"
     choose: "stop at the first failing command and fix it before continuing"
     over: "running all commands regardless of earlier failures"
     because: "later checks can mask or be invalidated by an earlier structural failure"
@@ -81,9 +81,8 @@ the design doc to confirm the claim it makes is substantiated in the body.
 Run in order; stop at the first failure and fix before continuing:
 
 ```
-ut-tdd doctor              # structural governance: orphans, missing pairs, PLAN schema
+ut-tdd doctor              # structural governance and design pairs
 ut-tdd vmodel lint         # V-model layer obligations: absence-fail-close
-ut-tdd plan lint           # PLAN schema, dependency existence, schedule section
 npm run typecheck          # TypeScript: zero errors
 npm run lint               # Biome check: format + lint, zero violations
 npm run test               # Vitest: no skipped tests without rationale
@@ -100,16 +99,16 @@ CI runs its own authoritative step set: `.github/workflows/harness-check.yml` å…
 - `ut-tdd vmodel lint` reports no L3 obligation gap.
 
 **L4-L6 (basic design through unit-test design):**
-- L5 detailed design doc exists at `docs/design/L5/` for each PLAN in scope.
+- L5 detailed design doc exists at `docs/design/L5/` for each design in scope.
 - L6 test-design doc exists at `docs/test-design/L6/` for each module.
 - L6 test-design lists explicit scenario IDs that match Vitest `describe`/`it`
   names. Absence of a matching test = open obligation, not a pass.
 
 **L7 (implementation):**
 - Vitest assertions exercise the scenarios in the paired L6 doc.
-- No `.skip`, `todo`, or `@ts-ignore` without a PLAN-linked rationale in a
+- No `.skip`, `todo`, or `@ts-ignore` without an Issue-linked rationale in a
   comment on the same line.
-- `harness.db` projection row for the PLAN is in `completed` or `review` state.
+- The PR or Issue identifies the verified subject commit and evidence.
 
 **L8-L9 (integration and system test design):**
 - L8 integration test design doc exists at `docs/test-design/L8/`.
@@ -128,9 +127,9 @@ blindness is the root cause of descent gaps.
 At the completion of a layer-group verification cycle, write:
 
 ```
-.ut-tdd/audit/<PLAN-id>-verification-<layer-group>.json
+.ut-tdd/audit/<issue-number>-verification-<layer-group>.json
 {
-  "plan_id": "<id>",
+  "issue": "<GitHub Issue number>",
   "layer_group": "L0-L3 | L4-L6 | L7 | L8-L9",
   "machine_checks": "all-pass | <failing command>",
   "descent_findings": ["<finding>" | "none"],

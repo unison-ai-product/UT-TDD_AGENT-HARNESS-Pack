@@ -5,7 +5,6 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -277,7 +276,7 @@ describe("review delegation repository-root custody", () => {
       expect(existsSync(result.path)).toBe(true);
       expect(existsSync(join(root, "nested", "task", ".ut-tdd", "review"))).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   }, 60_000);
 });

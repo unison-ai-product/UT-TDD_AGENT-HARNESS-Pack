@@ -8,6 +8,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { GH_COMMAND_TIMEOUT_MS, ghCommandEnv } from "../github/gh-command.ts";
 import { createGhAttestationVerifier } from "./adapters/gh-attestation-verifier.ts";
 import {
   admitReviewCustody,
@@ -142,8 +143,6 @@ function draftFromEnvironment(input: {
     mergeSha: receiptKind === "post_merge_closure" ? (facts.mergeSha ?? undefined) : undefined,
     mergeMethod,
     mergedAt: receiptKind === "post_merge_closure" ? (facts.mergedAt ?? undefined) : undefined,
-    planId: requireText({ env, name: "UT_TDD_CUSTODY_PLAN_ID" }),
-    planRevision: requireText({ env, name: "UT_TDD_CUSTODY_PLAN_REVISION" }),
     requestIdentity: requestIdentity({ env, prNumber: facts.prNumber, headSha: facts.headSha }),
     judgmentDigest: requireText({ env, name: "UT_TDD_CUSTODY_JUDGMENT_DIGEST" }),
     workflowRef: requireText({ env, name: "GITHUB_WORKFLOW_REF" }),
@@ -261,8 +260,6 @@ export async function observeAndAdmitCustodyReceipt(
       headSha: facts.headSha,
       receiptKind: facts.state === "MERGED" ? "post_merge_closure" : "pre_merge_review",
       mergeMethod: facts.state === "MERGED" ? requireMergeMethod({ env }) : undefined,
-      planId: requireText({ env, name: "UT_TDD_CUSTODY_PLAN_ID" }),
-      planRevision: requireText({ env, name: "UT_TDD_CUSTODY_PLAN_REVISION" }),
       requestIdentity: requestIdentity({ env, prNumber: facts.prNumber, headSha: facts.headSha }),
       judgmentDigest: requireText({ env, name: "UT_TDD_CUSTODY_JUDGMENT_DIGEST" }),
       workflowRef: requireText({ env, name: "GITHUB_WORKFLOW_REF" }),
@@ -286,7 +283,12 @@ function processEnvironment(): RunnerEnvironment {
   return {
     get: (name) => process.env[name],
     runGh: (args) => {
-      const result = spawnSync("gh", [...args], { encoding: "utf8", windowsHide: true });
+      const result = spawnSync("gh", [...args], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: GH_COMMAND_TIMEOUT_MS,
+        env: ghCommandEnv(process.env),
+      });
       if (result.error) return { status: null, stdout: "" };
       return { status: result.status, stdout: result.stdout ?? "" };
     },

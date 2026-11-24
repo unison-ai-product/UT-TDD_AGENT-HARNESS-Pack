@@ -190,8 +190,6 @@ describe("IT-SEARCH-01 / IT-DB-03 / IT-FEEDBACK-01", () => {
       expect(
         events.find((event) => event.signal_type === "refactor_candidate:split-module")?.severity,
       ).toBe("warn");
-      const plan = db.prepare("SELECT * FROM plan_registry").get();
-      expect(plan).toBeUndefined();
     } finally {
       db.close();
     }

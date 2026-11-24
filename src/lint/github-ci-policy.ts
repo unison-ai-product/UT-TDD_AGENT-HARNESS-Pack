@@ -1,6 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import {
+  githubExpression,
+  harnessAggregateSteps,
+  harnessLaneEvidenceSteps,
+  runtimeLegShapeProblems,
+  WINDOWS_SHARD_REGRESSION_STEPS,
+} from "./github-ci-windows-shard.ts";
 
 export interface GithubWorkflowDoc {
   file: string;
@@ -70,6 +77,7 @@ interface WorkflowJob {
   needs?: unknown;
   if?: unknown;
   "runs-on"?: unknown;
+  strategy?: unknown;
   steps?: unknown;
 }
 
@@ -115,29 +123,11 @@ const REQUIRED_CONCURRENCY_GROUP =
 const REQUIRED_CANCEL_IN_PROGRESS = "$" + "{{ github.ref != 'refs/heads/main' }}";
 const REQUIRED_AGGREGATE_IF = "$" + "{{ always() }}";
 
-const PULL_REQUEST_ACTIVITY_TYPES = new Set([
-  "assigned",
-  "unassigned",
-  "labeled",
-  "unlabeled",
-  "opened",
-  "edited",
-  "closed",
-  "reopened",
-  "synchronize",
-  "converted_to_draft",
-  "locked",
-  "unlocked",
-  "enqueued",
-  "dequeued",
-  "milestoned",
-  "demilestoned",
-  "ready_for_review",
-  "review_requested",
-  "review_request_removed",
-  "auto_merge_enabled",
-  "auto_merge_disabled",
-]);
+const PULL_REQUEST_ACTIVITY_TYPES = new Set(
+  `assigned unassigned labeled unlabeled opened edited closed reopened synchronize
+  converted_to_draft locked unlocked enqueued dequeued milestoned demilestoned ready_for_review
+  review_requested review_request_removed auto_merge_enabled auto_merge_disabled`.split(/\s+/),
+);
 
 const SOURCE_REQUIRED_STEPS = [
   { label: "checkout@v5", any: ["actions/checkout@v5"] },
@@ -148,6 +138,7 @@ const SOURCE_REQUIRED_STEPS = [
   { label: "setup-node@v4", any: ["actions/setup-node@v4"] },
   { label: "frozen install", any: ["npm ci"] },
   { label: "github guard", any: ["github guard"] },
+  { label: "design protection", any: ["github design-protection"] },
   { label: "typecheck", any: ["npm run typecheck"] },
   { label: "db rebuild", any: ["db rebuild"] },
   { label: "full tests", any: ["npm run test"] },
@@ -259,18 +250,18 @@ function hasStep(steps: WorkflowStep[], needles: readonly string[]): boolean {
   });
 }
 
-function pushViolation(input: {
+function pushViolation({
+  violations,
+  doc,
+  reason,
+  detail,
+}: {
   violations: GithubCiPolicyViolation[];
   doc: GithubWorkflowDoc;
   reason: GithubCiPolicyViolation["reason"];
   detail: string;
 }): void {
-  input.violations.push({
-    file: input.doc.file,
-    profile: input.doc.profile,
-    reason: input.reason,
-    detail: input.detail,
-  });
+  violations.push({ file: doc.file, profile: doc.profile, reason, detail });
 }
 
 const HARNESS_LEGS = ["harness-check-linux", "harness-check-windows"] as const;
@@ -284,6 +275,8 @@ const RUNTIME_LEGS = [...HARNESS_LEGS, ...NODE_GENERATION_LEGS] as const;
 const LANE_REFERENCE_NEEDLE = "steps.classify.outputs.lane";
 const LANE_FULL_ONLY_IF = "$" + "{{ steps.classify.outputs.lane == 'full' }}";
 const LANE_DOC_ONLY_IF = "$" + "{{ steps.classify.outputs.lane == 'doc' }}";
+const DOC_LANE_DOCTOR = "node src/cli.ts doctor --profile source-doc-lane";
+const DB_REBUILD = "node src/cli.ts db rebuild --json";
 // 注意: 素朴な部分文字列一致だと "npm run test" が doc lane 専用の
 // "npm run test:doc-lane" を誤って full-only allowlist に混入させる (substring collision)。
 // `\b...\b(?!:)` で script suffix (`:fast` 等) 付き script 名との衝突を避ける。
@@ -292,6 +285,9 @@ const LANE_SKIPPABLE_FULL_ONLY_STEP_MATCHERS: readonly ((text: string) => boolea
   (text) => text.includes("db rebuild"),
   (text) => /\bnpm\s+run\s+test\b(?!:)/.test(text),
   (text) => text.includes("npm run test:windows"),
+  (text) =>
+    text === "write Windows shard evidence\nnode scripts/windows-ci-shard-evidence.mjs shard",
+  (text) => text === "upload Windows shard evidence\nactions/upload-artifact@v4",
   (text) => text.includes("audit quality"),
   (text) => text.includes("src/cli.ts doctor") && !text.includes("--profile source-doc-lane"),
 ];
@@ -300,7 +296,6 @@ function matchesLaneSkipAllowlist(text: string): boolean {
   return LANE_SKIPPABLE_FULL_ONLY_STEP_MATCHERS.some((matches) => matches(text));
 }
 
-const githubExpression = (expression: string): string => ["$", `{{ ${expression} }}`].join("");
 const CLASSIFY_COMMAND = [
   "node src/cli.ts github classify-changes",
   `--event-name "${githubExpression("github.event_name")}"`,
@@ -328,7 +323,7 @@ function isFailCloseStep(step: WorkflowStep): boolean {
 function hasCanonicalDocLaneDoctor(step: WorkflowStep): boolean {
   return (
     step.if === LANE_DOC_ONLY_IF &&
-    normalizedRun(step.run) === "node src/cli.ts doctor --profile source-doc-lane" &&
+    normalizedRun(step.run) === DOC_LANE_DOCTOR &&
     step.shell === undefined &&
     step.env === undefined &&
     isFailCloseStep(step)
@@ -349,23 +344,20 @@ const step = (name: string, fields: Record<string, unknown>): Record<string, unk
 });
 const run = (name: string, command: string, condition?: string): Record<string, unknown> =>
   step(name, { ...(condition ? { if: condition } : {}), run: command });
-const commonRuntimeSteps = [
-  step("checkout", { uses: "actions/checkout@v5", with: { "fetch-depth": 0 } }),
-  // Issue #472 (S1-c, PLAN-L7-522): node が harness 実行系の正式 runtime。setup-bun は撤去済み。
-  step("setup node (harness 実行系の正式 runtime、PLAN-L7-462 step 2)", {
-    uses: "actions/setup-node@v4",
-    with: { "node-version": "24.13.0", cache: "npm" },
-  }),
-  run("install deps (frozen)", "npm ci --no-audit --no-fund"),
-] as const;
-const commonNodeGenerationSteps = [
-  step("checkout", { uses: "actions/checkout@v5", with: { "fetch-depth": 0 } }),
-  step("setup node (sealed generation runtime)", {
-    uses: "actions/setup-node@v4",
-    with: { "node-version": "24.13.0", cache: "npm" },
-  }),
-  run("install deps (frozen)", "npm ci --no-audit --no-fund"),
-] as const;
+const commonSteps = (setupNodeName: string) =>
+  [
+    step("checkout", { uses: "actions/checkout@v5", with: { "fetch-depth": 0 } }),
+    step(setupNodeName, {
+      uses: "actions/setup-node@v4",
+      with: { "node-version": "24.22.3", cache: "npm" },
+    }),
+    run("install deps (frozen)", "npm ci --no-audit --no-fund"),
+  ] as const;
+// Issue #472 (S1-c, PLAN-L7-522): node が harness 実行系の正式 runtime。setup-bun は撤去済み。
+const commonRuntimeSteps = commonSteps(
+  "setup node (harness 実行系の正式 runtime、PLAN-L7-462 step 2)",
+);
+const commonNodeGenerationSteps = commonSteps("setup node (sealed generation runtime)");
 const classifyFields = { id: "classify", run: CLASSIFY_COMMAND };
 const nodeGenerationStep = (lane: (typeof NODE_GENERATION_LEGS)[number]) =>
   step(`build and verify sealed Node generation (${lane.replace("node-generation-", "")})`, {
@@ -387,60 +379,149 @@ const nodeGenerationUploadStep = (lane: (typeof NODE_GENERATION_LEGS)[number]) =
 const RUNTIME_STEP_MANIFESTS: Record<(typeof RUNTIME_LEGS)[number], readonly object[]> = {
   "harness-check-linux": [
     ...commonRuntimeSteps,
+    step("oracle baseline ratchet (required on every PR)", {
+      if: githubExpression("github.event_name == 'pull_request'"),
+      env: {
+        ORACLE_RATCHET_EVENT_NAME: githubExpression("github.event_name"),
+        ORACLE_RATCHET_MERGE_SHA: githubExpression("github.sha"),
+      },
+      run: `\
+          node --input-type=module <<'NODE'
+          import { execFileSync } from "node:child_process";
+          import { readFileSync } from "node:fs";
+          import { dirname, resolve } from "node:path";
+          import { fileURLToPath } from "node:url";
+          import { checkOracleBaselineRatchet } from "./src/lint/oracle-test-trace.ts";
+
+          const repoRoot = process.env.GITHUB_WORKSPACE;
+          const baselinePath = "docs/governance/oracle-test-trace-baseline.json";
+          const oracleTraceGitPaths = new Set([
+            baselinePath,
+            "src/lint/oracle-test-trace-baseline.ts",
+            "src/lint/oracle-test-trace-widened-baseline.ts",
+            "src/lint/oracle-test-citation-baseline.ts",
+          ]);
+          const sourceModule = fileURLToPath(import.meta.resolve("./src/lint/oracle-test-trace.ts"));
+          const moduleRoot = resolve(dirname(sourceModule), "../..");
+          const decodeUtf8 = (bytes) => new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+          const gitBytes = (args) => {
+            if (!repoRoot) throw new Error("github_workspace_missing");
+            return execFileSync("git", ["-C", repoRoot, ...args], {
+              encoding: "buffer",
+              maxBuffer: 64 * 1024 * 1024,
+              stdio: ["ignore", "pipe", "ignore"],
+              windowsHide: true,
+            });
+          };
+          const gitText = (args) => decodeUtf8(gitBytes(args));
+          const authority = {
+            readText(path) {
+              if (path !== baselinePath) return { ok: false, reason: "authority_read_failed" };
+              try {
+                return { ok: true, value: decodeUtf8(readFileSync(resolve(moduleRoot, path))) };
+              } catch (error) {
+                if (error && typeof error === "object" && error.code === "ENOENT")
+                  return { ok: true, value: null };
+                return { ok: false, reason: "authority_read_failed" };
+              }
+            },
+          };
+          const git = {
+            readFirstParent(mergeSha) {
+              try {
+                const commit = gitText(["cat-file", "-p", mergeSha]);
+                const headers = commit.split(/\\r?\\n\\r?\\n/u, 1)[0] ?? "";
+                const parent = headers.split(/\\r?\\n/u).find((line) => line.startsWith("parent "));
+                if (!parent) return { ok: true, value: null };
+                const parentSha = parent.slice("parent ".length);
+                if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(parentSha))
+                  return { ok: false, reason: "git_first_parent_read_failed" };
+                return { ok: true, value: parentSha };
+              } catch {
+                return { ok: false, reason: "git_first_parent_read_failed" };
+              }
+            },
+            readTextAt(commitSha, path) {
+              if (!oracleTraceGitPaths.has(path)) return { ok: false, reason: "git_object_read_failed" };
+              try {
+                const records = gitText(["ls-tree", "-z", "--full-tree", commitSha, "--", path])
+                  .split("\\0")
+                  .filter(Boolean);
+                if (records.length === 0) return { ok: true, value: null };
+                if (records.length !== 1)
+                  return { ok: false, reason: "git_object_read_failed" };
+                const entry = /^(?:100644|100755|120000) blob ([0-9a-f]{40}|[0-9a-f]{64})\\t(.+)$/u.exec(records[0]);
+                if (!entry || entry[2] !== path)
+                  return { ok: false, reason: "git_object_read_failed" };
+                return { ok: true, value: gitText(["cat-file", "blob", entry[1]]) };
+              } catch {
+                return { ok: false, reason: "git_object_read_failed" };
+              }
+            },
+          };
+          const result = checkOracleBaselineRatchet({
+            authority,
+            ci: {
+              eventName: process.env.ORACLE_RATCHET_EVENT_NAME ?? "",
+              mergeSha: process.env.ORACLE_RATCHET_MERGE_SHA ?? "",
+              git,
+            },
+          });
+          if (!result.ok) {
+            console.error(\`checkOracleBaselineRatchet: \${result.reason}\`);
+            process.exitCode = 1;
+          }
+          NODE`.replace(/^ {10}/gm, ""),
+    }),
     step("classify changed files (doc lane vs full, fail-close)", classifyFields),
+    ...harnessLaneEvidenceSteps("linux"),
     step("branch-type guard (commitlint / poc / hotfix)", {
       env: {
         HEAD_REF: githubExpression("github.head_ref || github.ref_name"),
         BASE_REF: githubExpression("github.base_ref || 'main'"),
         PR_TITLE: githubExpression(
-          "github.event.pull_request.title || github.event.head_commit.message || ''",
+          "github.event_name == 'pull_request' && github.event.pull_request.title || ''",
         ),
         PR_BODY: githubExpression("github.event.pull_request.body || ''"),
       },
       run: `printf '%s\\n' "$PR_BODY" > .ut-tdd-pr-body.txt
-git log --format=%s -n 20 > .ut-tdd-commit-subjects.txt
-node src/cli.ts github guard --head-ref "$HEAD_REF" --base-ref "$BASE_REF" --pr-title "$PR_TITLE" --pr-body-file .ut-tdd-pr-body.txt --commit-file .ut-tdd-commit-subjects.txt`,
+node src/cli.ts github guard --head-ref "$HEAD_REF" --base-ref "$BASE_REF" --pr-title "$PR_TITLE" --pr-body-file .ut-tdd-pr-body.txt`,
     }),
-    // Issue #598 (一時措置): source repository の PLAN admission receipt を全実行で照合する。
-    // consumer template は genesis projection 未生成のため対象外。v4 R05 で本 step と共に削除する。
-    step("plan admission-check (PLAN 編集の receipt 照合、fail-close)", {
+    step("design-protection (実装 PR の設計書書き換え拒否、fail-close)", {
+      if: githubExpression("github.event_name == 'pull_request'"),
+      env: { BASE_SHA: `${githubExpression("github.sha")}^1` },
+      run: `node src/cli.ts github design-protection --base "$BASE_SHA" --head "${githubExpression("github.sha")}"`,
+    }),
+    step("privacy scan (email の形、fail-close)", {
       env: {
-        BASE_SHA: githubExpression("github.event.pull_request.base.sha || github.event.before"),
+        EVENT_NAME: githubExpression("github.event_name"),
+        BASE_SHA: githubExpression("github.event.pull_request.base.sha"),
+        HEAD_SHA: githubExpression("github.event.pull_request.head.sha"),
       },
-      run: `node src/cli.ts plan admission-check --base "$BASE_SHA" --head "${githubExpression("github.sha")}"`,
+      run: `node src/cli.ts privacy-scan check --mode tree --fail-close
+if [ "$EVENT_NAME" = "pull_request" ]; then
+  node src/cli.ts privacy-scan check --mode diff --base "$BASE_SHA" --head "$HEAD_SHA" --fail-close
+fi`,
     }),
     run("typecheck (tsc --noEmit)", "npm run typecheck", LANE_FULL_ONLY_IF),
-    run(
-      "db rebuild (deterministic projection)",
-      "node src/cli.ts db rebuild --json",
-      LANE_FULL_ONLY_IF,
-    ),
+    run("db rebuild (deterministic projection)", DB_REBUILD, LANE_FULL_ONLY_IF),
     step("doctor (governance hard gates)", {
       if: LANE_FULL_ONLY_IF,
       env: {
         UT_TDD_DOCTOR_RESULT_FILE: `${githubExpression("runner.temp")}/ut-tdd-doctor-result.json`,
       },
-      run: 'node src/cli.ts doctor --strict-green-command-digest --result-file "$UT_TDD_DOCTOR_RESULT_FILE"',
+      run: 'node src/cli.ts doctor --result-file "$UT_TDD_DOCTOR_RESULT_FILE"',
     }),
     step("test — 全回帰 (vitest run)", {
       if: LANE_FULL_ONLY_IF,
       env: {
         UT_TDD_DOCTOR_RESULT_FILE: `${githubExpression("runner.temp")}/ut-tdd-doctor-result.json`,
         UT_TDD_DOCTOR_RESULT_ROOT: githubExpression("github.workspace"),
-        UT_TDD_DOCTOR_RESULT_STRICT: "1",
       },
       run: "npm run test",
     }),
-    run(
-      "doc lane checks (plan lint / readability / rule-drift)",
-      "node src/cli.ts plan lint\nnpm run test:doc-lane",
-      LANE_DOC_ONLY_IF,
-    ),
-    run(
-      "doc lane source doctor",
-      "node src/cli.ts doctor --profile source-doc-lane",
-      LANE_DOC_ONLY_IF,
-    ),
+    run("doc lane checks (readability / rule-drift)", "npm run test:doc-lane", LANE_DOC_ONLY_IF),
+    run("doc lane source doctor", DOC_LANE_DOCTOR, LANE_DOC_ONLY_IF),
     run("lint (biome)", "npm run lint"),
     run(
       "audit quality (gate findings)",
@@ -459,22 +540,11 @@ node src/cli.ts github guard --head-ref "$HEAD_REF" --base-ref "$BASE_REF" --pr-
       ...classifyFields,
       shell: "bash",
     }),
+    ...harnessLaneEvidenceSteps("windows"),
     run("typecheck (tsc --noEmit)", "npm run typecheck", LANE_FULL_ONLY_IF),
-    run(
-      "db rebuild (deterministic projection on Windows SQLite)",
-      "node src/cli.ts db rebuild --json",
-      LANE_FULL_ONLY_IF,
-    ),
-    run(
-      "test — Windows full 回帰 (vitest run, windows leg)",
-      "npm run test:windows",
-      LANE_FULL_ONLY_IF,
-    ),
-    run(
-      "doc lane source checks",
-      "node src/cli.ts doctor --profile source-doc-lane",
-      LANE_DOC_ONLY_IF,
-    ),
+    run("db rebuild (deterministic projection on Windows SQLite)", DB_REBUILD, LANE_FULL_ONLY_IF),
+    ...WINDOWS_SHARD_REGRESSION_STEPS,
+    run("doc lane source checks", DOC_LANE_DOCTOR, LANE_DOC_ONLY_IF),
     run("doctor (toolchain scope)", "node src/cli.ts doctor --scope toolchain", LANE_FULL_ONLY_IF),
   ],
   "node-generation-linux": [
@@ -509,14 +579,8 @@ function checkLaneSkipSafety(input: {
   for (const [index, leg] of input.legs.entries()) {
     if (!leg) continue;
     const name = RUNTIME_LEGS[index];
-    if (!hasExactKeys(leg, ["runs-on", "steps"])) {
-      pushViolation({
-        violations: input.violations,
-        doc: input.doc,
-        reason: "missing_runtime_leg",
-        detail: `jobs.${name} must contain only runs-on and steps`,
-      });
-    }
+    for (const detail of runtimeLegShapeProblems(name, leg))
+      pushViolation({ ...input, reason: "missing_runtime_leg", detail });
     if (leg.if !== undefined) {
       pushViolation({
         violations: input.violations,
@@ -730,18 +794,11 @@ function checkRuntimeAggregate(input: {
     }
     const aggregateSteps =
       Array.isArray(aggregate.steps) && aggregate.steps.every(workflowStep) ? aggregate.steps : [];
-    const aggregateText = aggregateSteps.map(stepText).join("\n");
     const failCloseDisabled =
       ![undefined, false].includes(aggregate["continue-on-error"] as undefined | false) ||
-      aggregateSteps.some(
-        (step) => ![undefined, false].includes(step["continue-on-error"] as undefined | false),
-      ) ||
-      !aggregateSteps.some((step) => step.run?.trim() === REQUIRED_AGGREGATE_COMMAND) ||
-      !aggregateSteps.some(
-        (step) => step.run?.trim() === "node scripts/node-generation-ci-aggregate.mjs",
-      );
-    for (const leg of RUNTIME_LEGS) {
-      if (!failCloseDisabled && aggregateText.includes(aggregateResultExpression(leg))) continue;
+      JSON.stringify(canonicalSemantic(aggregateSteps)) !==
+        JSON.stringify(canonicalSemantic(harnessAggregateSteps(REQUIRED_AGGREGATE_COMMAND)));
+    for (const leg of failCloseDisabled ? RUNTIME_LEGS : []) {
       pushViolation({
         violations: input.violations,
         doc: input.doc,
@@ -876,7 +933,7 @@ function checkHarnessTriggers(input: {
   }
 }
 
-export const ATTESTATION_WORKFLOW_FILE = join(".github", "workflows", "review-attestation.yml");
+export const ATTESTATION_WORKFLOW_FILE = ".github/workflows/review-attestation.yml";
 const ATTESTATION_JOB = "review-attestation";
 const ATTESTATION_PERMISSIONS: Readonly<Record<string, string>> = {
   contents: "read",
@@ -1220,7 +1277,7 @@ export function loadGithubCiPolicyDocs(input: LoadGithubCiPolicyDocsInput): Gith
     if (!existsSync(absoluteFile)) return;
     const content = readFileSync(absoluteFile, "utf8");
     candidates.push({
-      file: relativeFile,
+      file: relativeFile.replaceAll("\\", "/"),
       content,
       profile,
       role,

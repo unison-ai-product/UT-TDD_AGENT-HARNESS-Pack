@@ -5,7 +5,7 @@ Claude Code sessions should route harness lifecycle work through `ut-tdd`.
 Consumer-owned Claude instructions can be added outside this managed block.
 
 - Session evidence: `ut-tdd status` and `ut-tdd handover`
-- Health check: `ut-tdd doctor --profile consumer-setup-smoke`
+- Health check: `ut-tdd doctor --profile consumer-setup-smoke` (troubleshooting: https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/blob/main/docs/reference/setup-guide.md)
 - Toolchain check: `ut-tdd doctor --profile consumer-toolchain`
 - Review separation: use another runtime/model family when feasible
 

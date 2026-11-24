@@ -21,7 +21,7 @@ typed_spec_phase_owner: L4
 
 | `doc_type_id` | `layer` | `sub_doc` | `category` | `requirement_class` | `applicability` | `default_status` | `source_doc_family` | `authoring_source_path` | `projection_table` | `profile_controlled` | `skip_reason_required` |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `DOC-L0-CHARTER` | `L0` | `charter` | `planning` | `core` | `in_scope` | `required` | `vmodel-core` | `docs/plans/PLAN-L0-01-vmodel-harness-upgrade-charter.md` | `plan_registry` | `false` | `false` |
+| `DOC-L0-CHARTER` | `L0` | `charter` | `planning` | `core` | `in_scope` | `required` | `vmodel-core` | `docs/design/harness/L0-planning/charter.md` | `spec_defs` | `false` | `false` |
 | `DOC-L1-REQUIREMENTS` | `L1` | `functional-requirements` | `requirements` | `core` | `in_scope` | `required` | `vmodel-core` | `docs/design/harness/L1-requirements/functional-requirements.md` | `spec_defs` | `false` | `false` |
 | `DOC-L1-VMODEL-ENGINE-SWAP-DELTA` | `L1` | `technical` | `upgrade-delta` | `core` | `in_scope` | `required` | `vmodel-upgrade` | `docs/design/harness/L1-requirements/vmodel-engine-swap-requirements-delta.md` | `spec_defs` | `false` | `false` |
 | `DOC-L2-SCREEN` | `L2` | `screen-list` | `screen` | `core` | `in_scope` | `required` | `vmodel-core` | `docs/design/harness/L2-screen/screen-list.md` | `spec_defs` | `false` | `false` |

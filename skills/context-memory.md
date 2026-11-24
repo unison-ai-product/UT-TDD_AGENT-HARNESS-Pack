@@ -25,16 +25,16 @@ decision_points:
     choose: "Cross-check each carry item against `git log` and current file state before acting on it."
     over: "Treating the carry list as an accurate to-do list and starting work directly from it."
     because: "The skill states carry is a claim, not truth; a carry item that conflicts with git log or doctor output is stale and would misdirect the new session."
-  - when: "`open_plans` in `CURRENT.json` lists a PLAN as open."
-    choose: "Verify it against `ut-tdd doctor` output before treating it as active."
-    over: "Assuming the handover file's open_plans list is current."
-    because: "A PLAN listed as open but absent from governance output is a stale handover entry, not a real open obligation."
-  - when: "A PLAN completes or a drive-model cycle boundary is crossed."
+  - when: "A handover lists unfinished work."
+    choose: "Verify the linked GitHub Issue and PR before acting."
+    over: "Starting from the handover list alone."
+    because: "The current Issue and PR can show completion or an assignment change that the handover predates."
+  - when: "Work completes or a drive-model cycle boundary is crossed."
     choose: "Run `ut-tdd handover` to flush the session log and rewrite `CURRENT.json`."
     over: "Continuing directly into the next task without flushing handover state."
     because: "Skipping handover at a drive-cycle boundary means the next session starts blind, per the skill's explicit anti-pattern."
   - when: "`CURRENT.json` is older than ~24 hours or several sessions have elapsed without a handover flush."
-    choose: "Treat it as potentially stale and verify open items from scratch, running `ut-tdd db rebuild` if needed."
+    choose: "Treat it as potentially stale and verify open items against Git and GitHub."
     over: "Propagating the existing carry state as current."
     because: "The skill flags >24h age as a staleness threshold; state drifts across unflushed sessions faster than the handover narrative reflects."
   - when: "A session decision needs to be recorded for future continuity."
@@ -56,7 +56,7 @@ true (FR-L1-31 session log, FR-L1-42 handover state).
 ## When to load this skill
 
 - Starting a new session where a `CURRENT.json` handover exists.
-- Closing out a PLAN or crossing a drive-model cycle boundary.
+- Closing out a work item or crossing a drive-model cycle boundary.
 - A task will span more than one session or runtime switch.
 - A Scrum S3 verify or Recovery exit needs handover evidence before the next
   session begins.
@@ -69,7 +69,6 @@ true (FR-L1-31 session log, FR-L1-42 handover state).
 |---|---|
 | `carry` | Items the previous session reported as incomplete |
 | `completed` | Items the previous session reported as done |
-| `open_plans` | PLAN IDs with non-terminal status |
 | `session_digest` | Compressed event log from the closing session |
 
 **Treat `carry` as a claim, not truth.** Before acting on it:
@@ -77,13 +76,13 @@ true (FR-L1-31 session log, FR-L1-42 handover state).
 1. Run `git log --oneline -20` and cross-check completed work against actual
    commits.
 2. Run `ut-tdd doctor` to confirm structural state.
-3. Run `ut-tdd status` to see the current drive mode and open PLANs.
+3. Run `ut-tdd status` to confirm the runtime and check active Issues and PRs on GitHub.
 4. Any carry item that conflicts with `git log` or `doctor` output is stale —
    update or remove it before proceeding.
 
 ## Session-close procedure
 
-At any PLAN completion or session boundary:
+At the end of a work item or session:
 
 ```
 ut-tdd handover
@@ -106,24 +105,21 @@ session-close evidence. Do not rely on the handover narrative alone.
    (timestamp within ~24 hours).
 2. Verify each `carry` item against `git log` and current file state — do not
    re-report items that are already committed.
-3. Check `open_plans` against `ut-tdd doctor` output — a PLAN listed as open
-   but absent from governance is a stale handover entry.
+3. Reconcile the listed items with current GitHub Issues and PRs.
 4. Proceed with the verified carry, not the raw handover text.
 
 ## Session log and digests
 
-The `SessionStart` and `Stop` hooks write to `src/runtime/session-log.ts`. Each
-session compresses into a PLAN digest in `harness.db`. Digests are queryable via
-`ut-tdd metrics skill` and `ut-tdd find <query>`. Session log entries store metadata only —
-never prompt text, credentials, or PII.
+The `SessionStart` and `Stop` hooks use `src/runtime/session-log.ts`. Session
+logs provide metadata for the runtime summary. Use the committed head, Issue,
+and PR for durable work and review evidence.
 
 ## Staleness and multi-session gaps
 
 A `CURRENT.json` older than 24 hours should be treated as potentially stale.
 Verify open items from scratch rather than propagating possibly outdated carry.
-If multiple sessions have elapsed without a handover flush, run `ut-tdd db
-rebuild` to re-project harness state from the current `docs/plans/` and
-`.ut-tdd/` on-disk state.
+If multiple sessions have elapsed, check the repository and GitHub state before
+using any carry item.
 
 ## Anti-patterns
 

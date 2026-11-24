@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -9,6 +9,7 @@ import {
   EXPECTED_CONTRACT_COUNT,
   EXPECTED_CONTRACT_IDS,
   EXPECTED_ORACLE_COUNT,
+  EXPECTED_ORACLE_IDS,
   type LaneDeclaration,
   parseContractMappingRows,
   parseFreezeAttributeRows,
@@ -17,17 +18,15 @@ import {
   REAL_RUNNER_LANES,
   resourceKernelPairMappingMessages,
 } from "../src/lint/resource-kernel-pair-mapping.ts";
-import { workspaceRead } from "./support/workspace-roots.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
+import { headSnapshotRoot, workspaceRead } from "./support/workspace-roots.ts";
 
 const L8_DOC = "docs/test-design/harness/L8-integration-test-design.md";
-const L5_DOC = "docs/plans/PLAN-L5-25-resource-kernel-physical-protocol.md";
+const L5_CANONICAL_DOC = "docs/design/harness/L5-detailed-design/resource-kernel-wire-custody.md";
 
 function snapshotRoot(): string {
-  return workspaceRead({
-    id: "U-RGKPAIR",
-    mode: "head_snapshot",
-    reason: "D0-R の L5↔L8 pair 写像は HEAD の 2 doc を突合して判定する",
-  });
+  // U-RGKPAIR: D0-R の L5↔L8 pair 写像は immutable HEAD の 2 doc を突合して判定する。
+  return headSnapshotRoot();
 }
 
 function loadRepoRows() {
@@ -35,9 +34,37 @@ function loadRepoRows() {
   const l8Markdown = readFileSync(join(root, L8_DOC), "utf8");
   return {
     freezeRows: parseFreezeAttributeRows(l8Markdown),
-    mappingRows: parseContractMappingRows(readFileSync(join(root, L5_DOC), "utf8")),
+    mappingRows: parseContractMappingRows(readFileSync(join(root, L5_CANONICAL_DOC), "utf8")),
     laneDeclarations: parseLaneDeclarations(l8Markdown),
     declaredRealRunnerTotal: parseRealRunnerTotal(l8Markdown),
+  };
+}
+
+/** 正本 L5 と L8 だけを置く、docs/plans/ 不在の候補 snapshot。 */
+function planlessPairFixture(): { root: string; cleanup: () => void } {
+  const source = snapshotRoot();
+  const root = mkdtempSync(join(tmpdir(), "rgk-pair-planless-"));
+  for (const rel of [L8_DOC, L5_CANONICAL_DOC]) {
+    const target = join(root, rel);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, readFileSync(join(source, rel), "utf8"), "utf8");
+  }
+  const isolatedRoot = workspaceRead({
+    id: "U-RGKPAIR-PLANLESS-001",
+    mode: "isolated_fixture",
+    root,
+    reason: "候補RedはL5 canonical文書とL8 freeze表だけのsnapshotでgate readerを検証する",
+  });
+  return { root: isolatedRoot, cleanup: () => removeTestTree(root) };
+}
+
+function parsePlanlessPair(root: string) {
+  const l8 = readFileSync(join(root, L8_DOC), "utf8");
+  return {
+    freezeRows: parseFreezeAttributeRows(l8),
+    mappingRows: parseContractMappingRows(readFileSync(join(root, L5_CANONICAL_DOC), "utf8")),
+    laneDeclarations: parseLaneDeclarations(l8),
+    declaredRealRunnerTotal: parseRealRunnerTotal(l8),
   };
 }
 
@@ -50,19 +77,38 @@ function mutatedRepo(mutate: (docs: { l8: string; l5: string }) => { l8: string;
   const root = mkdtempSync(join(tmpdir(), "rgk-pair-doctor-"));
   const docs = mutate({
     l8: readFileSync(join(source, L8_DOC), "utf8"),
-    l5: readFileSync(join(source, L5_DOC), "utf8"),
+    l5: readFileSync(join(source, L5_CANONICAL_DOC), "utf8"),
   });
   for (const [rel, text] of [
     [L8_DOC, docs.l8],
-    [L5_DOC, docs.l5],
+    [L5_CANONICAL_DOC, docs.l5],
   ] as const) {
     mkdirSync(dirname(join(root, rel)), { recursive: true });
     writeFileSync(join(root, rel), text, "utf8");
   }
-  return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, cleanup: () => removeTestTree(root) };
 }
 
 describe("Resource Kernel L5↔L8 pair mapping lint (U-RGKPAIR, PLAN-L5-25 §7.1)", () => {
+  it("U-RGKPAIR-PLANLESS-001 setup: planless fixture has 58 real D.5 rows and 42 L8 rows", () => {
+    const fixture = planlessPairFixture();
+    try {
+      expect(existsSync(join(fixture.root, "docs/plans"))).toBe(false);
+      expect(existsSync(join(fixture.root, L5_CANONICAL_DOC))).toBe(true);
+      const l5Text = readFileSync(join(fixture.root, L5_CANONICAL_DOC), "utf8");
+      expect(l5Text).toContain("### D.5 ");
+      const sourceIds = [...l5Text.matchAll(/^\| `((?:C-RGK-\d{2}))` \|/gm)].map(
+        (match) => match[1],
+      );
+      expect(sourceIds).toEqual([...EXPECTED_CONTRACT_IDS]);
+      expect(
+        parseFreezeAttributeRows(readFileSync(join(fixture.root, L8_DOC), "utf8")),
+      ).toHaveLength(42);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   it("U-RGKPAIR-001: 実 repo の freeze 属性表は 42 件・欠番 0・全属性充填・lane 語彙内", () => {
     const { freezeRows } = loadRepoRows();
     expect(freezeRows).toHaveLength(42);
@@ -523,7 +569,118 @@ describe("Resource Kernel L5↔L8 pair mapping lint (U-RGKPAIR, PLAN-L5-25 §7.1
       expect(result.ok).toBe(false);
       expect(result.messages.join(" ")).toContain("読めなかった");
     } finally {
-      rmSync(unreadable, { recursive: true, force: true });
+      removeTestTree(unreadable);
+    }
+  });
+
+  it("U-RGKPAIR-PLANLESS-001: L5 canonical D.5 parserが58契約行を読む", () => {
+    const fixture = planlessPairFixture();
+    try {
+      const parsed = parsePlanlessPair(fixture.root);
+      expect(parsed.mappingRows).toHaveLength(58);
+      expect(parsed.mappingRows.map((row) => row.contractId)).toEqual([...EXPECTED_CONTRACT_IDS]);
+      const direct = analyzeResourceKernelPairMapping(parsed);
+      expect(direct.ok).toBe(true);
+      expect(direct.contractIdsMissing).toEqual([]);
+      expect(direct.oraclesMissingFromMapping).toEqual([]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("U-RGKPAIR-PLANLESS-001: PLANなしsnapshotでdoctor readerがcanonical L5/L8を読む", () => {
+    const fixture = planlessPairFixture();
+    try {
+      const gate = checkResourceKernelPairMapping(fixture.root);
+      expect(gate.ok).toBe(true);
+      expect(gate.messages.join(" ")).toContain("resource-kernel-pair-mapping — OK");
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("U-RGKPAIR-PLANLESS-002: planless正本の契約・oracle集合変異をID付きでfail-closeする", () => {
+    const fixture = planlessPairFixture();
+    try {
+      const base = parsePlanlessPair(fixture.root);
+      expect(base.mappingRows).toHaveLength(58);
+      expect(base.freezeRows).toHaveLength(42);
+      expect(analyzeResourceKernelPairMapping(base).ok).toBe(true);
+
+      const missingContract = analyzeResourceKernelPairMapping({
+        ...base,
+        mappingRows: base.mappingRows.filter((row) => row.contractId !== "C-RGK-01"),
+      });
+      expect(missingContract.contractIdsMissing).toEqual(["C-RGK-01"]);
+
+      const duplicateContract = analyzeResourceKernelPairMapping({
+        ...base,
+        mappingRows: [...base.mappingRows, base.mappingRows[0]],
+      });
+      expect(duplicateContract.contractIdsDuplicated).toEqual(["C-RGK-01"]);
+
+      const unknownContract = analyzeResourceKernelPairMapping({
+        ...base,
+        mappingRows: base.mappingRows.map((row, i) =>
+          i === 0 ? { ...row, contractId: "C-RGK-99" } : row,
+        ),
+      });
+      expect(unknownContract.contractIdsUnknown).toEqual(["C-RGK-99"]);
+
+      const missingOracle = analyzeResourceKernelPairMapping({
+        ...base,
+        freezeRows: base.freezeRows.filter((row) => row.id !== "IT-RGK-PHYS-001"),
+      });
+      expect(missingOracle.oracleIdsMissing).toEqual(["IT-RGK-PHYS-001"]);
+
+      const duplicateOracle = analyzeResourceKernelPairMapping({
+        ...base,
+        freezeRows: [...base.freezeRows, base.freezeRows[0]],
+      });
+      expect(duplicateOracle.oracleIdsDuplicated).toEqual(["IT-RGK-PHYS-001"]);
+
+      const unknownOracle = analyzeResourceKernelPairMapping({
+        ...base,
+        freezeRows: base.freezeRows.map((row, i) =>
+          i === 0 ? { ...row, id: "IT-RGK-PHYS-099" } : row,
+        ),
+      });
+      expect(unknownOracle.oracleIdsUnknown).toEqual(["IT-RGK-PHYS-099"]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("U-RGKPAIR-PLANLESS-003: edge 004→028とoracle 004欠落を別々に検出する", () => {
+    const fixture = planlessPairFixture();
+    try {
+      const base = parsePlanlessPair(fixture.root);
+      expect(base.mappingRows).toHaveLength(58);
+      expect(base.freezeRows).toHaveLength(42);
+      expect(analyzeResourceKernelPairMapping(base).ok).toBe(true);
+
+      const changedEdge = analyzeResourceKernelPairMapping({
+        ...base,
+        mappingRows: base.mappingRows.map((row) =>
+          row.contractId === "C-RGK-34"
+            ? {
+                ...row,
+                oracles: row.oracles.map((id) =>
+                  id === EXPECTED_ORACLE_IDS[3] ? EXPECTED_ORACLE_IDS[27] : id,
+                ),
+              }
+            : row,
+        ),
+      });
+      expect(changedEdge.oraclesMissingFromMapping).toEqual([EXPECTED_ORACLE_IDS[3]]);
+
+      const removedOracle = analyzeResourceKernelPairMapping({
+        ...base,
+        freezeRows: base.freezeRows.filter((row) => row.id !== EXPECTED_ORACLE_IDS[3]),
+      });
+      expect(removedOracle.oraclesMissingFromFreeze).toEqual([EXPECTED_ORACLE_IDS[3]]);
+    } finally {
+      fixture.cleanup();
     }
   });
 });

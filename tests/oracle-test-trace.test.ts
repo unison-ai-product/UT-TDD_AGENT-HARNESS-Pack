@@ -1,21 +1,27 @@
 // PLAN-REVERSE-41 塊B: oracle 宣言 ⇔ 実テスト citation の突合 (IMP-128、forward-citation 規律)。
 // test-design 宣言 oracle (U-*/IT-*/ST-*/P-*/M-*) が tests/ に ID citation を持つか。NEW は fail、
 // 既存 89 は baseline、検出範囲拡張 (issue #165 / PLAN-L7-480) の 344 は widened baseline。
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   analyzeOracleTestTrace,
+  checkOracleBaselineRatchet,
   collectOracleCitationSites,
   collectOracleDeclarationSites,
   collectOracleIds,
   loadOracleTestTraceInput,
   ORACLE_ID_DUPLICATE_BASELINE,
-  ORACLE_TEST_CITATION_BASELINE,
-  ORACLE_TEST_TRACE_BASELINE,
-  ORACLE_TEST_TRACE_WIDENED_BASELINE,
+  type OracleBaselineRatchetInput,
+  type OracleBaselineRatchetResult,
+  OracleTestTraceLoadError,
+  type OracleTraceAuthority,
+  type OracleTraceGitPath,
 } from "../src/lint/oracle-test-trace.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 /** test-design fixture を作り、規定パターンでの宣言収集だけを隔離検証する。 */
 function declarationFixture(markdown: string): string {
@@ -32,6 +38,1254 @@ function citationFixture(source: string): string {
   writeFileSync(join(root, "tests", "sample.test.ts"), source, "utf8");
   return root;
 }
+
+type BaselineValues = {
+  legacy: unknown[];
+  widened: unknown[];
+  citations: unknown[];
+};
+
+function baselineJson(overrides: Partial<BaselineValues> = {}): string {
+  return JSON.stringify({
+    schemaVersion: 2,
+    legacy: [],
+    widened: [],
+    citations: [],
+    ...overrides,
+  });
+}
+
+function observeBaselineLoadFailure(
+  subjectRoot: string,
+  authority: OracleTraceAuthority,
+  assert: (reads: string[], caught: unknown) => void,
+): void {
+  try {
+    const reads: string[] = [];
+    let caught: unknown;
+    try {
+      loadOracleTestTraceInput(subjectRoot, {
+        authority: {
+          readText(path) {
+            reads.push(path);
+            return authority.readText(path);
+          },
+        },
+      });
+    } catch (error) {
+      caught = error;
+    }
+    assert(reads, caught);
+  } finally {
+    removeTestTree(subjectRoot);
+  }
+}
+
+function baselineSubjectFixture(): string {
+  const root = declarationFixture("");
+  mkdirSync(join(root, "tests"), { recursive: true });
+  return root;
+}
+
+function fixedBaselineAuthority(text: string | null): OracleTraceAuthority {
+  return { readText: () => ({ ok: true, value: text }) };
+}
+
+function failedBaselineAuthority(): OracleTraceAuthority {
+  return { readText: () => ({ ok: false, reason: "authority_read_failed" }) };
+}
+
+const RATC_MERGE_SHA = "a".repeat(40);
+const RATC_BASE_SHA = "b".repeat(40);
+const RATC_JSON_PATH = "docs/governance/oracle-test-trace-baseline.json" as const;
+// Immutable migration-foot baseline: this is historical input for the ratchet's unit Git port only,
+// not a fallback/current baseline authority. Keep the ratchet fixture available after Green retires
+// the three source files; the repository path below is only where `git show` is run.
+const RATC_HISTORICAL_FIXTURE_COMMIT = "25bde95e623bce25e75fd285af204bc780412b79";
+const RATC_OLD_SOURCE_PATHS = [
+  "src/lint/oracle-test-trace-baseline.ts",
+  "src/lint/oracle-test-trace-widened-baseline.ts",
+  "src/lint/oracle-test-citation-baseline.ts",
+] as const;
+const RATC_OLD_EXPORTS = [
+  "ORACLE_TEST_TRACE_BASELINE",
+  "ORACLE_TEST_TRACE_WIDENED_BASELINE",
+  "ORACLE_TEST_CITATION_BASELINE",
+] as const;
+
+function gitShowOldBaselineSources(): readonly [string, string, string] {
+  return RATC_OLD_SOURCE_PATHS.map((path) =>
+    execFileSync("git", ["show", `${RATC_HISTORICAL_FIXTURE_COMMIT}:${path}`], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    }),
+  ) as unknown as readonly [string, string, string];
+}
+
+function parseExportedSet(source: string, exportName: string): string[] {
+  const marker = `export const ${exportName}: ReadonlySet<string> = new Set([`;
+  const start = source.indexOf(marker);
+  const end = source.indexOf("\n]);", start);
+  if (start < 0 || end < 0) throw new Error(`Could not parse Git source export ${exportName}`);
+  return [...source.slice(start + marker.length, end).matchAll(/^\s*"([^"]+)"[,]?\s*$/gm)].map(
+    (match) => match[1],
+  );
+}
+
+const RATC_OLD_SOURCE_BLOBS = gitShowOldBaselineSources();
+const RATC_OLD_SETS = {
+  legacy: parseExportedSet(RATC_OLD_SOURCE_BLOBS[0], RATC_OLD_EXPORTS[0]),
+  widened: parseExportedSet(RATC_OLD_SOURCE_BLOBS[1], RATC_OLD_EXPORTS[1]),
+  citations: parseExportedSet(RATC_OLD_SOURCE_BLOBS[2], RATC_OLD_EXPORTS[2]),
+};
+if (
+  RATC_OLD_SETS.legacy.length !== 89 ||
+  RATC_OLD_SETS.widened.length !== 317 ||
+  RATC_OLD_SETS.citations.length !== 582
+) {
+  throw new Error("Git baseline source fixture cardinality drifted from the migration contract");
+}
+if (
+  new Set(RATC_OLD_SETS.legacy).size !== RATC_OLD_SETS.legacy.length ||
+  new Set(RATC_OLD_SETS.widened).size !== RATC_OLD_SETS.widened.length ||
+  new Set(RATC_OLD_SETS.citations).size !== RATC_OLD_SETS.citations.length ||
+  RATC_OLD_SETS.legacy.some((id) => RATC_OLD_SETS.widened.includes(id)) ||
+  !RATC_OLD_SETS.legacy.includes("U-ASSETDRIFT-001") ||
+  !RATC_OLD_SETS.citations.includes("U-ADAPTER-005") ||
+  !RATC_OLD_SETS.legacy.includes("U-RDRIFT-004") ||
+  !RATC_OLD_SETS.citations.includes("U-RDRIFT-004")
+) {
+  throw new Error(
+    "Git baseline source fixture does not match the ratchet selectors/overlap contract",
+  );
+}
+
+type RatchetBaseline = { legacy: string[]; widened: string[]; citations: string[] };
+type RatchetBlob =
+  | { ok: true; value: string | null }
+  | { ok: false; reason: "git_object_read_failed" };
+type RatchetBlobOverride = readonly [string, OracleTraceGitPath, RatchetBlob];
+
+function baselineFromOldSources(): RatchetBaseline {
+  return {
+    legacy: [...RATC_OLD_SETS.legacy],
+    widened: [...RATC_OLD_SETS.widened],
+    citations: [...RATC_OLD_SETS.citations],
+  };
+}
+
+function ratchetBaselineJson(value: RatchetBaseline): string {
+  return baselineJson(value);
+}
+
+function updateRatchetBaseline(
+  changes: Partial<Record<keyof RatchetBaseline, { add?: string[]; remove?: string[] }>>,
+): RatchetBaseline {
+  const result = baselineFromOldSources();
+  for (const axis of ["legacy", "widened", "citations"] as const) {
+    const change = changes[axis];
+    if (change === undefined) continue;
+    result[axis] = result[axis].filter((id) => !change.remove?.includes(id));
+    result[axis].push(...(change.add ?? []));
+  }
+  return result;
+}
+
+type RatchetObservation = {
+  result: OracleBaselineRatchetResult;
+  firstParentCalls: string[];
+  blobCalls: Array<readonly [string, OracleTraceGitPath]>;
+  authorityReadCount: number;
+};
+
+type RatchetFixtureOptions = {
+  eventName?: string | null;
+  mergeSha?: string | null;
+  firstParentResult?:
+    | { ok: true; value: string | null }
+    | { ok: false; reason: "git_first_parent_read_failed" };
+  baseJson?: string | null;
+  headJson?: string | null;
+  includeOldSourceBlobs?: boolean;
+  blobOverrides?: readonly RatchetBlobOverride[];
+};
+
+function runRatchetFixture(options: RatchetFixtureOptions = {}): RatchetObservation {
+  const blobs = new Map<string, RatchetBlob>();
+  const key = (sha: string, path: OracleTraceGitPath) => `${sha}:${path}`;
+  const baseJson =
+    options.baseJson === undefined
+      ? ratchetBaselineJson(baselineFromOldSources())
+      : options.baseJson;
+  const headJson =
+    options.headJson === undefined
+      ? ratchetBaselineJson(baselineFromOldSources())
+      : options.headJson;
+  blobs.set(key(RATC_BASE_SHA, RATC_JSON_PATH), { ok: true, value: baseJson });
+  blobs.set(key(RATC_MERGE_SHA, RATC_JSON_PATH), { ok: true, value: headJson });
+  if (options.includeOldSourceBlobs) {
+    RATC_OLD_SOURCE_PATHS.forEach((path, index) => {
+      blobs.set(key(RATC_BASE_SHA, path), { ok: true, value: RATC_OLD_SOURCE_BLOBS[index] });
+    });
+  }
+  for (const [sha, path, response] of options.blobOverrides ?? []) {
+    blobs.set(key(sha, path), response);
+  }
+
+  const firstParentCalls: string[] = [];
+  const blobCalls: Array<readonly [string, OracleTraceGitPath]> = [];
+  let authorityReadCount = 0;
+  const eventName = Object.hasOwn(options, "eventName") ? options.eventName : "pull_request";
+  const mergeSha = Object.hasOwn(options, "mergeSha") ? options.mergeSha : RATC_MERGE_SHA;
+  const input = {
+    authority: {
+      readText() {
+        authorityReadCount += 1;
+        return { ok: false, reason: "authority_read_failed" as const };
+      },
+    },
+    ci: {
+      eventName,
+      mergeSha,
+      git: {
+        readFirstParent(sha: string) {
+          firstParentCalls.push(sha);
+          return options.firstParentResult ?? { ok: true as const, value: RATC_BASE_SHA };
+        },
+        readTextAt(sha: string, path: OracleTraceGitPath) {
+          blobCalls.push([sha, path]);
+          return blobs.get(key(sha, path)) ?? { ok: true as const, value: null };
+        },
+      },
+    },
+  } as unknown as OracleBaselineRatchetInput;
+  const result = checkOracleBaselineRatchet(input);
+  return { result, firstParentCalls, blobCalls, authorityReadCount };
+}
+
+function expectRatchetResultAndReads(
+  observation: RatchetObservation,
+  expectedResult: OracleBaselineRatchetResult,
+  expectedParents: readonly string[],
+  expectedBlobs: readonly (readonly [string, OracleTraceGitPath])[],
+): void {
+  expect(observation.result).toEqual(expectedResult);
+  expect(observation.firstParentCalls).toEqual(expectedParents);
+  expect(observation.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+    expectedBlobs.map(([sha, path]) => `${sha}:${path}`).sort(),
+  );
+  expect(observation.authorityReadCount).toBe(0);
+}
+
+function expectMigrationJsonMatchesOldSources(text: string): void {
+  const value = JSON.parse(text) as RatchetBaseline & { schemaVersion: number };
+  expect(value.schemaVersion).toBe(2);
+  expect(value.legacy.length).toBe(89);
+  expect(value.widened.length).toBe(317);
+  expect(value.citations.length).toBe(582);
+  expect([...value.legacy].sort()).toEqual([...RATC_OLD_SETS.legacy].sort());
+  expect([...value.widened].sort()).toEqual([...RATC_OLD_SETS.widened].sort());
+  expect([...value.citations].sort()).toEqual([...RATC_OLD_SETS.citations].sort());
+}
+
+function expectAnalyzerClean(result: ReturnType<typeof analyzeOracleTestTrace>): void {
+  expect(result.orphans).toEqual([]);
+  expect(result.duplicates).toEqual([]);
+  expect(result.staleDuplicateBaseline).toEqual([]);
+  expect(result.undeclaredCitations).toEqual([]);
+  expect(result.staleCitationBaseline).toEqual([]);
+  expect(result.ok).toBe(true);
+}
+
+function forwardDebtForAxis(
+  axis: "legacy" | "widened",
+  declared: readonly string[],
+  referenced: ReadonlySet<string>,
+  baseline: RatchetBaseline,
+): string[] {
+  return declared
+    .filter(
+      (id) =>
+        !referenced.has(id) &&
+        (axis === "legacy" ? !baseline.widened.includes(id) : !baseline.legacy.includes(id)),
+    )
+    .sort();
+}
+
+function citationSites(ids: readonly string[]) {
+  return ids.map((id, index) => ({
+    id,
+    path: "tests/debt.test.ts",
+    line: index + 1,
+    kind: "static-test-label" as const,
+  }));
+}
+
+function forwardAxisAnalyzerFixture(
+  axis: "legacy" | "widened",
+  head: RatchetBaseline,
+  referenced: ReadonlySet<string>,
+) {
+  const declared = [...new Set([...head.legacy, ...head.widened])];
+  return {
+    derived: forwardDebtForAxis(axis, declared, referenced, head),
+    analysis: analyzeOracleTestTrace({
+      declared,
+      referenced: new Set(referenced),
+      baseline: new Set(head.legacy),
+      widenedBaseline: new Set(head.widened),
+    }),
+  };
+}
+
+function citationAxisAnalyzerFixture(head: RatchetBaseline) {
+  const sites = citationSites(head.citations);
+  return {
+    derived: [...new Set(sites.map((site) => site.id))].sort(),
+    analysis: analyzeOracleTestTrace({
+      declared: [],
+      referenced: new Set(),
+      baseline: new Set(),
+      widenedBaseline: new Set(),
+      citationSites: sites,
+      citationBaseline: new Set(head.citations),
+    }),
+  };
+}
+
+describe("oracle baseline authority decode (U-OIDBASE-002/003)", () => {
+  it("U-OIDBASE-002: 欠落したJSON authorityはtyped missing errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(subjectRoot, fixedBaselineAuthority(null), (reads, caught) => {
+      expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+      expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+      expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+        "baseline_asset_missing",
+      );
+    });
+  });
+
+  it("U-OIDBASE-002: authority reader I/O失敗はtyped errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(subjectRoot, failedBaselineAuthority(), (reads, caught) => {
+      expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+      expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+      expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+        "authority_read_failed",
+      );
+    });
+  });
+
+  it("U-OIDBASE-002: malformed JSONはtyped decode errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(subjectRoot, fixedBaselineAuthority("{"), (reads, caught) => {
+      expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+      expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+      expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+        "baseline_json_malformed",
+      );
+    });
+  });
+
+  it("U-OIDBASE-002: schemaVersion不一致はschema errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(
+        JSON.stringify({ schemaVersion: 1, legacy: [], widened: [], citations: [] }),
+      ),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_schema_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-002: schemaVersion欠落はschema errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(JSON.stringify({ legacy: [], widened: [], citations: [] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_schema_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-002: legacy欠落はschema errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(JSON.stringify({ schemaVersion: 2, widened: [], citations: [] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_schema_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-002: widened欠落はschema errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(JSON.stringify({ schemaVersion: 2, legacy: [], citations: [] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_schema_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-002: citations欠落はschema errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(JSON.stringify({ schemaVersion: 2, legacy: [], widened: [] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_schema_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-002: schemaVersionの型違いはschema errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(
+        JSON.stringify({ schemaVersion: "2", legacy: [], widened: [], citations: [] }),
+      ),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_schema_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-002: legacyの型違いはschema errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(
+        JSON.stringify({ schemaVersion: 2, legacy: "U-ZZBASE-001", widened: [], citations: [] }),
+      ),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_schema_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-002: widenedの型違いはschema errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(
+        JSON.stringify({ schemaVersion: 2, legacy: [], widened: "U-ZZBASE-001", citations: [] }),
+      ),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_schema_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-002: 未知fieldはschema errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(
+        JSON.stringify({ schemaVersion: 2, legacy: [], widened: [], citations: [], extra: true }),
+      ),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_schema_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-002: citationsの型違いはschema errorで拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(
+        JSON.stringify({ schemaVersion: 2, legacy: [], widened: [], citations: "U-ZZBASE-001" }),
+      ),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_schema_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-003: legacy内の不正ID tokenは集合化前に拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(baselineJson({ legacy: ["not-an-oracle-id"] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_id_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-003: widened内の不正ID tokenは集合化前に拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(baselineJson({ widened: ["not-an-oracle-id"] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_id_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-003: citations内の不正ID tokenは集合化前に拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(baselineJson({ citations: ["not-an-oracle-id"] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_id_invalid",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-003: legacy内の重複IDは集合化前に拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(baselineJson({ legacy: ["U-ZZBASE-001", "U-ZZBASE-001"] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_id_duplicate",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-003: widened内の重複IDは集合化前に拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(baselineJson({ widened: ["U-ZZBASE-001", "U-ZZBASE-001"] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_id_duplicate",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-003: citations内の重複IDは集合化前に拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(baselineJson({ citations: ["U-ZZBASE-001", "U-ZZBASE-001"] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_id_duplicate",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-003: legacyとwidenedの重複は拒否される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    observeBaselineLoadFailure(
+      subjectRoot,
+      fixedBaselineAuthority(baselineJson({ legacy: ["U-ZZBASE-001"], widened: ["U-ZZBASE-001"] })),
+      (reads, caught) => {
+        expect(reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+        expect(caught).toBeInstanceOf(OracleTestTraceLoadError);
+        expect((caught as OracleTestTraceLoadError | undefined)?.reason).toBe(
+          "baseline_sets_overlap",
+        );
+      },
+    );
+  });
+
+  it("U-OIDBASE-003: citationsとlegacyのcross-set overlapは許可される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    try {
+      const input = loadOracleTestTraceInput(subjectRoot, {
+        authority: fixedBaselineAuthority(
+          baselineJson({ legacy: ["U-RDRIFT-004"], citations: ["U-RDRIFT-004"] }),
+        ),
+      });
+      expect(input.citationBaseline).toBeDefined();
+      expect([...input.baseline]).toEqual(["U-RDRIFT-004"]);
+      expect([...(input.citationBaseline as ReadonlySet<string>)]).toEqual(["U-RDRIFT-004"]);
+    } finally {
+      removeTestTree(subjectRoot);
+    }
+  });
+
+  it("U-OIDBASE-003: citationsとwidenedのcross-set overlapは許可される", () => {
+    const subjectRoot = baselineSubjectFixture();
+    try {
+      const input = loadOracleTestTraceInput(subjectRoot, {
+        authority: fixedBaselineAuthority(
+          baselineJson({ widened: ["U-RDRIFT-004"], citations: ["U-RDRIFT-004"] }),
+        ),
+      });
+      expect(input.citationBaseline).toBeDefined();
+      expect([...input.widenedBaseline]).toEqual(["U-RDRIFT-004"]);
+      expect([...(input.citationBaseline as ReadonlySet<string>)]).toEqual(["U-RDRIFT-004"]);
+    } finally {
+      removeTestTree(subjectRoot);
+    }
+  });
+
+  it("U-OIDBASE-008: explicit authorityはsubject rootやprocess cwdに依存しない", () => {
+    const subjectRoot = baselineSubjectFixture();
+    let cwdOne: string | undefined;
+    let cwdTwo: string | undefined;
+
+    try {
+      cwdOne = mkdtempSync(join(tmpdir(), "ut-tdd-oidbase-cwd-one-"));
+      cwdTwo = mkdtempSync(join(tmpdir(), "ut-tdd-oidbase-cwd-two-"));
+      const subjectJsonPath = join(
+        subjectRoot,
+        "docs",
+        "governance",
+        "oracle-test-trace-baseline.json",
+      );
+      const subjectDesignPath = join(subjectRoot, "docs", "test-design", "L7.md");
+      mkdirSync(join(subjectRoot, "docs", "governance"), { recursive: true });
+      mkdirSync(join(cwdOne, "docs", "governance"), { recursive: true });
+      mkdirSync(join(cwdTwo, "docs", "governance"), { recursive: true });
+      mkdirSync(join(cwdOne, "docs", "test-design"), { recursive: true });
+      mkdirSync(join(cwdTwo, "docs", "test-design"), { recursive: true });
+      mkdirSync(join(cwdOne, "tests"), { recursive: true });
+      mkdirSync(join(cwdTwo, "tests"), { recursive: true });
+      writeFileSync(subjectJsonPath, baselineJson({ legacy: ["U-ZZSUBJECT-001"] }), "utf8");
+      writeFileSync(
+        subjectDesignPath,
+        [
+          "| U-ID | 対象 | oracle |",
+          "|---|---|---|",
+          "| `U-ZZSUBJECT-001` | subject | expected |",
+        ].join("\n"),
+        "utf8",
+      );
+      writeFileSync(
+        join(cwdOne, "docs", "governance", "oracle-test-trace-baseline.json"),
+        baselineJson({ legacy: ["U-ZZCWD-ONE-001"] }),
+        "utf8",
+      );
+      writeFileSync(
+        join(cwdOne, "docs", "test-design", "L7.md"),
+        [
+          "| U-ID | 対象 | oracle |",
+          "|---|---|---|",
+          "| `U-ZZCWD-ONE-001` | cwd | expected |",
+        ].join("\n"),
+        "utf8",
+      );
+      writeFileSync(
+        join(cwdTwo, "docs", "governance", "oracle-test-trace-baseline.json"),
+        baselineJson({ legacy: ["U-ZZCWD-TWO-001"] }),
+        "utf8",
+      );
+      writeFileSync(
+        join(cwdTwo, "docs", "test-design", "L7.md"),
+        [
+          "| U-ID | 対象 | oracle |",
+          "|---|---|---|",
+          "| `U-ZZCWD-TWO-001` | cwd | expected |",
+        ].join("\n"),
+        "utf8",
+      );
+      writeFileSync(
+        join(subjectRoot, "tests", "subject.test.ts"),
+        'it("U-ZZSUBJECT-001: subject", () => {});',
+        "utf8",
+      );
+      writeFileSync(
+        join(cwdOne, "tests", "cwd.test.ts"),
+        'it("U-ZZCWD-ONE-001: cwd", () => {});',
+        "utf8",
+      );
+      writeFileSync(
+        join(cwdTwo, "tests", "cwd.test.ts"),
+        'it("U-ZZCWD-TWO-001: cwd", () => {});',
+        "utf8",
+      );
+      const moduleUrl = pathToFileURL(
+        join(process.cwd(), "src", "lint", "oracle-test-trace.ts"),
+      ).href;
+      const authorityText = baselineJson({ legacy: ["U-ZZAUTH-001"] });
+      const script = `
+      const { loadOracleTestTraceInput } = await import(${JSON.stringify(moduleUrl)});
+      const subjectRoot = ${JSON.stringify(subjectRoot)};
+      const reads = [];
+      const input = loadOracleTestTraceInput(subjectRoot, {
+        authority: {
+          readText(path) {
+            reads.push(path);
+            return { ok: true, value: ${JSON.stringify(authorityText)} };
+          },
+        },
+      });
+      console.log(JSON.stringify({
+        baseline: [...input.baseline],
+        declared: input.declared,
+        referenced: [...input.referenced],
+        reads,
+      }));
+    `;
+
+      const resultAt = (cwd: string) =>
+        JSON.parse(
+          execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+            cwd,
+            encoding: "utf8",
+          }),
+        ) as { baseline: string[]; declared: string[]; referenced: string[]; reads: string[] };
+      const first = resultAt(cwdOne);
+      const second = resultAt(cwdTwo);
+      expect(first).toEqual(second);
+      expect(first.baseline).toEqual(["U-ZZAUTH-001"]);
+      expect(first.declared).toEqual(["U-ZZSUBJECT-001"]);
+      expect(first.referenced).toContain("U-ZZSUBJECT-001");
+      expect(first.declared).not.toContain("U-ZZCWD-ONE-001");
+      expect(first.declared).not.toContain("U-ZZCWD-TWO-001");
+      expect(first.reads).toEqual(["docs/governance/oracle-test-trace-baseline.json"]);
+    } finally {
+      removeTestTree(subjectRoot);
+      if (cwdOne !== undefined) removeTestTree(cwdOne);
+      if (cwdTwo !== undefined) removeTestTree(cwdTwo);
+    }
+  });
+});
+
+describe("trusted-base baseline ratchet bootstrap (CANDIDATE-U-OIDBASE-001/011/012)", () => {
+  const jsonPairReads = [
+    [RATC_BASE_SHA, RATC_JSON_PATH],
+    [RATC_MERGE_SHA, RATC_JSON_PATH],
+  ] as const;
+  const bootstrapReads = [
+    [RATC_BASE_SHA, RATC_JSON_PATH],
+    ...RATC_OLD_SOURCE_PATHS.map((path) => [RATC_BASE_SHA, path] as const),
+    [RATC_MERGE_SHA, RATC_JSON_PATH],
+  ] as const;
+
+  it("CANDIDATE-U-OIDBASE-001: initial migration accepts old TS blobs only when every set matches head JSON", () => {
+    const headJson = ratchetBaselineJson(baselineFromOldSources());
+    const observed = runRatchetFixture({
+      baseJson: null,
+      headJson,
+      includeOldSourceBlobs: true,
+    });
+    expectRatchetResultAndReads(observed, { ok: true }, [RATC_MERGE_SHA], bootstrapReads);
+    expectMigrationJsonMatchesOldSources(headJson);
+    expect(RATC_OLD_SOURCE_BLOBS[0]).toContain("export const ORACLE_TEST_TRACE_BASELINE");
+    expect(RATC_OLD_SOURCE_BLOBS[1]).toContain("export const ORACLE_TEST_TRACE_WIDENED_BASELINE");
+    expect(RATC_OLD_SOURCE_BLOBS[2]).toContain("export const ORACLE_TEST_CITATION_BASELINE");
+  });
+
+  it("CANDIDATE-U-OIDBASE-011: 正規bootstrap構造は旧89/317/582件と全要素一致で受理される", () => {
+    const headJson = ratchetBaselineJson(baselineFromOldSources());
+    const observed = runRatchetFixture({
+      baseJson: null,
+      headJson,
+      includeOldSourceBlobs: true,
+    });
+    expect(observed.result).toEqual({ ok: true });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      bootstrapReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+    const value = JSON.parse(headJson) as RatchetBaseline & { schemaVersion: number };
+    expect(value.schemaVersion).toBe(2);
+    expect(value.legacy.length).toBe(89);
+    expect(value.widened.length).toBe(317);
+    expect(value.citations.length).toBe(582);
+    expect([...value.legacy].sort()).toEqual([...RATC_OLD_SETS.legacy].sort());
+    expect([...value.widened].sort()).toEqual([...RATC_OLD_SETS.widened].sort());
+    expect([...value.citations].sort()).toEqual([...RATC_OLD_SETS.citations].sort());
+  });
+
+  it("CANDIDATE-U-OIDBASE-011: bootstrapに必要な旧blobの欠落はbase invalidで拒否される", () => {
+    const observed = runRatchetFixture({
+      baseJson: null,
+      headJson: ratchetBaselineJson(baselineFromOldSources()),
+      includeOldSourceBlobs: true,
+      blobOverrides: [[RATC_BASE_SHA, RATC_OLD_SOURCE_PATHS[0], { ok: true, value: null }]],
+    });
+    expect(observed.result).toEqual({ ok: false, reason: "bootstrap_base_invalid" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    const actualBlobCalls = observed.blobCalls.map(([sha, path]) => `${sha}:${path}`);
+    const allowedBlobCalls = new Set(bootstrapReads.map(([sha, path]) => `${sha}:${path}`));
+    expect(actualBlobCalls.every((call) => allowedBlobCalls.has(call))).toBe(true);
+    expect(actualBlobCalls).toContain(`${RATC_BASE_SHA}:${RATC_JSON_PATH}`);
+    expect(actualBlobCalls).toContain(`${RATC_BASE_SHA}:${RATC_OLD_SOURCE_PATHS[0]}`);
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("CANDIDATE-U-OIDBASE-011: 非正規の旧export shapeはbase invalidで拒否される", () => {
+    const observed = runRatchetFixture({
+      baseJson: null,
+      headJson: ratchetBaselineJson(baselineFromOldSources()),
+      includeOldSourceBlobs: true,
+      blobOverrides: [
+        [
+          RATC_BASE_SHA,
+          RATC_OLD_SOURCE_PATHS[0],
+          { ok: true, value: "export const WRONG = new Set([]);" },
+        ],
+      ],
+    });
+    expect(observed.result).toEqual({ ok: false, reason: "bootstrap_base_invalid" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    const actualBlobCalls = observed.blobCalls.map(([sha, path]) => `${sha}:${path}`);
+    const allowedBlobCalls = new Set(bootstrapReads.map(([sha, path]) => `${sha}:${path}`));
+    expect(actualBlobCalls.every((call) => allowedBlobCalls.has(call))).toBe(true);
+    expect(actualBlobCalls).toContain(`${RATC_BASE_SHA}:${RATC_JSON_PATH}`);
+    expect(actualBlobCalls).toContain(`${RATC_BASE_SHA}:${RATC_OLD_SOURCE_PATHS[0]}`);
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("CANDIDATE-U-OIDBASE-011: old source blob Git I/O failure returns an object read failure", () => {
+    const observed = runRatchetFixture({
+      baseJson: null,
+      headJson: ratchetBaselineJson(baselineFromOldSources()),
+      includeOldSourceBlobs: true,
+      blobOverrides: [
+        [RATC_BASE_SHA, RATC_OLD_SOURCE_PATHS[0], { ok: false, reason: "git_object_read_failed" }],
+      ],
+    });
+    expect(observed.result).toEqual({ ok: false, reason: "git_object_read_failed" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    const actualBlobCalls = observed.blobCalls.map(([sha, path]) => `${sha}:${path}`);
+    const allowedBlobCalls = new Set(bootstrapReads.map(([sha, path]) => `${sha}:${path}`));
+    expect(actualBlobCalls.every((call) => allowedBlobCalls.has(call))).toBe(true);
+    expect(actualBlobCalls).toContain(`${RATC_BASE_SHA}:${RATC_JSON_PATH}`);
+    expect(actualBlobCalls).toContain(`${RATC_BASE_SHA}:${RATC_OLD_SOURCE_PATHS[0]}`);
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("CANDIDATE-U-OIDBASE-011: 有効旧blobに対する同件数要素差分はvalue mismatch", () => {
+    const mismatched = updateRatchetBaseline({
+      legacy: { remove: ["U-ASSETDRIFT-001"], add: ["U-ZZBASE-901"] },
+    });
+    const headJson = ratchetBaselineJson(mismatched);
+    const observed = runRatchetFixture({ baseJson: null, headJson, includeOldSourceBlobs: true });
+    expectRatchetResultAndReads(
+      observed,
+      { ok: false, reason: "bootstrap_value_mismatch" },
+      [RATC_MERGE_SHA],
+      bootstrapReads,
+    );
+    expect(headJson).not.toEqual(ratchetBaselineJson(baselineFromOldSources()));
+    expect(JSON.parse(headJson).legacy.length).toBe(89);
+    expect(JSON.parse(headJson).legacy).not.toContain("U-ASSETDRIFT-001");
+    expect(JSON.parse(headJson).legacy).toContain("U-ZZBASE-901");
+  });
+
+  it.fails("CANDIDATE-U-OIDBASE-012: accept a normal JSON pair and reject old-bootstrap-only input", () => {
+    const normalPair = runRatchetFixture({ includeOldSourceBlobs: true });
+    expectRatchetResultAndReads(normalPair, { ok: true }, [RATC_MERGE_SHA], jsonPairReads);
+
+    const oldBootstrapOnly = runRatchetFixture({
+      baseJson: null,
+      headJson: ratchetBaselineJson(baselineFromOldSources()),
+      includeOldSourceBlobs: true,
+    });
+    expectRatchetResultAndReads(
+      oldBootstrapOnly,
+      { ok: false, reason: "git_baseline_missing" },
+      [RATC_MERGE_SHA],
+      [[RATC_BASE_SHA, RATC_JSON_PATH]],
+    );
+  });
+});
+
+describe("three independent subset axes (U-OIDBASE-005 / U-OIDBASE-006)", () => {
+  const jsonPairReads = [
+    [RATC_BASE_SHA, RATC_JSON_PATH],
+    [RATC_MERGE_SHA, RATC_JSON_PATH],
+  ] as const;
+
+  it("U-OIDBASE-005: legacy debtと対応derived IDの同時縮小を受理する", () => {
+    const id = "U-ASSETDRIFT-001";
+    const head = updateRatchetBaseline({ legacy: { remove: [id] } });
+    const observed = runRatchetFixture({ headJson: ratchetBaselineJson(head) });
+    expect(observed.result).toEqual({ ok: true });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      jsonPairReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+
+    const fixture = forwardAxisAnalyzerFixture("legacy", head, new Set([id]));
+    expect(fixture.derived).toEqual([...head.legacy].sort());
+    expect(fixture.analysis.orphans).toEqual([]);
+    expect(fixture.analysis.duplicates).toEqual([]);
+    expect(fixture.analysis.staleDuplicateBaseline).toEqual([]);
+    expect(fixture.analysis.undeclaredCitations).toEqual([]);
+    expect(fixture.analysis.staleCitationBaseline).toEqual([]);
+    expect(fixture.analysis.ok).toBe(true);
+  });
+
+  it("U-OIDBASE-005: widened debtと対応derived IDの同時縮小を受理する", () => {
+    const id = RATC_OLD_SETS.widened[0];
+    const head = updateRatchetBaseline({ widened: { remove: [id] } });
+    const observed = runRatchetFixture({ headJson: ratchetBaselineJson(head) });
+    expect(observed.result).toEqual({ ok: true });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      jsonPairReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+
+    const fixture = forwardAxisAnalyzerFixture("widened", head, new Set([id]));
+    expect(fixture.derived).toEqual([...head.widened].sort());
+    expect(fixture.analysis.orphans).toEqual([]);
+    expect(fixture.analysis.duplicates).toEqual([]);
+    expect(fixture.analysis.staleDuplicateBaseline).toEqual([]);
+    expect(fixture.analysis.undeclaredCitations).toEqual([]);
+    expect(fixture.analysis.staleCitationBaseline).toEqual([]);
+    expect(fixture.analysis.ok).toBe(true);
+  });
+
+  it("U-OIDBASE-005: citation siteとhead citation debtの同時縮小を受理する", () => {
+    const id = "U-ADAPTER-005";
+    const head = updateRatchetBaseline({ citations: { remove: [id] } });
+    const observed = runRatchetFixture({ headJson: ratchetBaselineJson(head) });
+    expect(observed.result).toEqual({ ok: true });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      jsonPairReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+    const fixture = citationAxisAnalyzerFixture(head);
+    expect(fixture.derived).toEqual([...head.citations].sort());
+    expect(fixture.analysis.orphans).toEqual([]);
+    expect(fixture.analysis.duplicates).toEqual([]);
+    expect(fixture.analysis.staleDuplicateBaseline).toEqual([]);
+    expect(fixture.analysis.undeclaredCitations).toEqual([]);
+    expect(fixture.analysis.staleCitationBaseline).toEqual([]);
+    expect(fixture.analysis.ok).toBe(true);
+  });
+
+  it("U-OIDBASE-006: derived equality passでもbase外legacy growthは拒否する", () => {
+    const id = "U-ZZBASE-901";
+    const head = updateRatchetBaseline({ legacy: { add: [id] } });
+    const observed = runRatchetFixture({ headJson: ratchetBaselineJson(head) });
+    expect(observed.result).toEqual({ ok: false, reason: "baseline_growth" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      jsonPairReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+
+    const fixture = forwardAxisAnalyzerFixture("legacy", head, new Set());
+    expect(fixture.derived).toEqual([...head.legacy].sort());
+    expect(fixture.analysis.orphans).toEqual([]);
+    expect(fixture.analysis.duplicates).toEqual([]);
+    expect(fixture.analysis.staleDuplicateBaseline).toEqual([]);
+    expect(fixture.analysis.undeclaredCitations).toEqual([]);
+    expect(fixture.analysis.staleCitationBaseline).toEqual([]);
+    expect(fixture.analysis.ok).toBe(true);
+  });
+
+  it("U-OIDBASE-006: derived equality passでもbase外widened growthは拒否する", () => {
+    const id = "U-ZZBASE-901";
+    const head = updateRatchetBaseline({ widened: { add: [id] } });
+    const observed = runRatchetFixture({ headJson: ratchetBaselineJson(head) });
+    expect(observed.result).toEqual({ ok: false, reason: "baseline_growth" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      jsonPairReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+
+    const fixture = forwardAxisAnalyzerFixture("widened", head, new Set());
+    expect(fixture.derived).toEqual([...head.widened].sort());
+    expect(fixture.analysis.orphans).toEqual([]);
+    expect(fixture.analysis.duplicates).toEqual([]);
+    expect(fixture.analysis.staleDuplicateBaseline).toEqual([]);
+    expect(fixture.analysis.undeclaredCitations).toEqual([]);
+    expect(fixture.analysis.staleCitationBaseline).toEqual([]);
+    expect(fixture.analysis.ok).toBe(true);
+  });
+
+  it("U-OIDBASE-006: derived equality passでもbase外citation growthは拒否する", () => {
+    const id = "U-ZZBASE-901";
+    const head = updateRatchetBaseline({ citations: { add: [id] } });
+    const observed = runRatchetFixture({ headJson: ratchetBaselineJson(head) });
+    expect(observed.result).toEqual({ ok: false, reason: "baseline_growth" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      jsonPairReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+    const fixture = citationAxisAnalyzerFixture(head);
+    expect(fixture.derived).toEqual([...head.citations].sort());
+    expect(fixture.analysis.orphans).toEqual([]);
+    expect(fixture.analysis.duplicates).toEqual([]);
+    expect(fixture.analysis.staleDuplicateBaseline).toEqual([]);
+    expect(fixture.analysis.undeclaredCitations).toEqual([]);
+    expect(fixture.analysis.staleCitationBaseline).toEqual([]);
+    expect(fixture.analysis.ok).toBe(true);
+  });
+
+  it("legacy debt shrinkのfixtureではderived equalityとanalyzer cleanが独立して成立する", () => {
+    const id = "U-ASSETDRIFT-001";
+    const head = updateRatchetBaseline({ legacy: { remove: [id] } });
+    const fixture = forwardAxisAnalyzerFixture("legacy", head, new Set([id]));
+    expect(fixture.derived).toEqual([...head.legacy].sort());
+    expectAnalyzerClean(fixture.analysis);
+  });
+
+  it("widened debt shrinkのfixtureではderived equalityとanalyzer cleanが独立して成立する", () => {
+    const id = RATC_OLD_SETS.widened[0];
+    const head = updateRatchetBaseline({ widened: { remove: [id] } });
+    const fixture = forwardAxisAnalyzerFixture("widened", head, new Set([id]));
+    expect(fixture.derived).toEqual([...head.widened].sort());
+    expectAnalyzerClean(fixture.analysis);
+  });
+
+  it("citation debt shrinkのfixtureではderived equalityとanalyzer cleanが独立して成立する", () => {
+    const head = updateRatchetBaseline({ citations: { remove: ["U-ADAPTER-005"] } });
+    const fixture = citationAxisAnalyzerFixture(head);
+    expect(fixture.derived).toEqual([...head.citations].sort());
+    expectAnalyzerClean(fixture.analysis);
+  });
+
+  it("legacy debt growthのfixtureではderived equalityとanalyzer cleanが独立して成立する", () => {
+    const head = updateRatchetBaseline({ legacy: { add: ["U-ZZBASE-901"] } });
+    const fixture = forwardAxisAnalyzerFixture("legacy", head, new Set());
+    expect(fixture.derived).toEqual([...head.legacy].sort());
+    expectAnalyzerClean(fixture.analysis);
+  });
+
+  it("widened debt growthのfixtureではderived equalityとanalyzer cleanが独立して成立する", () => {
+    const head = updateRatchetBaseline({ widened: { add: ["U-ZZBASE-901"] } });
+    const fixture = forwardAxisAnalyzerFixture("widened", head, new Set());
+    expect(fixture.derived).toEqual([...head.widened].sort());
+    expectAnalyzerClean(fixture.analysis);
+  });
+
+  it("citation debt growthのfixtureではderived equalityとanalyzer cleanが独立して成立する", () => {
+    const head = updateRatchetBaseline({ citations: { add: ["U-ZZBASE-901"] } });
+    const fixture = citationAxisAnalyzerFixture(head);
+    expect(fixture.derived).toEqual([...head.citations].sort());
+    expectAnalyzerClean(fixture.analysis);
+  });
+});
+
+describe("trusted PR pair fail-close reasons (U-OIDBASE-007)", () => {
+  const jsonPairReads = [
+    [RATC_BASE_SHA, RATC_JSON_PATH],
+    [RATC_MERGE_SHA, RATC_JSON_PATH],
+  ] as const;
+
+  it("U-OIDBASE-007: pull_request以外のeventはPR context invalid", () => {
+    const observed = runRatchetFixture({ eventName: "push" });
+    expect(observed.result).toEqual({ ok: false, reason: "pr_context_invalid" });
+    expect(observed.firstParentCalls).toEqual([]);
+    const expectedBlobs: readonly (readonly [string, OracleTraceGitPath])[] = [];
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      expectedBlobs.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: event name欠落はPR context invalid", () => {
+    const observed = runRatchetFixture({ eventName: undefined });
+    expect(observed.result).toEqual({ ok: false, reason: "pr_context_invalid" });
+    expect(observed.firstParentCalls).toEqual([]);
+    const expectedBlobs: readonly (readonly [string, OracleTraceGitPath])[] = [];
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      expectedBlobs.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: merge SHA欠落はPR context invalid", () => {
+    const observed = runRatchetFixture({ mergeSha: undefined });
+    expect(observed.result).toEqual({ ok: false, reason: "pr_context_invalid" });
+    expect(observed.firstParentCalls).toEqual([]);
+    const expectedBlobs: readonly (readonly [string, OracleTraceGitPath])[] = [];
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      expectedBlobs.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: merge SHA不正形式はPR context invalid", () => {
+    const observed = runRatchetFixture({ mergeSha: "not-a-40-hex-sha" });
+    expect(observed.result).toEqual({ ok: false, reason: "pr_context_invalid" });
+    expect(observed.firstParentCalls).toEqual([]);
+    const expectedBlobs: readonly (readonly [string, OracleTraceGitPath])[] = [];
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      expectedBlobs.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: missing first parent returns its dedicated failure reason", () => {
+    const observed = runRatchetFixture({ firstParentResult: { ok: true, value: null } });
+    expect(observed.result).toEqual({ ok: false, reason: "git_first_parent_missing" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    const expectedBlobs: readonly (readonly [string, OracleTraceGitPath])[] = [];
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      expectedBlobs.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: first-parent Git I/O failure returns its dedicated failure reason", () => {
+    const observed = runRatchetFixture({
+      firstParentResult: { ok: false, reason: "git_first_parent_read_failed" },
+    });
+    expect(observed.result).toEqual({ ok: false, reason: "git_first_parent_read_failed" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    const expectedBlobs: readonly (readonly [string, OracleTraceGitPath])[] = [];
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      expectedBlobs.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: base JSON Git I/O failureはobject read failure", () => {
+    const observed = runRatchetFixture({
+      blobOverrides: [
+        [RATC_BASE_SHA, RATC_JSON_PATH, { ok: false, reason: "git_object_read_failed" }],
+      ],
+    });
+    expect(observed.result).toEqual({ ok: false, reason: "git_object_read_failed" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    const expectedBlobs = [[RATC_BASE_SHA, RATC_JSON_PATH]] as const;
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      expectedBlobs.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: malformed base JSONはtrusted baseline invalid", () => {
+    const observed = runRatchetFixture({ baseJson: "{" });
+    expect(observed.result).toEqual({ ok: false, reason: "trusted_baseline_invalid" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    const expectedBlobs = [[RATC_BASE_SHA, RATC_JSON_PATH]] as const;
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      expectedBlobs.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: schema不正なbase JSONはtrusted baseline invalid", () => {
+    const observed = runRatchetFixture({
+      baseJson: JSON.stringify({ schemaVersion: 1, legacy: [], widened: [], citations: [] }),
+    });
+    expect(observed.result).toEqual({ ok: false, reason: "trusted_baseline_invalid" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    const expectedBlobs = [[RATC_BASE_SHA, RATC_JSON_PATH]] as const;
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      expectedBlobs.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: head JSON欠落はgit baseline missing", () => {
+    const observed = runRatchetFixture({ headJson: null });
+    expect(observed.result).toEqual({ ok: false, reason: "git_baseline_missing" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      jsonPairReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: head JSON Git I/O failureはobject read failure", () => {
+    const observed = runRatchetFixture({
+      blobOverrides: [
+        [RATC_MERGE_SHA, RATC_JSON_PATH, { ok: false, reason: "git_object_read_failed" }],
+      ],
+    });
+    expect(observed.result).toEqual({ ok: false, reason: "git_object_read_failed" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      jsonPairReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: malformed head JSONはtrusted baseline invalid", () => {
+    const observed = runRatchetFixture({ headJson: "{" });
+    expect(observed.result).toEqual({ ok: false, reason: "trusted_baseline_invalid" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      jsonPairReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+
+  it("U-OIDBASE-007: schema不正なhead JSONはtrusted baseline invalid", () => {
+    const observed = runRatchetFixture({
+      headJson: JSON.stringify({ schemaVersion: 1, legacy: [], widened: [], citations: [] }),
+    });
+    expect(observed.result).toEqual({ ok: false, reason: "trusted_baseline_invalid" });
+    expect(observed.firstParentCalls).toEqual([RATC_MERGE_SHA]);
+    expect(observed.blobCalls.map(([sha, path]) => `${sha}:${path}`).sort()).toEqual(
+      jsonPairReads.map(([sha, path]) => `${sha}:${path}`).sort(),
+    );
+    expect(observed.authorityReadCount).toBe(0);
+  });
+});
 
 describe("analyzeOracleTestTrace (U-OTT-001..003)", () => {
   const base = {
@@ -137,6 +1391,65 @@ describe("宣言 provenance の一意性 (Issue #206)", () => {
 });
 
 describe("宣言 site 収集 (Issue #206)", () => {
+  it("退役表中の既存ID参照は宣言にせず、正確なIDセル宣言は orphan に残す", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-retired-id-"));
+    try {
+      mkdirSync(join(root, "docs", "test-design"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "test-design", "L7.md"),
+        [
+          "### Confirmed test design",
+          "| ID | Description | Result |",
+          "|---|---|---|",
+          "| `U-ZZCANON-901` | canonical declaration | reject |",
+          "",
+          "### Retired references",
+          "| Former oracle | Reason |",
+          "|---|---|",
+          "| 既存 `U-ZZRETIRE-901` | retired, not a declaration |",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const { declared, declarationSites } = collectOracleIds(root);
+      expect([...declared].sort()).toEqual(["U-ZZCANON-901"]);
+      expect(declarationSites.map((site) => site.id)).toEqual(["U-ZZCANON-901"]);
+      const result = analyzeOracleTestTrace({
+        declared: [...declared],
+        referenced: new Set(),
+        baseline: new Set(),
+        widenedBaseline: new Set(),
+        declarationSites,
+      });
+      expect(result.orphans).toEqual(["U-ZZCANON-901"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("ST-ID / AC 複合セルは ST oracle を宣言として収集する", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-system-oracle-"));
+    try {
+      mkdirSync(join(root, "docs", "test-design"), { recursive: true });
+      writeFileSync(
+        join(root, "docs", "test-design", "L9.md"),
+        [
+          "### System red oracles",
+          "| ST-ID / AC | system fixture / fault | positive expected | negative expected |",
+          "|---|---|---|---|",
+          "| `ST-ZZSYS-901` / `AC-ZZSYS-901` | fault fixture | deny | accept |",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const { declared, declarationSites } = collectOracleIds(root);
+      expect([...declared]).toEqual(["ST-ZZSYS-901"]);
+      expect(declarationSites.map((site) => site.id)).toEqual(["ST-ZZSYS-901"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("正確なIDセルだけを宣言として収集し、family range の再引用を除外する", () => {
     const root = declarationFixture(
       [
@@ -370,34 +1683,69 @@ describe("derived ratchet 検証 (U-OIDGATE-005..007)", () => {
     // 定数 size 比較は中身を保証しない (PR #258 で CANDIDATE 由来 6 件が混入したまま件数だけ
     // 合致した実例)。集合一致なら (a) 新規 orphan の混入と (b) stale 行の両方が同時に落ちる。
     // baseline 収載 oracle を citation したら、この test が baseline の縮小を機械強制する。
+    const input = loadOracleTestTraceInput(process.cwd());
     const { declared, referenced } = collectOracleIds(process.cwd());
     const derived = [...declared]
-      .filter((id) => !referenced.has(id) && !ORACLE_TEST_TRACE_BASELINE.has(id))
+      .filter((id) => !referenced.has(id) && !input.baseline.has(id))
       .sort();
-    expect(derived).toEqual([...ORACLE_TEST_TRACE_WIDENED_BASELINE].sort());
+    expect(derived).toEqual([...input.widenedBaseline].sort());
+
+    // 同じ件数でも要素置換は完全集合比較で検出する。実 loader に authority を注入し、
+    // valid な新 ID との置換を通して集合内容が比較されることを確認する。
+    const citationBaseline = input.citationBaseline;
+    expect(citationBaseline).toBeDefined();
+    const originalWidened = [...input.widenedBaseline].sort();
+    const replacedId = originalWidened[0];
+    expect(replacedId).toBeDefined();
+    const replacementId = "U-ZZBASE-901";
+    expect(input.baseline.has(replacementId)).toBe(false);
+    expect(input.widenedBaseline.has(replacementId)).toBe(false);
+    const mutatedWidened = originalWidened.filter((id) => id !== replacedId);
+    mutatedWidened.push(replacementId);
+    const mutatedAuthorityJson = baselineJson({
+      legacy: [...input.baseline],
+      widened: mutatedWidened,
+      citations: [...(citationBaseline as ReadonlySet<string>)],
+    });
+    const authorityReads: string[] = [];
+    const mutatedInput = loadOracleTestTraceInput(process.cwd(), {
+      authority: {
+        readText(path) {
+          authorityReads.push(path);
+          return { ok: true, value: mutatedAuthorityJson };
+        },
+      },
+    });
+    expect(authorityReads).toEqual([RATC_JSON_PATH]);
+    const mutatedDerived = [...declared]
+      .filter((id) => !referenced.has(id) && !mutatedInput.baseline.has(id))
+      .sort();
+    expect(mutatedInput.widenedBaseline.size).toBe(input.widenedBaseline.size);
+    expect(mutatedDerived).toHaveLength(mutatedInput.widenedBaseline.size);
+    expect(mutatedDerived).not.toEqual([...mutatedInput.widenedBaseline].sort());
   });
 
   it("U-OIDGATE-006: baseline に citation 済み ID が混ざると derived 集合との不一致で stale 検出される", () => {
     // 実機構を通す: 実 repo の derived 集合に対し、citation 済みの実宣言 oracle を 1 件
     // widened baseline へ混入させると、U-OIDGATE-005 と同じ集合一致検証が必ず fail する
     // (blind review blocking 是正 — リテラル同士の比較では production コードを検証しない)。
+    const input = loadOracleTestTraceInput(process.cwd());
     const { declared, referenced } = collectOracleIds(process.cwd());
     const derived = [...declared]
-      .filter((id) => !referenced.has(id) && !ORACLE_TEST_TRACE_BASELINE.has(id))
+      .filter((id) => !referenced.has(id) && !input.baseline.has(id))
       .sort();
-    const cited = [...declared].find(
-      (id) => referenced.has(id) && !ORACLE_TEST_TRACE_WIDENED_BASELINE.has(id),
-    );
+    const cited = [...declared].find((id) => referenced.has(id) && !input.widenedBaseline.has(id));
     expect(cited).toBeDefined();
-    const stale = [...new Set([...ORACLE_TEST_TRACE_WIDENED_BASELINE, cited as string])].sort();
+    const stale = [...new Set([...input.widenedBaseline, cited as string])].sort();
     expect(derived).not.toEqual(stale);
   });
 
   it("U-OIDGATE-007: 既存 89 件 baseline は本変更で不変 (別集合 ratchet)", () => {
-    expect(ORACLE_TEST_TRACE_BASELINE.size).toBe(89);
+    const input = loadOracleTestTraceInput(process.cwd());
+    expect(input.baseline.size).toBe(89);
     // 拡張債務が既存 baseline へ混入していないことの負の回帰網。
-    for (const id of ORACLE_TEST_TRACE_WIDENED_BASELINE) {
-      expect(ORACLE_TEST_TRACE_BASELINE.has(id)).toBe(false);
+    for (const id of input.widenedBaseline) {
+      expect(input.baseline.has(id)).toBe(false);
     }
   });
 });
@@ -539,15 +1887,17 @@ describe("loadOracleTestTraceInput real repo (U-OTT-004/005)", () => {
   });
 
   it("U-OTT-006: 既存の citation baseline 89 件は本変更で不変", () => {
-    expect(ORACLE_TEST_TRACE_BASELINE.size).toBe(89);
+    expect(loadOracleTestTraceInput(process.cwd()).baseline.size).toBe(89);
   });
 
   it("U-OIDGATE-011: 実 repo の未宣言 test-label 集合は citation baseline と一致する", () => {
     const declared = new Set(collectOracleDeclarationSites(process.cwd()).map((site) => site.id));
     const { citationSites } = collectOracleIds(process.cwd());
+    const { citationBaseline } = loadOracleTestTraceInput(process.cwd());
+    expect(citationBaseline).toBeDefined();
     const derived = [
       ...new Set(citationSites.filter((site) => !declared.has(site.id)).map((site) => site.id)),
     ].sort();
-    expect(derived).toEqual([...ORACLE_TEST_CITATION_BASELINE].sort());
+    expect(derived).toEqual([...(citationBaseline as ReadonlySet<string>)].sort());
   });
 });

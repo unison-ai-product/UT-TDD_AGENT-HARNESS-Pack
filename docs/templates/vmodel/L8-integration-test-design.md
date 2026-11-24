@@ -8,12 +8,12 @@ source_entries:
     sha256: "sha256:388d490b334db587672bad23d83daed33feb7d4e188bee76f61e38dd3ff53f99"
 disposition_target: "docs/test-design/harness/L8-integration-test-design.md"
 pair_artifact: docs/test-design/harness/L7-release-consumer-dev-start-test-design.md
-plan: docs/plans/PLAN-<id>.md
+issue: <Issue 番号>
 ---
 
 # DOC-L8-INTEGRATION-TEST-DESIGN: 結合テスト設計書
 
-本テンプレートは `Vモデル設計ドキュメント_checked.zip` (PO 承認、issue #676) の該当 source document を PLAN-L7-676 §3.5.2 の変換規則で Markdown 化したものである。項目名・説明文は zip の日本語をそのまま使い、意味は書き換えていない。zip で空欄・空表の箇所には、記入欄の placeholder のみを置き、記入例の内容は機械生成しない。 <!-- 説明用の表記例: <記入>、<本文を記入>、<項目を記入> -->
+本テンプレートは `Vモデル設計ドキュメント_checked.zip` (PO 承認、issue #676) の該当 source document を、変換規則（対応 Issue #676）で Markdown 化したものである。項目名・説明文は zip の日本語をそのまま使い、意味は書き換えていない。zip で空欄・空表の箇所には、記入欄の placeholder のみを置き、記入例の内容は機械生成しない。 <!-- 説明用の表記例: <記入>、<本文を記入>、<項目を記入> -->
 
 ### 移植元: ZIP-DOC-007 結合テスト設計
 

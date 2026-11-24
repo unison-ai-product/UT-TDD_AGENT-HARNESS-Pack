@@ -22,7 +22,7 @@ export function registerForwardWorkflowCommands(
     .description("append-only Forward FSM workflow query and transition");
   workflow
     .command("status")
-    .requiredOption("--plan <subjectId>")
+    .requiredOption("--issue <number>")
     .option("--revision <revision>", "subject revision", "1")
     .option("--source-commit <commit>", "tracked source commit", "unknown")
     .action((options: CliOptions) => {
@@ -30,7 +30,7 @@ export function registerForwardWorkflowCommands(
     });
   workflow
     .command("transition")
-    .requiredOption("--plan <subjectId>")
+    .requiredOption("--issue <number>")
     .requiredOption("--event <event>")
     .option("--command-id <id>")
     .option("--revision <revision>", "subject revision", "1")
@@ -45,7 +45,7 @@ export function registerForwardWorkflowCommands(
     });
   workflow
     .command("explain")
-    .requiredOption("--plan <subjectId>")
+    .requiredOption("--issue <number>")
     .requiredOption("--event <event>")
     .option("--revision <revision>", "subject revision", "1")
     .option("--source-commit <commit>", "tracked source commit", "unknown")
@@ -119,7 +119,7 @@ function forwardUnavailableEnvelope(
 }
 
 interface CliOptions {
-  readonly plan: string;
+  readonly issue: string;
   readonly revision: string;
   readonly sourceCommit: string;
   readonly event: string;
@@ -127,8 +127,11 @@ interface CliOptions {
 }
 
 function subject(options: CliOptions): ForwardSubject {
+  if (!/^[1-9][0-9]*$/.test(options.issue) || !Number.isSafeInteger(Number(options.issue))) {
+    throw new Error("--issue must be a positive integer");
+  }
   return {
-    subjectId: options.plan,
+    subjectId: options.issue,
     subjectRevision: Number(options.revision),
     sourceCommit: options.sourceCommit,
   };

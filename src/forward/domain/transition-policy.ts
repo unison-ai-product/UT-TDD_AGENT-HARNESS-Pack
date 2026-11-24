@@ -3,7 +3,7 @@ import type {
   EvidenceExitRule,
   EvidenceKind,
   EvidenceProducer,
-} from "../../plan-asset/domain/evidence-types.ts";
+} from "./evidence-types.ts";
 
 export const FORWARD_STATES = [
   "proposed",

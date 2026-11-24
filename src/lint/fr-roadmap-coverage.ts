@@ -46,7 +46,6 @@ export interface FrRoadmapCoverageViolation {
     | "missing_closure_table"
     | "malformed_closure_row"
     | "missing_closure_evidence"
-    | "missing_plan_target"
     | "missing_source_target"
     | "missing_test_target"
     | "missing_coverage_gate"
@@ -172,7 +171,7 @@ function parseClosureRows(
     const testTarget = cells[indexes.test] ?? "";
     const coverageGate = cells[indexes.gate] ?? "";
     const status = normalizeStatus(cells[indexes.status] ?? "");
-    if (!bucket || !planTarget || !sourceTarget || !testTarget || !coverageGate || !status) {
+    if (!bucket || !sourceTarget || !testTarget || !coverageGate || !status) {
       violations.push({
         file: doc.file,
         bucket: bucket || undefined,
@@ -293,11 +292,6 @@ export function analyzeFrRoadmapCoverageWithRoot(
     }
     if (evidence.status !== "closed") {
       violations.push({ file: row.file, bucket: row.bucket, reason: "closure_status_mismatch" });
-    }
-    if (!pathFromTarget(evidence.planTarget)) {
-      violations.push({ file: row.file, bucket: row.bucket, reason: "missing_plan_target" });
-    } else if (!targetExists(repoRoot, evidence.planTarget)) {
-      violations.push({ file: row.file, bucket: row.bucket, reason: "missing_evidence_file" });
     }
     if (!pathFromTarget(evidence.sourceTarget)) {
       violations.push({ file: row.file, bucket: row.bucket, reason: "missing_source_target" });

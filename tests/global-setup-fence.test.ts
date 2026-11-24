@@ -17,5 +17,5 @@ describe("global setup fence", () => {
     );
     expect(result.status).toBe(1);
     expect(`${result.stdout}\n${result.stderr}`).toContain("test workspace fence violation");
-  });
+  }, 180000); // 89s measured, #1063
 });

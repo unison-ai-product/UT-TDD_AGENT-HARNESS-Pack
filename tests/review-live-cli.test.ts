@@ -6,7 +6,6 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -27,6 +26,7 @@ import {
 import type { ClaudeReviewInboxEntry } from "../src/runtime/claude-memory-wake.ts";
 import { resolveProjectMemoryRoot } from "../src/runtime/project-memory-root.ts";
 import { ensureTrackedProjectIdentity } from "./support/project-identity-fixture.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const head = "a".repeat(40);
 const roots: string[] = [];
@@ -98,7 +98,7 @@ function wakeInboxRoot(root: string): string {
 }
 
 afterEach(() => {
-  while (roots.length > 0) rmSync(roots.pop() as string, { recursive: true, force: true });
+  while (roots.length > 0) removeTestTree(roots.pop() as string);
 });
 
 describe("review live CLI composition", () => {

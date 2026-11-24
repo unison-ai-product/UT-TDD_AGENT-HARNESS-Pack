@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   analyzeDriveModelPassage,
@@ -59,14 +57,7 @@ describe("drive-model passage lint", () => {
     expect(driveModelPassageMessages(r)[0]).toContain("violation");
   });
 
-  it("U-DMP-003: current reconciliation PLAN has all passage certificate modes", () => {
-    if (
-      !existsSync(
-        join(process.cwd(), "docs", "plans", "PLAN-L3-04-upstream-schedule-reconciliation.md"),
-      )
-    )
-      return;
-
+  it("U-DMP-003: current L3 design document has all passage certificate modes", () => {
     const docs = loadDriveModelPassageDocs(process.cwd());
     const r = analyzeDriveModelPassage(docs);
 

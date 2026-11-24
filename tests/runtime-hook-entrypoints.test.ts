@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -13,12 +14,15 @@ import { delimiter, join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { describe, expect, it, vi } from "vitest";
 import { BUILTIN_GITHUB_TEMPLATES } from "../src/setup/templates.ts";
+import {
+  registerPlanret014LifecycleOracle,
+  writeFakeClaude,
+} from "./support/planret-s4-runtime-oracle.ts";
 import { ensureTrackedProjectIdentity } from "./support/project-identity-fixture.ts";
 
 const sessionStartProbe = vi.hoisted(() => ({
   materializeCallback: null as null | ((repoRoot: string) => void),
 }));
-
 vi.mock("../src/shared/embedded-skills.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/shared/embedded-skills.ts")>();
   return {
@@ -33,8 +37,8 @@ vi.mock("../src/shared/embedded-skills.ts", async (importOriginal) => {
   };
 });
 
-const repoRoot = process.cwd();
-const cliPath = join(repoRoot, "src", "cli.ts");
+const repoRoot = process.cwd(),
+  cliPath = join(repoRoot, "src", "cli.ts");
 const legacyEnvPrefix = ["HE", "LIX"].join("");
 const claudeProjectDir = `$${"{CLAUDE_PROJECT_DIR}"}`;
 
@@ -58,6 +62,26 @@ function readSessionStartEvents(root: string, sessionId: string): Array<Record<s
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function expectPlanFreeLifecycle(root: string, sessionId: string): void {
+  const events = readSessionStartEvents(root, sessionId);
+  expect(events.map((event) => event.event_type).sort()).toEqual([
+    "session_end",
+    "session_start",
+    "tool_use",
+  ]);
+  expect(events.every((event) => event.plan_id === null)).toBe(true);
+}
+
+function expectSingleCodexLifecycle(root: string): void {
+  const sessionFiles = readdirSync(join(root, ".ut-tdd", "logs", "session")).filter((name) =>
+    name.startsWith("codex-"),
+  );
+  expect(sessionFiles).toHaveLength(1);
+  const sessionFile = sessionFiles[0];
+  if (!sessionFile) throw new Error("codex wrapper session log was not created");
+  expectPlanFreeLifecycle(root, sessionFile.replace(/\.jsonl$/u, ""));
 }
 
 async function runCapturedSessionStart(
@@ -164,49 +188,95 @@ function writeFakeCodex(binDir: string): string {
   chmodSync(path, 0o755);
   return path;
 }
-
-function writeFakeClaude(binDir: string): string {
-  mkdirSync(binDir, { recursive: true });
-  const rawEnv = [legacyEnvPrefix, "ALLOW", "RAW", "CLAUDE"].join("_");
-  const reasonEnv = [legacyEnvPrefix, "RAW", "CLAUDE", "REASON"].join("_");
-  if (process.platform === "win32") {
-    const path = join(binDir, "claude.cmd");
-    writeFileSync(
-      path,
-      `@echo off\r\necho %* > claude-called.txt\r\nfindstr "^" > claude-stdin.txt\r\n(echo raw=%${rawEnv}%)> claude-env.txt\r\n(echo reason=%${reasonEnv}%)>> claude-env.txt\r\nexit /b 0\r\n`,
-    );
-    return path;
-  }
-  const path = join(binDir, "claude");
-  writeFileSync(
-    path,
-    `#!/bin/sh\necho "$@" > claude-called.txt\ncat > claude-stdin.txt\nprintf "raw=%s\\nreason=%s\\n" "$${rawEnv}" "$${reasonEnv}" > claude-env.txt\nexit 0\n`,
-  );
-  chmodSync(path, 0o755);
-  return path;
-}
-
 describe("runtime hook entrypoints", () => {
-  it("SessionStart timeout is 30s in source and consumer settings without changing other hook timeouts", () => {
-    const settingsPaths = [
-      join(repoRoot, ".claude", "settings.json"),
-      join(repoRoot, "docs", "templates", "adapter", ".claude", "settings.json"),
+  registerPlanret014LifecycleOracle({ runCli, readSessionStartEvents });
+  describe("U-SLOG-011: source開発repo自身の5記録hookを30秒にする", () => {
+    it("U-SLOG-011: source開発repo自身の5記録hookを30秒にする", () => {
+      const claude = JSON.parse(readFileSync(join(repoRoot, ".claude", "settings.json"), "utf8"));
+      const codex = JSON.parse(readFileSync(join(repoRoot, ".codex", "hooks.json"), "utf8"));
+
+      expect(claude.hooks.PostToolUse[0].hooks[0].timeout).toBe(30);
+      expect(claude.hooks.Stop[0].hooks[0].timeout).toBe(30);
+      expect(codex.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
+      expect(codex.hooks.PostToolUse[0].hooks[0].timeout).toBe(30);
+      expect(codex.hooks.Stop[0].hooks[0].timeout).toBe(30);
+    });
+  });
+
+  describe("U-SLOG-010: Pack consumerの5記録hookを30秒にする", () => {
+    it("U-SLOG-010: Pack consumerの5記録hookを30秒にする", () => {
+      const claudeSettings = [
+        JSON.parse(
+          readFileSync(
+            join(repoRoot, "docs", "templates", "adapter", ".claude", "settings.json"),
+            "utf8",
+          ),
+        ),
+        JSON.parse(BUILTIN_GITHUB_TEMPLATES["adapter/.claude/settings.json"]),
+      ];
+      for (const settings of claudeSettings) {
+        expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
+        expect(settings.hooks.PostToolUse[0].hooks[0].timeout).toBe(30);
+        expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(30);
+        expect(
+          settings.hooks.PreToolUse.map(
+            (entry: { hooks: Array<{ timeout: number }> }) => entry.hooks[0].timeout,
+          ),
+        ).toEqual([5, 5]);
+        expect(settings.hooks.Stop[1].hooks[0].timeout).toBe(930);
+      }
+
+      const codexHooks = [
+        JSON.parse(
+          readFileSync(
+            join(repoRoot, "docs", "templates", "adapter", ".codex", "hooks.json"),
+            "utf8",
+          ),
+        ),
+        JSON.parse(BUILTIN_GITHUB_TEMPLATES["adapter/.codex/hooks.json"]),
+      ];
+      for (const settings of codexHooks) {
+        expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
+        expect(settings.hooks.PostToolUse[0].hooks[0].timeout).toBe(30);
+        expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(30);
+        expect(
+          settings.hooks.PreToolUse.map(
+            (entry: { hooks: Array<{ timeout: number }> }) => entry.hooks[0].timeout,
+          ),
+        ).toEqual([5, 5]);
+      }
+    });
+  });
+
+  it("source and consumer non-target hook timeouts remain unchanged", () => {
+    const sourceSettings = JSON.parse(
+      readFileSync(join(repoRoot, ".claude", "settings.json"), "utf8"),
+    );
+    const consumerSettings = [
+      JSON.parse(BUILTIN_GITHUB_TEMPLATES["adapter/.claude/settings.json"]),
+      JSON.parse(
+        readFileSync(
+          join(repoRoot, "docs", "templates", "adapter", ".claude", "settings.json"),
+          "utf8",
+        ),
+      ),
     ];
 
-    const settingsSources = [
-      JSON.parse(BUILTIN_GITHUB_TEMPLATES["adapter/.claude/settings.json"]),
-      ...settingsPaths.map((path) => JSON.parse(readFileSync(path, "utf8"))),
-    ];
-    for (const settings of settingsSources) {
+    expect(sourceSettings.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
+    expect(sourceSettings.hooks).toMatchObject({
+      PreToolUse: [{ hooks: [{ timeout: 5 }] }, { hooks: [{ timeout: 5 }] }],
+      Stop: [{}, { hooks: [{ timeout: 930 }] }],
+      SubagentStop: [{ hooks: [{ timeout: 5 }] }],
+    });
+    for (const settings of consumerSettings) {
       expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
       expect(settings.hooks).toMatchObject({
         PreToolUse: [{ hooks: [{ timeout: 5 }] }, { hooks: [{ timeout: 5 }] }],
-        PostToolUse: [{ hooks: [{ timeout: 5 }] }],
-        Stop: [{ hooks: [{ timeout: 5 }] }, { hooks: [{ timeout: 930 }] }],
+        Stop: [{}, { hooks: [{ timeout: 930 }] }],
         SubagentStop: [{ hooks: [{ timeout: 5 }] }],
       });
     }
-    expect(settingsSources[0]).toEqual(settingsSources[2]);
+    expect(consumerSettings[0]).toEqual(consumerSettings[1]);
   });
 
   it("Claude settings route session-log hooks through the shared UT-TDD CLI", () => {
@@ -233,13 +303,10 @@ describe("runtime hook entrypoints", () => {
     });
   });
 
-  it("U-835-007: shared CLI session/hook commands record a PLAN digest in a temp repo", () => {
+  it("U-835-007: shared CLI session/hook commands record a plan-free lifecycle in a temp repo", () => {
     const cwd = mkdtempSync(join(tmpdir(), "ut-tdd-hook-"));
     try {
       ensureTrackedProjectIdentity(cwd, "fixture/runtime-hook-entrypoints");
-      const start = runCli(cwd, ["plan", "use", "PLAN-L4-13"]);
-      expect(start.status).toBe(0);
-
       const sessionStart = runCli(cwd, ["session", "start"], {
         hook_event_name: "SessionStart",
         session_id: "s-cli",
@@ -264,14 +331,10 @@ describe("runtime hook entrypoints", () => {
       expect(stop.status).toBe(0);
       expect(stop.stdout).toContain("session-log: summary s-cli");
 
-      const digest = JSON.parse(
-        readFileSync(join(cwd, ".ut-tdd", "logs", "plan", "PLAN-L4-13.digest.json"), "utf8"),
+      expectPlanFreeLifecycle(cwd, "s-cli");
+      expect(existsSync(join(cwd, ".ut-tdd", "logs", "plan", "PLAN-L4-13.digest.json"))).toBe(
+        false,
       );
-      expect(digest.plan_id).toBe("PLAN-L4-13");
-      expect(digest.sessions).toEqual(["s-cli"]);
-      expect(digest.files_touched).toEqual(["Edit src/cli.ts"]);
-      expect(digest.event_counts.session_start).toBe(1);
-      expect(digest.event_counts.tool_use).toBe(1);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -471,7 +534,7 @@ describe("runtime hook entrypoints", () => {
     }
   });
 
-  it("U-835-006: the real session-start action preserves its explicit session ID and current plan", async () => {
+  it("U-835-006: the real session-start action preserves its session ID without resolving current-plan", async () => {
     const root = mkdtempSync(join(tmpdir(), "ut-tdd-session-start-identity-"));
     const sessionId = "issue835-exact-session-006";
     const planId = "PLAN-L7-835-windows-sessionstart-contract";
@@ -488,7 +551,7 @@ describe("runtime hook entrypoints", () => {
       expect(eventsAtSideEffectEntry).toContainEqual(
         expect.objectContaining({
           session_id: sessionId,
-          plan_id: planId,
+          plan_id: null,
           event_type: "session_start",
         }),
       );
@@ -508,7 +571,6 @@ describe("runtime hook entrypoints", () => {
         UT_TDD_CODEX_BIN: fakeCodex,
       };
 
-      expect(runCli(cwd, ["plan", "use", "PLAN-L4-13"]).status).toBe(0);
       const run = runCli(
         cwd,
         ["codex", "--role", "se", "--task", "implement parity", "--execute"],
@@ -517,13 +579,7 @@ describe("runtime hook entrypoints", () => {
       );
       expect(run.status).toBe(0);
 
-      const digest = JSON.parse(
-        readFileSync(join(cwd, ".ut-tdd", "logs", "plan", "PLAN-L4-13.digest.json"), "utf8"),
-      );
-      expect(digest.sessions).toHaveLength(1);
-      expect(digest.sessions[0]).toMatch(/^codex-/);
-      expect(digest.event_counts.session_start).toBe(1);
-      expect(digest.event_counts.tool_use).toBe(1);
+      expectSingleCodexLifecycle(cwd);
       expect(readFileSync(join(cwd, "codex-called.txt"), "utf8")).toContain("exec");
       const envText = readFileSync(join(cwd, "codex-env.txt"), "utf8");
       expect(envText).not.toContain("raw=1");
@@ -545,7 +601,6 @@ describe("runtime hook entrypoints", () => {
         UT_TDD_CODEX_BIN: fakeCodex,
       };
 
-      expect(runCli(cwd, ["plan", "use", "PLAN-L4-13"]).status).toBe(0);
       const run = runCli(
         cwd,
         ["codex", "--role", "se", "--task-file", "task.md", "--execute"],
@@ -554,11 +609,7 @@ describe("runtime hook entrypoints", () => {
       );
       expect(run.status).toBe(0);
 
-      const digest = JSON.parse(
-        readFileSync(join(cwd, ".ut-tdd", "logs", "plan", "PLAN-L4-13.digest.json"), "utf8"),
-      );
-      expect(digest.event_counts.session_start).toBe(1);
-      expect(digest.event_counts.tool_use).toBe(1);
+      expectSingleCodexLifecycle(cwd);
       const called = readFileSync(join(cwd, "codex-called.txt"), "utf8");
       expect(called).toContain("exec");
       // プロンプトは args でなく stdin で渡る (PLAN-L7-77、cmd.exe shell-wrap の改行切り詰め回避)。
@@ -572,7 +623,7 @@ describe("runtime hook entrypoints", () => {
     }
   });
 
-  it("ut-tdd codex --plan records wrapper lifecycle without forwarding plan flags to Codex", () => {
+  it("ut-tdd codex records wrapper lifecycle without resolving a current PLAN", () => {
     const cwd = mkdtempSync(join(tmpdir(), "ut-tdd-codex-plan-"));
     const binDir = join(cwd, "bin");
     try {
@@ -585,37 +636,27 @@ describe("runtime hook entrypoints", () => {
 
       const run = runCli(
         cwd,
-        [
-          "codex",
-          "--role",
-          "se",
-          "--task",
-          "implement explicit plan",
-          "--plan",
-          "PLAN-L4-77-adapter",
-          "--execute",
-        ],
+        ["codex", "--role", "se", "--task", "implement without plan metadata", "--execute"],
         undefined,
         env,
       );
       expect(run.status).toBe(0);
 
-      const digest = JSON.parse(
-        readFileSync(
-          join(cwd, ".ut-tdd", "logs", "plan", "PLAN-L4-77-adapter.digest.json"),
-          "utf8",
-        ),
+      expect(
+        existsSync(join(cwd, ".ut-tdd", "logs", "plan", "PLAN-L4-77-adapter.digest.json")),
+      ).toBe(false);
+      const sessionFile = readdirSync(join(cwd, ".ut-tdd", "logs", "session")).find((name) =>
+        name.startsWith("codex-"),
       );
-      expect(digest.plan_id).toBe("PLAN-L4-77-adapter");
-      expect(digest.event_counts.session_start).toBe(1);
-      expect(digest.event_counts.tool_use).toBe(1);
-      expect(digest.event_counts.session_end).toBe(1);
+      expect(sessionFile).toBeDefined();
+      if (!sessionFile) throw new Error("codex wrapper session log was not created");
+      expectPlanFreeLifecycle(cwd, sessionFile.replace(/\.jsonl$/u, ""));
       const called = readFileSync(join(cwd, "codex-called.txt"), "utf8");
       expect(called).toContain("exec");
       expect(called).not.toContain("--plan-id");
       expect(called).not.toContain("PLAN-L4-77-adapter");
       const stdinText = readFileSync(join(cwd, "codex-stdin.txt"), "utf8");
-      expect(stdinText).toContain("implement explicit plan");
+      expect(stdinText).toContain("implement without plan metadata");
       expect(stdinText).not.toContain("UT-TDD context injection");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -627,7 +668,7 @@ describe("runtime hook entrypoints", () => {
     const binDir = join(cwd, "bin");
     try {
       ensureTrackedProjectIdentity(cwd, "fixture/runtime-claude-wrapper");
-      const fakeClaude = writeFakeClaude(binDir);
+      const fakeClaude = writeFakeClaude(binDir, legacyEnvPrefix);
       const env = {
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
         UT_TDD_CLAUDE_BIN: fakeClaude,
@@ -635,31 +676,15 @@ describe("runtime hook entrypoints", () => {
 
       const run = runCli(
         cwd,
-        [
-          "claude",
-          "--role",
-          "pmo-sonnet",
-          "--task",
-          "review explicit plan",
-          "--plan",
-          "PLAN-L4-78-adapter",
-          "--execute",
-        ],
+        ["claude", "--role", "docs", "--task", "review without plan metadata", "--execute"],
         undefined,
         env,
       );
       expect(run.status).toBe(0);
 
-      const digest = JSON.parse(
-        readFileSync(
-          join(cwd, ".ut-tdd", "logs", "plan", "PLAN-L4-78-adapter.digest.json"),
-          "utf8",
-        ),
-      );
-      expect(digest.plan_id).toBe("PLAN-L4-78-adapter");
-      expect(digest.event_counts.session_start).toBe(1);
-      expect(digest.event_counts.tool_use).toBe(1);
-      expect(digest.event_counts.session_end).toBe(1);
+      expect(
+        existsSync(join(cwd, ".ut-tdd", "logs", "plan", "PLAN-L4-78-adapter.digest.json")),
+      ).toBe(false);
       const called = readFileSync(join(cwd, "claude-called.txt"), "utf8");
       expect(called).toContain("--print");
       expect(called).toContain("--input-format");
@@ -667,7 +692,7 @@ describe("runtime hook entrypoints", () => {
       expect(called).not.toMatch(/(^|\s)"?-p"?(\s|$)/);
       expect(called).not.toContain("review explicit plan");
       const stdinText = readFileSync(join(cwd, "claude-stdin.txt"), "utf8");
-      expect(stdinText).toContain("review explicit plan");
+      expect(stdinText).toContain("review without plan metadata");
       expect(called).not.toContain("--role");
       expect(called).not.toContain("--task");
       expect(called).not.toContain("--plan-id");
@@ -685,7 +710,7 @@ describe("runtime hook entrypoints", () => {
     const binDir = join(cwd, "bin");
     try {
       const fakeCodex = writeFakeCodex(binDir);
-      const fakeClaude = writeFakeClaude(binDir);
+      const fakeClaude = writeFakeClaude(binDir, legacyEnvPrefix);
       mkdirSync(join(cwd, ".ut-tdd", "teams"), { recursive: true });
       writeFileSync(
         join(cwd, ".ut-tdd", "teams", "speed.yaml"),
@@ -718,8 +743,6 @@ describe("runtime hook entrypoints", () => {
           "--mode",
           "hybrid",
           "--execute",
-          "--plan",
-          "PLAN-L4-79-team-wrapper",
           "--json",
         ],
         undefined,
@@ -727,23 +750,16 @@ describe("runtime hook entrypoints", () => {
       );
       expect(run.status).toBe(0);
 
-      const digest = JSON.parse(
-        readFileSync(
-          join(cwd, ".ut-tdd", "logs", "plan", "PLAN-L4-79-team-wrapper.digest.json"),
-          "utf8",
-        ),
+      expect(
+        existsSync(join(cwd, ".ut-tdd", "logs", "plan", "PLAN-L4-79-team-wrapper.digest.json")),
+      ).toBe(false);
+      const sessionFiles = readdirSync(join(cwd, ".ut-tdd", "logs", "session")).filter((name) =>
+        name.includes("-team-"),
       );
-      expect(digest.plan_id).toBe("PLAN-L4-79-team-wrapper");
-      expect(digest.sessions).toHaveLength(2);
-      expect(digest.sessions).toEqual(
-        expect.arrayContaining([
-          expect.stringMatching(/^codex-team-/),
-          expect.stringMatching(/^claude-team-/),
-        ]),
-      );
-      expect(digest.event_counts.session_start).toBe(2);
-      expect(digest.event_counts.tool_use).toBe(2);
-      expect(digest.event_counts.session_end).toBe(2);
+      expect(sessionFiles).toHaveLength(2);
+      for (const sessionFile of sessionFiles) {
+        expectPlanFreeLifecycle(cwd, sessionFile.replace(/\.jsonl$/u, ""));
+      }
       expect(readFileSync(join(cwd, "codex-called.txt"), "utf8")).toContain("exec");
       expect(readFileSync(join(cwd, "claude-called.txt"), "utf8")).toContain("--print");
     } finally {

@@ -10,12 +10,12 @@ source_entries:
     sha256: "sha256:d435d1ba5eb4e211af6df2eaca352424f04bf4b1ec81b5ffb1b8bfa7a4070d82"
 disposition_target: "docs/test-design/harness/L9-system-test-design.md"
 pair_artifact: docs/test-design/harness/L7-release-consumer-dev-start-test-design.md
-plan: docs/plans/PLAN-<id>.md
+issue: <Issue 番号>
 ---
 
 # DOC-L9-SYSTEM-TEST-DESIGN: 総合テスト設計書 / セキュリティテスト計画・脆弱性診断書
 
-本テンプレートは `Vモデル設計ドキュメント_checked.zip` (PO 承認、issue #676) の該当 source document を PLAN-L7-676 §3.5.2 の変換規則で Markdown 化したものである。項目名・説明文は zip の日本語をそのまま使い、意味は書き換えていない。zip で空欄・空表の箇所には、記入欄の placeholder のみを置き、記入例の内容は機械生成しない。 <!-- 説明用の表記例: <記入>、<本文を記入>、<項目を記入> -->
+本テンプレートは `Vモデル設計ドキュメント_checked.zip` (PO 承認、issue #676) の該当 source document を、変換規則（対応 Issue #676）で Markdown 化したものである。項目名・説明文は zip の日本語をそのまま使い、意味は書き換えていない。zip で空欄・空表の箇所には、記入欄の placeholder のみを置き、記入例の内容は機械生成しない。 <!-- 説明用の表記例: <記入>、<本文を記入>、<項目を記入> -->
 
 ### 移植元: ZIP-DOC-008 総合テスト設計
 

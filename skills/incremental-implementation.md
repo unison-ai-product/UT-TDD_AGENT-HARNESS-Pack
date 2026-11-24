@@ -14,13 +14,13 @@ applies_to:
     - Retrofit
 decision_points:
   - when: "an L5 design doc or L6 test design doc is missing before writing a new module"
-    choose: "stop and resolve the design gap as an unresolved PLAN `requires` before writing source"
+    choose: "stop and resolve the design gap as an unresolved dependency in the Issue before writing source"
     over: "write the source file first and backfill the design doc afterward"
     because: "`ut-tdd doctor` checks structural link existence but not substance, so writing ahead creates descent obligation debt that goes undetected"
   - when: "an external input's type cannot be immediately narrowed (parsed JSON, CLI args)"
     choose: "type it `unknown` and narrow with a type guard before use"
     over: "type it `any` to unblock compilation quickly"
-    because: "`any` without a PLAN-linked rationale is forbidden and silently defeats `npm run typecheck` as a safety gate"
+    because: "`any` without an Issue-linked rationale is forbidden and silently defeats `npm run typecheck` as a safety gate"
   - when: "a function reads state, transforms it, and writes output in one body"
     choose: "split into three functions with distinct names, separating I/O from computation"
     over: "keep it as one function for brevity"
@@ -30,7 +30,7 @@ decision_points:
     over: "batch multiple feature commits into one to reduce commit noise"
     because: "the Red-commit/Green-commit sequence is required audit evidence (FR-L1-02); batching destroys the trace"
   - when: "a Biome lint rule fires on generated or awkward code"
-    choose: "fix the underlying formatting/lint issue or document a PLAN-linked rationale for suppressing it"
+    choose: "fix the underlying formatting/lint issue or document an Issue-linked rationale for suppressing it"
     over: "add `// biome-ignore` without explanation to unblock the commit"
     because: "unexplained biome-ignore comments accumulate silently and break CI on a later push when the suppressed rule finally matters"
   - when: "a function body is approaching or exceeding 30 lines"
@@ -43,16 +43,16 @@ decision_points:
 
 L7 implementation quality baseline for UT-TDD: type safety, naming discipline,
 function design, and descent obligation. Covers the period from pair-freeze to
-trace-freeze on a PLAN. Does not replace the TDD cycle order (see
+trace-freeze on an Issue. Does not replace the TDD cycle order (see
 test-driven-development skill) — these rules apply *within* each Red-Green step.
 
 ## When to load this skill
 
 - Starting L7 implementation after pair-freeze (L5/L6 design docs exist,
-  `ut-tdd plan lint` and `ut-tdd doctor` are green).
+  the applicable `ut-tdd doctor` checks pass).
 - A code review (`ut-tdd review --uncommitted`) flags a type, naming, or
   design quality issue.
-- A Refactor or Retrofit PLAN is scoping what source changes are in-bounds.
+- A Refactor or Retrofit Issue is scoping what source changes are in-bounds.
 
 ## Descent obligation
 
@@ -62,7 +62,7 @@ unit-test design doc. Before writing a new module:
 1. Confirm `docs/design/L5-<module>.md` exists and has passed pair-freeze.
 2. Confirm `docs/test-design/L6-<module>.md` exists and references the test
    file to be written.
-3. If either is absent, the PLAN has an unresolved `requires` — stop and
+3. If either is absent, the Issue has an unresolved design dependency — stop and
    resolve the design gap before writing source.
 
 `ut-tdd doctor` checks structural link existence but not substance. Read the L5
@@ -70,7 +70,7 @@ doc and confirm it answers the implementation questions before coding.
 
 ## Type safety rules
 
-- No `any` without a PLAN-linked comment explaining why the type cannot be
+- No `any` without an Issue-linked comment explaining why the type cannot be
   narrowed. `// @ts-ignore` is forbidden without the same rationale.
 - Use TypeScript discriminated unions for multi-shape return values; avoid
   `T | null | undefined` where a `Result<T, E>` pattern is cleaner.
@@ -117,10 +117,10 @@ doc and confirm it answers the implementation questions before coding.
 - [ ] `npm run typecheck` exits 0.
 - [ ] `npm run lint` exits 0 (Biome check — format + lint).
 - [ ] `npm run test` exits 0 with no `.skip` or `.todo` left open without a
-  PLAN-linked rationale.
+  Issue-linked rationale.
 - [ ] `ut-tdd doctor` exits 0.
 - [ ] New terms added to L0 glossary.
-- [ ] PLAN `review_evidence` references the trace-freeze commit SHA.
+- [ ] The PR evidence references the trace-freeze commit SHA.
 - [ ] `ut-tdd review --uncommitted` produces no blocking findings for L7.
 
 ## Anti-patterns
