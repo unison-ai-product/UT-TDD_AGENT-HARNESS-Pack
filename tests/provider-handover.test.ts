@@ -21,12 +21,11 @@ function deps(): ProviderHandoverDeps & { files: Map<string, string> } {
 }
 
 describe("provider handover", () => {
-  it("U-PHOVER-002: builds a Claude to Codex mechanical package with sanitized context", () => {
+  it("U-PHOVER-001: builds a Claude to Codex mechanical package with sanitized context", () => {
     const pkg = buildProviderHandover(
       {
         from: "claude",
         to: "codex",
-        activePlan: "PLAN-L4-99-provider-handover",
         budget: "token=secret123",
         summary: "continue without token=secret123",
         nextActions: ["implement provider handover"],
@@ -38,16 +37,17 @@ describe("provider handover", () => {
     expect(pkg.handover_kind).toBe("mechanical");
     expect(pkg.from).toBe("claude");
     expect(pkg.to).toBe("codex");
+    expect(pkg.active_plan).toBeNull();
+    expect(pkg.handover_id).toBe("20260608000000-claude-to-codex");
     expect(JSON.stringify(pkg)).not.toContain("secret123");
   });
 
-  it("rejects same-provider handover", () => {
+  it("U-PHOVER-001: rejects same-provider handover", () => {
     expect(() =>
       buildProviderHandover(
         {
           from: "codex",
           to: "codex",
-          activePlan: "PLAN-L4-99-provider-handover",
           summary: "x",
         },
         NOW,
@@ -55,13 +55,18 @@ describe("provider handover", () => {
     ).toThrow(/different/);
   });
 
-  it("writes package and CURRENT.json under .ut-tdd/handover/provider", () => {
+  it("U-PHOVER-001: rejects a blank summary", () => {
+    expect(() => buildProviderHandover({ from: "claude", to: "codex", summary: " " }, NOW)).toThrow(
+      /summary/,
+    );
+  });
+
+  it("U-PHOVER-002: writes package and CURRENT.json under .ut-tdd/handover/provider", () => {
     const d = deps();
     const result = runProviderHandover(
       {
         from: "codex",
         to: "claude",
-        activePlan: "PLAN-L4-99-provider-handover",
         summary: "handoff",
       },
       d,
@@ -71,13 +76,12 @@ describe("provider handover", () => {
     expect(current?.handover_id).toBe(result.package.handover_id);
   });
 
-  it("dry-run does not write files", () => {
+  it("U-PHOVER-002: dry-run does not write files", () => {
     const d = deps();
     const result = runProviderHandover(
       {
         from: "codex",
         to: "claude",
-        activePlan: "PLAN-L4-99-provider-handover",
         summary: "handoff",
         dryRun: true,
       },

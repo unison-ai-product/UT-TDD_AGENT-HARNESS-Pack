@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { lintG1Trace } from "../lint/g1-trace.ts";
+import { lintG3Trace } from "../lint/g3-trace.ts";
 import {
   analyzeG8IntegrationWorkflow,
   canLoadG8IntegrationWorkflowInput,
@@ -27,7 +29,6 @@ import {
   loadOracleTestTraceInput,
   oracleTestTraceMessages,
 } from "../lint/oracle-test-trace.ts";
-import { lintPlanWithGate } from "../plan/lint.ts";
 import { resolveDesignRoot, resolveVModelRoots } from "../shared/design-root.ts";
 import {
   analyzePairFreeze,
@@ -35,7 +36,6 @@ import {
   designLayerFromPath,
   isDesignSubDoc,
   loadPairDocs,
-  loadVerificationPlanEvidence,
   type PairDoc,
   pairFreezeMessages,
   verificationGroupMessages,
@@ -222,11 +222,7 @@ export function readCoverageSummary(path: string, threshold = 80): CoverageSumma
 function evaluateG7(input: StaticGateInput, repoRoot: string): StaticGateResult {
   const docs = loadPairDocs(repoRoot);
   const pair = analyzePairFreeze(docs);
-  const groups = analyzeVerificationGroups(
-    docs,
-    pair.orphans,
-    loadVerificationPlanEvidence(repoRoot),
-  );
+  const groups = analyzeVerificationGroups(docs, pair.orphans);
   const l0l7 = groups.find((g) => g.id === "L0-L7");
 
   const impl = analyzeImplPlanTrace(loadImplPlanTraceInput(repoRoot));
@@ -270,7 +266,7 @@ export function evaluateStaticGate(input: StaticGateInput): StaticGateResult {
       throw new Error("repo root is not a directory");
     }
     if (key === "G1" || key === "G1-TRACE") {
-      const result = lintPlanWithGate(undefined, repoRoot, "G1-trace");
+      const result = lintG1Trace(repoRoot);
       return combineStaticGates(input.gate, [
         evaluateLayerPairGate(input.gate, "L1", repoRoot),
         { gate: input.gate, applicable: true, passed: result.ok, messages: result.messages },
@@ -280,7 +276,7 @@ export function evaluateStaticGate(input: StaticGateInput): StaticGateResult {
       return evaluateLayerPairGate(input.gate, "L2", repoRoot);
     }
     if (key === "G3" || key === "G3-TRACE") {
-      const result = lintPlanWithGate(undefined, repoRoot, "G3-trace");
+      const result = lintG3Trace(repoRoot);
       return combineStaticGates(input.gate, [
         evaluateLayerPairGate(input.gate, "L3", repoRoot),
         { gate: input.gate, applicable: true, passed: result.ok, messages: result.messages },

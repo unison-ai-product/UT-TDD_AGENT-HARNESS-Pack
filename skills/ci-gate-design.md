@@ -15,8 +15,8 @@ applies_to:
     - Refactor
     - Recovery
 decision_points:
-  - when: "A new class of defect (e.g., orphaned PLAN, roster/guard drift) is proposed as a new `ut-tdd doctor` check."
-    choose: "First confirm `src/plan/lint.ts` and `src/doctor/` do not already cover it before implementing."
+  - when: "A new class of defect (e.g., broken design trace or roster/guard drift) is proposed as a new `ut-tdd doctor` check."
+    choose: "First confirm `src/lint/` and `src/doctor/` do not already cover it before implementing."
     over: "Adding the new gate directly without checking for overlap."
     because: "The skill states overlapping gates create false-confidence; a duplicate check can pass while masking the actual uncovered case."
   - when: "Designing what a new gate should detect."
@@ -28,7 +28,7 @@ decision_points:
     over: "Piping through `| tail` to see only the end of the log."
     because: "The skill explicitly warns truncation hides the root error; the real failing command is often earlier in the log than the final summary."
   - when: "A sub-gate fails and blocks the push."
-    choose: "Fix the root cause in source, or file a PLAN-linked rationale if suppressing."
+    choose: "Fix the root cause in source, or file an Issue-linked rationale if suppressing."
     over: "Silencing with `// biome-ignore`, `// @ts-ignore`, or `.skip` without justification."
     because: "Unlinked suppressions hide real defects from future review and accumulate as untracked technical debt."
   - when: "`npm run lint` and `biome lint` are both available as ways to check the code."
@@ -36,7 +36,7 @@ decision_points:
     over: "Running `biome lint` alone."
     because: "`biome lint` alone does not check formatting, so format violations pass locally and fail the next CI push."
   - when: "A check passes locally on code that should have failed."
-    choose: "File an `improvement-backlog.md` entry and open a PLAN for the gate defect."
+    choose: "File an `improvement-backlog.md` entry and file a GitHub Issue for the gate defect."
     over: "Treating the pass as valid and moving on."
     because: "A false-green is itself a gate defect per the skill's failure-response protocol, not a one-off fluke to ignore."
 ---
@@ -49,7 +49,7 @@ quality gate (FR-L1-05 static gate, FR-L1-18 cross-detection aggregation).
 
 ## When to load this skill
 
-- A PLAN adds a new `ut-tdd doctor` check or a `src/lint/` rule.
+- A change adds a new `ut-tdd doctor` check or a `src/lint/` rule.
 - `harness-check` is red and the root cause must be found.
 - A gate condition is being designed for a layer transition (pair-freeze /
   trace-freeze / accept).
@@ -59,7 +59,7 @@ quality gate (FR-L1-05 static gate, FR-L1-18 cross-detection aggregation).
 The canonical CI run is `harness-check`; its sub-gates are defined in
 `.github/workflows/harness-check.yml` 全体 (linux / windows / node-generation / 集約 `harness-check` job),
 which is the full set — read that file, not a copy here. (Examples only, not
-exhaustive: branch-type guard, plan admission-check, typecheck, db rebuild,
+exhaustive: branch-type guard, typecheck, db rebuild,
 doctor, vitest, biome lint, audit quality, Windows verification, Node generation.)
 Never skip a sub-gate to make CI pass. Use `npm run lint` (Biome check = format +
 lint) locally; `biome lint` alone does not check formatting.
@@ -67,10 +67,9 @@ lint) locally; `biome lint` alone does not check formatting.
 ## When a new gate is warranted
 
 Add a gate when a class of defect is mechanically detectable and currently slips
-past review (substance gap, orphaned PLAN, roster↔guard drift). First confirm
-`src/plan/lint.ts` and `src/doctor/` do not already cover it — overlapping gates
-create false-confidence (plan-governance already checks PLAN dependency
-existence). Implement under `src/lint/` or the doctor surface, wire it into
+past review (substance gap, broken design trace, roster↔guard drift). First confirm
+`src/lint/` and `src/doctor/` do not already cover it — overlapping gates
+can report the same condition more than once. Implement under `src/lint/` or the doctor surface, wire it into
 `ut-tdd doctor`, and add a Vitest test exercising both the pass and the fail
 path.
 
@@ -86,10 +85,10 @@ content is correct. When designing a gate, ask: can it detect an *absent* or
 1. Read the **full** output — never `| tail`. Truncation hides the root error.
 2. Identify the failed sub-gate (e.g. typecheck / lint / test / doctor; the full set is the workflow file).
 3. Fix the root cause in source. Do not silence with `// biome-ignore`,
-   `// @ts-ignore`, or `.skip` without a PLAN-linked rationale.
+   `// @ts-ignore`, or `.skip` without an Issue-linked rationale.
 4. Re-run the full sequence locally before pushing.
 5. If a check passed that should have failed, file an `improvement-backlog.md`
-   entry and open a PLAN — a false-green is a gate defect.
+   entry and file a GitHub Issue — a false-green is a gate defect.
 
 ## Environment notes (Windows / Linux parity)
 

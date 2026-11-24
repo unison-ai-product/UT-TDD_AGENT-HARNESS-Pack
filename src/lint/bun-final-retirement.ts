@@ -152,15 +152,11 @@ const PACK_DOCUMENT_PREFIXES = [
 ];
 
 const COMPATIBILITY_PATHS = new Set([
-  "src/schema/frontmatter.ts",
-  "src/schema/cutover-transition.ts",
-  "src/runtime/cutover-transition.ts",
   "src/runtime/verb-classify.ts",
   "src/runtime/agent-slots.ts",
   "src/runtime/node-slice-admission.ts",
   "src/lint/design-language.ts",
   "src/lint/erasable-syntax.ts",
-  "src/lint/review-evidence.ts",
   "src/lint/verification-profile.ts",
   "src/lint/verification-profile-types.ts",
   "src/lint/verification-profile-catalog.ts",

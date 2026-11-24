@@ -1,14 +1,8 @@
 import { checkCrossAgentModelPair } from "../schema/index.ts";
 import { isSecretLike } from "./index.ts";
 
-// Pure guardrail-decision invariant logic. Lives in state-db (next to the
-// guardrail_decisions table + the isSecretLike/upsert primitives it relies on)
-// so BOTH consumers can share one source of truth without a module cycle:
-//   - src/guardrail/ledger.ts (write path, fail-close) re-exports these.
-//   - src/state-db/projection-writer.ts (projection advisory, warn-first)
-//     imports them directly.
-// state-db must not import guardrail/ (that would re-introduce the
-// guardrail <-> state-db cycle the dependency-drift gate forbids).
+// Keep the pure invariants next to isSecretLike in state-db. The decision
+// ledger imports and re-exports them through guardrail/ledger.ts.
 
 export type GuardrailDecisionValue = "allow" | "block" | "human-required";
 
@@ -51,14 +45,9 @@ function normalizeDecision(input: GuardrailDecisionInput): GuardrailDecisionValu
 }
 
 /**
- * Pure, side-effect-free evaluation of the guardrail invariants. Single source
- * of truth shared by two paths so they cannot diverge:
- *   - recordGuardrailDecision (write path): fail-close — throws on secret,
- *     blocks on self-review / human-required-without-evidence.
- *   - projectGuardrailInvariantAdvisories (projection path): warn-first /
- *     non-blocking — surfaces the same violations as advisory findings without
- *     changing any authz outcome.
- * See PLAN-L7-52 C-1 (option C: projection-based, non-API, Phase 0 advisory).
+ * Pure evaluation of guardrail decision invariants. The explicit decision
+ * writer rejects secret evidence and applies the normalized decision to block
+ * self-review, same-provider review, and required approval without evidence.
  */
 export function inspectGuardrailInvariants(
   input: GuardrailDecisionInput,

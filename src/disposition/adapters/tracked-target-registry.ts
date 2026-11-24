@@ -9,16 +9,6 @@ export function buildTrackedTargetRegistry(
   familyRefs: readonly string[],
 ): TargetRegistry {
   const paths = trackedPaths(repoRoot);
-  const aliases: Record<string, string[]> = {};
-  for (const path of paths) {
-    if (!path.startsWith("docs/plans/") || !path.endsWith(".md")) continue;
-    const content = readFileSync(join(repoRoot, path), "utf8");
-    const planId = /^plan_id:\s*([^\s]+)\s*$/m.exec(content)?.[1];
-    if (!planId) continue;
-    addAlias(aliases, planId, planId);
-    const short = /^(PLAN-(?:L\d+|REVERSE)-\d+)/.exec(planId)?.[1];
-    if (short) addAlias(aliases, short, planId);
-  }
   const tracked = new Set(paths);
   const pathAliases: Record<string, string[]> = {};
   for (const path of paths) addAlias(pathAliases, basename(path), path);
@@ -48,7 +38,6 @@ export function buildTrackedTargetRegistry(
   });
   if (!parsed.ok) throw new Error(JSON.stringify(parsed.findings));
   return Object.freeze({
-    aliases: Object.freeze(aliases),
     pathAliases: Object.freeze(pathAliases),
     trackedPaths: tracked,
     familyMembers: Object.freeze(familyMembers),

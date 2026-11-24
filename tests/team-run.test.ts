@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -25,6 +25,7 @@ import {
   TEAM_RUN_REQUIRES_CROSS_PROVIDER_REVIEW_MESSAGE,
   TEAM_RUN_REQUIRES_HYBRID_MESSAGE,
 } from "../src/team/run-policy.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const hybrid = (currentRuntime: "claude" | "codex"): RuntimeDetection => ({
   mode: "hybrid",
@@ -233,7 +234,7 @@ describe("team run validation", () => {
     const recommendation = recommendTeamLaunch({
       task,
       mode: "hybrid",
-      proposalSubagents: coverage.recommended_subagents,
+      proposalSubagents: coverage.recommended_lanes,
     });
 
     expect(recommendation.should_launch).toBe(true);
@@ -418,7 +419,7 @@ describe("team run validation", () => {
       expect(slots.every((slot) => slot.slot_source === "team_runner")).toBe(true);
       expect(slots.every((slot) => slot.released_at !== null)).toBe(true);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 
@@ -456,7 +457,7 @@ describe("team run validation", () => {
         skipped_reason: dependencyFailedMessage("se"),
       });
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 
@@ -498,7 +499,7 @@ describe("team run validation", () => {
       expect(started).toEqual(["codex exec", "claude --print", "claude --print"]);
       expect(loadSlots(deps).every((slot) => slot.released_at !== null)).toBe(true);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 

@@ -1,10 +1,7 @@
 /**
  * advisory-strict-gate-aging (PLAN-L7-420 Step 3) — doctor 自身の「strict 化待ち advisory gate 放置」検出。
  *
- * green-command-digest (PLAN-L7-132) は「hard 化は fake digest 是正後」と宣言したが、CI が
- * `--strict-green-command-digest` 無しで doctor を回し続けた結果、この advisory 状態が導入から
- * 2週間以上放置され、不一致が 30 件→44 件→49 件と再蓄積した (PLAN-L7-420 G-1)。「段階導入」という
- * advisory 状態は、期限も検出機構も無いまま恒久化しうる — fail-open の看板替え。
+ * 「段階導入」という advisory 状態は、期限も検出機構も無いまま恒久化しうる。
  *
  * 本検査は「opt-in strict フラグを持つ advisory gate」の既知レジストリを保持し、CI (harness-check.yml)
  * がその strict フラグを常時投入していない gate について、導入日からの経過日数が閾値を超えていないかを
@@ -62,21 +59,10 @@ export interface AdvisoryStrictGate {
 
 /**
  * 既知の advisory→strict opt-in gate レジストリ。
- * - green-command-digest: PLAN-L7-420 Step 1/2 で不一致 49 件を是正し CI へ strict 投入済
- *   (promotedInCi=true、fail-open リスク解消)。
  * - db-telemetry-provenance: PLAN-L7-192 で opt-in switch を実装したが runtime capture gap が
  *   残るため CI 投入は期限付き deferral (PLAN-L7-420 §telemetry-provenance strict deferral 参照)。
  */
 export const ADVISORY_STRICT_GATES: readonly AdvisoryStrictGate[] = [
-  {
-    id: "green-command-digest",
-    introducedOn: "2026-06-25",
-    strictFlag: "--strict-green-command-digest",
-    promotedInCi: true,
-    planRef: "PLAN-L7-132 / PLAN-L7-194 / PLAN-L7-303 / PLAN-L7-420",
-    description:
-      "green_command の output_digest が evidence_path の実 hash と一致するかの hard gate",
-  },
   {
     id: "db-telemetry-provenance",
     introducedOn: "2026-06-29",

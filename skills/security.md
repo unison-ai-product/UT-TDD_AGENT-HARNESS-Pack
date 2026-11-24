@@ -24,10 +24,10 @@ decision_points:
     choose: "stop the PLAN, document the boundary crossed in `.ut-tdd/audit/`, and wait for explicit PO confirmation"
     over: "proceeding with implementation and recording the change in normal review_evidence"
     because: "these are named escalation boundaries; the file states escalation means stopping the PLAN, not just annotating it after the fact."
-  - when: "`agent-guard.ts` receives an agent call with an unknown `subagent_type` or missing `model` field."
-    choose: "exit 1 (fail-close)"
+  - when: "`agent-guard.ts` receives an agent call with a missing or unrecognised `model`, fable on the generic route, or an envelope without `tool_name`."
+    choose: "exit 2 (fail-close)"
     over: "exiting 0 and logging a warning"
-    because: "the file states fail-close is the only safe default for an unrecognized agent type or missing model — a fail-open path would let an unvetted agent execute."
+    because: "an implicit or unverifiable model is the unsafe default; the generic route (no harness definition) is allowed only with an explicit model and has no closing authority (#1002)."
   - when: "`UT_TDD_ALLOW_RAW_AGENT=1` is used to bypass agent-guard."
     choose: "require it to write evidence to `.ut-tdd/audit/` every time, treating it as an emergency bypass"
     over: "treating it as a normal operational flag usable without an audit trail"
@@ -81,14 +81,16 @@ Escalation means stopping the current PLAN, documenting the boundary crossed in
 
 The `agent-guard.ts` hook enforces:
 
-1. `subagent_type` must be in the allowlist (currently 14 named agents). Any
-   unknown type exits 1 — fail-close is the only safe default.
-2. Agent calls without a `model` field are rejected.
-3. The model family must match the agent frontmatter declaration.
+1. Agent calls without a `model` field are rejected (exit 2), for every
+   `subagent_type` — an implicit model is the unsafe default.
+2. A `subagent_type` without a harness definition (generic route) passes only with an
+   explicit, recognised, non-fable model; it has no closing authority (#1002).
+3. For a defined subagent, the model family must be at or above the family declared
+   in its frontmatter (a floor; downgrades are rejected).
 4. Bypass requires `UT_TDD_ALLOW_RAW_AGENT=1` AND must write evidence to
    `.ut-tdd/audit/`.
-5. Invalid stdin JSON fails closed — silently ignoring parse errors is
-   prohibited.
+5. Invalid stdin JSON, and an envelope without `tool_name` (including empty stdin),
+   fail closed — silently ignoring parse errors is prohibited.
 
 When reviewing a PLAN that modifies agent-guard behaviour, verify each of these
 five rules is still enforced after the change.

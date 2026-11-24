@@ -21,9 +21,9 @@ const validDocs: RuntimePortabilityDoc[] = [
         build: "node scripts/build-node.mjs",
         test: "vitest run",
         "test:fast":
-          "vitest run --exclude tests/cli-surface.test.ts --exclude tests/drive-db-registration.test.ts --exclude tests/projection-writer.test.ts",
+          "vitest run --exclude tests/cli-surface.test.ts --exclude tests/projection-writer.test.ts",
         "test:db":
-          "npm run db && vitest run tests/db-projection-ingestion.test.ts tests/drive-db-registration.test.ts tests/projection-writer.test.ts",
+          "npm run db && vitest run tests/db-projection-ingestion.test.ts tests/projection-writer.test.ts",
         "test:cli": "vitest run tests/cli-surface.test.ts tests/runtime-hook-entrypoints.test.ts",
         "test:node-fallback": "vitest run tests/state-db.test.ts tests/runtime-portability.test.ts",
         typecheck: "tsc --noEmit",

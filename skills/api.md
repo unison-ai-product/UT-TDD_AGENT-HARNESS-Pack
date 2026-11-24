@@ -45,13 +45,13 @@ decision_points:
 # api
 
 REST/RPC endpoint design, versioning strategy, and the UT-TDD V-model obligations
-that accompany a new or changed API surface. Apply when a PLAN introduces,
+that accompany a new or changed API surface. Apply when an Issue introduces,
 modifies, or removes an API endpoint.
 
 ## When to load this skill
 
 - Authoring an L4 basic-design doc that defines a new REST or RPC surface.
-- A PLAN with `kind=add-impl` or `kind=add-design` touches `src/` routes or CLI
+- An Add-feature design or implementation touches `src/` routes or CLI
   command dispatch.
 - A Reverse R1 pass must extract the existing HTTP surface into a contract doc.
 - An L8 integration-test design must specify the API contract under test.
@@ -83,13 +83,13 @@ requires an L4 doc update and a new pair-freeze before merging.
 - Deprecated versions must carry a sunset date in the L4 doc and a response
   header (`Deprecation: <date>`).
 
-## Pair-freeze checklist for an API PLAN
+## Pair-freeze checklist for an API change
 
 - [ ] L4 doc exists at `docs/design/.../L4-basic/` with method, path, shapes,
       errors, and versioning section.
 - [ ] L8 integration-test design doc exists at `docs/test-design/` and references
       the L4 doc by path.
-- [ ] `ut-tdd plan lint` exits 0 (PLAN `generates` lists both L4 and L8 docs).
+- [ ] The Issue links the L4 design and its L8 test design.
 - [ ] `ut-tdd doctor` exits 0.
 - [ ] No endpoint name conflicts with existing routes (`ut-tdd graph export
       --format mermaid` for a dependency view if wiring crosses modules).

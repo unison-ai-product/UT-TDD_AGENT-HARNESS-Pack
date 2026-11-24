@@ -20,8 +20,6 @@ const markers = [
   "claude-only",
   "codex-only",
   "hybrid",
-  "route_signal",
-  "generates",
 ].join("\n");
 
 const completeDocs = (): RuleAdapterDocs => ({
@@ -48,19 +46,6 @@ describe("rule-drift lint", () => {
     expect(result.forbiddenMarkers).toEqual([]);
     expect(result.missingMarkers).toEqual([{ file: "AGENTS.md", marker: "ut-tdd doctor" }]);
     expect(ruleDriftMessages(result)[0]).toContain("rule-drift");
-  });
-
-  // 2026-07-28: PLAN filing discipline (route certificate / draft generates) lived only
-  // in .claude/CLAUDE.md, so the Codex adapter never received it and produced PLANs that
-  // tripped the governance gates. An adapter dropping these terms must fail closed.
-  it("reports a PLAN filing rule dropped from one adapter", () => {
-    for (const marker of ["route_signal", "generates"]) {
-      const docs = completeDocs();
-      docs.agents = docs.agents.replace(marker, "");
-      const result = analyzeRuleDrift(docs);
-      expect(result.ok, `dropping ${marker} from AGENTS.md must fail closed`).toBe(false);
-      expect(result.missingMarkers).toEqual([{ file: "AGENTS.md", marker }]);
-    }
   });
 
   it("U-RDRIFT-004: reports forbidden legacy runtime markers from adapter docs", () => {

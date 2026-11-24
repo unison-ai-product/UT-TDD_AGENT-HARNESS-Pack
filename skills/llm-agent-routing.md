@@ -30,7 +30,7 @@ decision_points:
     choose: "redact before injection and assert their absence in a test"
     over: "pass the context through unredacted and rely on the model to ignore it"
     because: "the harness safety boundary prohibits PII/credentials/payload bodies in injected context outright, and models cannot be relied on to withhold received data"
-  - when: "an agent call's requested model does not match the family declared in the agent frontmatter"
+  - when: "an agent call for a defined subagent requests a model below the family floor declared in its frontmatter"
     choose: "let `agent-guard.ts` block the call at PreToolUse"
     over: "hard-code a mismatched or cost-cutting model in source to work around the guard"
     because: "hard-coding around the guard defeats the model-family floor the guard exists to enforce (FR-L1-09)"
@@ -59,7 +59,8 @@ UT-TDD externalises provider calls into `ut-tdd claude --role <role>`,
    it through the wrappers so session lifecycle, handover warnings, and cost
    telemetry are captured.
 2. The `PreToolUse(Agent)` guard (`src/runtime/agent-guard.ts:93`
-   `evaluateAgentGuard`) blocks disallowed `subagent_type` / model downgrades —
+   `evaluateAgentGuard`) blocks a missing model, fable on the generic route, and
+   model downgrades below a defined subagent's floor —
    never hard-code a mismatched model.
 3. Apply low-cost-first: use the lightest viable model for mechanical subtasks;
    reserve the frontier model for judgement gates and design decisions (see the

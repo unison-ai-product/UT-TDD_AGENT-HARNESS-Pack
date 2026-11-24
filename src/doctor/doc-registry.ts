@@ -24,7 +24,8 @@ import {
 
 const RGK_L8_DOC = "docs/test-design/harness/L8-integration-test-design.md";
 const RGK_FIXTURE_MANIFEST = "docs/test-design/harness/resource-kernel-fixture-manifest.yaml";
-const RGK_CONTRACT_DOC = "docs/plans/PLAN-L5-25-resource-kernel-physical-protocol.md";
+const RGK_PAIR_CONTRACT_DOC =
+  "docs/design/harness/L5-detailed-design/resource-kernel-wire-custody.md";
 
 /**
  * D0-R Resource Kernel の fixture 宣言と正本 manifest の突合を hard gate 検査
@@ -39,11 +40,14 @@ export function checkResourceKernelFixtureManifest(repoRoot: string): {
   ok: boolean;
 } {
   try {
+    const manifest = parseFixtureManifest(
+      readFileSync(join(repoRoot, RGK_FIXTURE_MANIFEST), "utf8"),
+    );
     const r = analyzeFixtureManifest({
       rows: parseL8FixtureRows(readFileSync(join(repoRoot, RGK_L8_DOC), "utf8")),
-      manifest: parseFixtureManifest(readFileSync(join(repoRoot, RGK_FIXTURE_MANIFEST), "utf8")),
+      manifest,
       contractSections: parseContractSections(
-        readFileSync(join(repoRoot, RGK_CONTRACT_DOC), "utf8"),
+        readFileSync(join(repoRoot, manifest.contractDoc), "utf8"),
       ),
       pathExists: (p) => existsSync(join(repoRoot, p)),
     });
@@ -87,7 +91,9 @@ export function checkResourceKernelPairMapping(repoRoot: string): {
     const l8Markdown = readFileSync(join(repoRoot, RGK_L8_DOC), "utf8");
     const r = analyzeResourceKernelPairMapping({
       freezeRows: parseFreezeAttributeRows(l8Markdown),
-      mappingRows: parseContractMappingRows(readFileSync(join(repoRoot, RGK_CONTRACT_DOC), "utf8")),
+      mappingRows: parseContractMappingRows(
+        readFileSync(join(repoRoot, RGK_PAIR_CONTRACT_DOC), "utf8"),
+      ),
       laneDeclarations: parseLaneDeclarations(l8Markdown),
       declaredRealRunnerTotal: parseRealRunnerTotal(l8Markdown),
     });

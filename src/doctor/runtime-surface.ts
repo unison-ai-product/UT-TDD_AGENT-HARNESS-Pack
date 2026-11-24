@@ -131,14 +131,10 @@ export function checkCodexWrapperParity(deps: RuntimeSurfaceDeps): {
   if (!/stdin:\s*(intent\.task|formatAdapterPrompt\(intent\.task,)/.test(adapter)) {
     violations.push("Codex/Claude adapter task text must be carried by stdin");
   }
-  if (!/plan_id:\s*intent\.planId/.test(adapter)) {
-    violations.push("adapter plan id must remain harness metadata");
-  }
-
   const codexWrapperTests = [
     "ut-tdd codex --execute records the same session lifecycle through the adapter wrapper",
     "ut-tdd codex --task-file feeds file content through the same adapter wrapper",
-    "ut-tdd codex --plan records wrapper lifecycle without forwarding plan flags to Codex",
+    "ut-tdd codex records wrapper lifecycle without resolving a current PLAN",
   ];
   for (const testName of codexWrapperTests) {
     if (!hookTests.includes(testName)) {

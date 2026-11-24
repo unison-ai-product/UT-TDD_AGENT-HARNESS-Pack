@@ -9,7 +9,6 @@ import {
   checkImprovementBacklog,
   checkLintWiring,
   checkProposalDocumentCoverage,
-  checkRightArmGatePlanning,
   checkRightLungDocGovernance,
 } from "../src/doctor/workflow-quality.ts";
 
@@ -19,7 +18,6 @@ describe("doctor workflow quality checks", () => {
 
     const checks = [
       ["improvement-backlog", checkImprovementBacklog(missingRoot)],
-      ["right-arm-gate-planning", checkRightArmGatePlanning(missingRoot)],
       ["lint-wiring", checkLintWiring(missingRoot)],
       ["frontend-design-coverage", checkFrontendDesignCoverage(missingRoot)],
       ["proposal-document-coverage", checkProposalDocumentCoverage(missingRoot)],

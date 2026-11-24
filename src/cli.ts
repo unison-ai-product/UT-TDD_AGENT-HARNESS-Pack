@@ -2,9 +2,10 @@
 /**
  * UT-TDD Agent Harness CLI (TypeScript core, ADR-001).
  * 薄い OS 別 entrypoint (scripts/ut-tdd, ut-tdd.ps1) が本 core を呼ぶ。
- * status / doctor / plan lint / vmodel lint / gate / runtime adapter を集約する。
+ * status / doctor / vmodel lint / gate / runtime adapter を集約する。
  */
-import { execFileSync, spawn } from "node:child_process";
+import "./runtime/windows-hide.ts";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -19,11 +20,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { parse as parseYaml } from "yaml";
-import {
-  catalogAutomationAssets,
-  checkRosterConsistency,
-  listRosterRegistry,
-} from "./assets/catalog.ts";
+import { catalogAutomationAssets } from "./assets/catalog.ts";
 import { loadBranchAudit, renderBranchAudit } from "./audit/branches.ts";
 import { renderQualityAudit, runQualityAudit } from "./audit/quality.ts";
 import {
@@ -33,10 +30,9 @@ import {
 } from "./cli/delegation.ts";
 import { registerDistributionCommands } from "./cli/distribution.ts";
 import { registerFeedbackCommands } from "./cli/feedback.ts";
-import { registerPlanAdmissionCommands } from "./cli/plan-admission.ts";
-import { registerPlanAssetCommands } from "./cli/plan-asset.ts";
-import { registerPlanDraftCommand } from "./cli/plan-draft.ts";
-import { registerPlanRevisionCommand } from "./cli/plan-revise.ts";
+import { registerGuardrailCommands } from "./cli/guardrail.ts";
+import { registerIssueCommands } from "./cli/issue.ts";
+import { registerLintGateCommands } from "./cli/lint-gates.ts";
 import { registerPrMergeCommands } from "./cli/pr-merge.ts";
 import { registerLiveReviewCommands } from "./cli/review-live.ts";
 import { contextSuggest } from "./context/doc-router.ts";
@@ -48,7 +44,6 @@ import {
 import { runDoctor, runDoctorMeasured } from "./doctor/index.ts";
 import { writeDoctorResultEnvelopeFile } from "./doctor/result-file.ts";
 import { acquireDoctorLock, doctorLockBlockedMessage } from "./doctor/singleton-lock.ts";
-import { renderElicitationContext, selectElicitationContext } from "./elicitation/context.ts";
 import { appendDesignDecision, DESIGN_DECISION_LOG_PATH } from "./elicitation/record.ts";
 import { computeSkillMetrics } from "./feedback/engine.ts";
 import { registerForwardWorkflowCommands } from "./forward/adapters/cli-registrar.ts";
@@ -56,11 +51,12 @@ import { evaluateGateReview, loadReviewChecklistIfPresent } from "./gate/review-
 import { writeGateRunEvidence } from "./gate/run-evidence.ts";
 import { evaluateStaticGate } from "./gate/static.ts";
 import { runChangeLaneClassification, SystemGitDiffNamesPort } from "./github/change-lane.ts";
+import { runDesignProtectionCommand } from "./github/design-protection.ts";
+import { GH_COMMAND_TIMEOUT_MS, ghCommandEnv } from "./github/gh-command.ts";
+import { evaluateGithubOpsGuardWithCommitInput } from "./github/guard-commit-range.ts";
 import { collectJobSummary, renderJobSummary } from "./github/job-summary.ts";
-import { evaluateGithubOpsGuard, renderGithubOpsGuard } from "./github/ops-guard.ts";
+import { renderGithubOpsGuard } from "./github/ops-guard.ts";
 import { renderPrTraceBlock, validatePrTraceBody } from "./github/pr-trace.ts";
-import { GhProjectV2Adapter, persistProjectSync, syncForwardProject } from "./github/project-v2.ts";
-import { syncRepositoryBindings } from "./github/repository-bindings.ts";
 import {
   diffRepositoryPolicy,
   normalizeRulesets,
@@ -68,14 +64,7 @@ import {
   renderPolicyDiff,
 } from "./github/repository-policy.ts";
 import { loadRelationGraphSourceSet } from "./graph/loader.ts";
-import {
-  checkHandoverBypass,
-  checkHandoverDiscipline,
-  latestSessionId,
-  nodeHandoverDeps,
-  runHandover,
-  setActivePlanCli,
-} from "./handover/index.ts";
+import { checkHandoverBypass, nodeHandoverDeps, runHandover } from "./handover/index.ts";
 import {
   renderSessionStartDigest,
   selectSessionStartDigest,
@@ -92,21 +81,18 @@ import {
 } from "./lint/bun-final-retirement.ts";
 import {
   type NodeBanF0cAggregateBinding,
+  type NodeBanTestProbeOutcome,
   nodeBanAuditMessages,
   runNodeBanAudit,
 } from "./lint/bun-permanent-ban.ts";
 import { loadChangedFiles, loadStagedFiles } from "./lint/change-impact.ts";
-import {
-  applyDigestAnchorCandidatesToContent,
-  nodeHistoryScanDeps,
-  planDigestMigration,
-} from "./lint/green-command-digest.ts";
 import { parseNodeGenerationCiEvidence } from "./lint/node-generation-ci-policy.ts";
 import { writeVModelTemplates } from "./setup/vmodel-template-writer.ts";
 import { materializeSkillAssets } from "./shared/embedded-skills.ts";
 
 export { collectFinalRetirementFindings };
 
+import { SystemGitCommandPort } from "./github/git-diff.ts";
 import {
   PROJECT_IDENTITY_COMMIT_RECOVERY_COMMANDS,
   PROJECT_IDENTITY_ORIGIN_RECOVERY_COMMANDS,
@@ -118,7 +104,6 @@ import {
   exportRelationDiagram,
   type RelationDiagramAdapter,
 } from "./lint/relation-graph.ts";
-import { loadReviewPlans } from "./lint/review-evidence.ts";
 import {
   inspectMcpProfile,
   listVerificationProfiles,
@@ -139,21 +124,8 @@ import {
   renderMemoryHealth,
   writeMemory,
 } from "./memory/service.ts";
-import { lintPlanWithGate } from "./plan/lint.ts";
-import { createNodePlanDraftRunner } from "./plan-admission/node-plan-draft-runner.ts";
-import { createNodePlanRevisionRunner } from "./plan-admission/node-plan-revision-runner.ts";
-import {
-  type AdapterContextInjection,
-  type AdapterProvider,
-  buildProviderInvocation,
-} from "./runtime/adapter.ts";
-import {
-  type AgentGuardInput,
-  evaluateAgentGuard,
-  normalizeModelFamily,
-  type ResolvedFamily,
-} from "./runtime/agent-guard.ts";
-import { SUBAGENT_ALLOWLIST } from "./runtime/agent-guard-policy.ts";
+import { type AdapterProvider, buildProviderInvocation } from "./runtime/adapter.ts";
+import { type AgentGuardInput, evaluateAgentGuard } from "./runtime/agent-guard.ts";
 import {
   nodeAgentSlotsDeps,
   recordGuardFire,
@@ -177,9 +149,15 @@ import {
   resolveLiveClaudeTarget,
   waitForClaudeMemory,
 } from "./runtime/claude-memory-wake.ts";
+import { emitClaudeVersionWarning } from "./runtime/claude-version-warning.ts";
 import { detectMode, nextActionForMode, type RuntimeDetection } from "./runtime/detect.ts";
 import { scanDanglingStops } from "./runtime/forced-stop.ts";
-import { createNodeInvocation, verifyNodeGeneration } from "./runtime/node-bootstrap.ts";
+import {
+  createNodeInvocation,
+  runNodeInvocationProbe,
+  verifyNodeGeneration,
+} from "./runtime/node-bootstrap.ts";
+import { createPostToolUseInput } from "./runtime/post-tool-use-input.ts";
 import {
   isLinkedWorktreeCheckout,
   requireProjectMemoryRoot,
@@ -201,8 +179,6 @@ import {
   dispatch,
   nodeDeps,
   parseSessionEvents,
-  recordSkillInjectionAttempt,
-  resolveActivePlan,
   type SessionHookInput,
   safeName,
 } from "./runtime/session-log.ts";
@@ -213,6 +189,11 @@ import {
   resolveForeignEditOverride,
 } from "./runtime/work-guard.ts";
 import { findReference } from "./search/index.ts";
+import {
+  handleConsumerWorktreeSetupOption,
+  invalidSetupMode,
+  reportExistingRuntime,
+} from "./setup/consumer-worktree-cli.ts";
 import {
   admitConsumerLocalRuntime,
   admitReleaseAggregate,
@@ -238,23 +219,10 @@ import { ensureDir } from "./shared/fs.ts";
 import {
   bucketRecommendations,
   buildSkillInjectionSet,
-  recommendSkillsForPlan,
   recommendSkillsForText,
-  recordSkillRecommendations,
   resolveRuntimeSessionId,
 } from "./skill-engine/recommend.ts";
 import { type SkillCategory, scaffoldSkill } from "./skill-engine/scaffold.ts";
-import {
-  claimGithubProjection,
-  deriveStoredForwardReadiness,
-  isManualGithubObservationKind,
-  markGithubProjectionFailed,
-  queueGithubProjection,
-  rebuildExecutionReadiness,
-  recordGithubBinding,
-  selectActiveProjectRows,
-  selectExistingProjectPlans,
-} from "./state-db/github-forward-projection.ts";
 import { defaultHarnessDbPath, openHarnessDb } from "./state-db/index.ts";
 import { harnessDbStatus } from "./state-db/maintenance.ts";
 import { migrate } from "./state-db/migration.ts";
@@ -315,6 +283,7 @@ function gitBranch(): string | null {
   try {
     return execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       encoding: "utf8",
+      windowsHide: true,
     }).trim();
   } catch {
     return null;
@@ -327,6 +296,10 @@ function gitHead(): string | null {
   } catch {
     return null;
   }
+}
+
+function fullGitHead(cwd: string): string {
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
 }
 
 function optionFromCommandChain<T>(cmd: Command, key: string): T | undefined {
@@ -357,70 +330,6 @@ function resolveTaskText(opts: { task?: string; taskFile?: string }): string | n
     }
   }
   return opts.task ?? null;
-}
-
-function resolveSkillContextInjection(
-  planId: string | undefined,
-): AdapterContextInjection | undefined {
-  if (!planId) return undefined;
-  const repoRoot = process.cwd();
-  // PLAN-L7-262: 注入の成功/skip を session jsonl へ記録する (silent fail-open をやめ、
-  // 「握った事実の記録付き fail-open」へ)。記録自体は recordEvent の fail-open に従う。
-  const logDeps = nodeDeps(repoRoot, () => null);
-  const db = openHarnessDb(":memory:", { repoRoot });
-  try {
-    try {
-      // 文脈注入は skill/PLAN 投影だけが必要で、グローバル token telemetry の再走査は不要。
-      // 毎回の provider 起動で home 配下を走査すると実行境界を不必要に遅延させる。
-      rebuildHarnessDb({ repoRoot, db, skipTokenTelemetry: true });
-    } catch {
-      recordSkillInjectionAttempt(
-        { plan_id: planId, status: "skipped", reason: "rebuild-failed", required: 0, optional: 0 },
-        logDeps,
-      );
-      return undefined;
-    }
-    const recommendations = recommendSkillsForPlan(db, planId);
-    const injection = buildSkillInjectionSet(db, recommendations);
-    if (injection.required_paths.length === 0 && injection.optional_paths.length === 0) {
-      recordSkillInjectionAttempt(
-        {
-          plan_id: planId,
-          status: "skipped",
-          reason: "no-matching-skills",
-          required: 0,
-          optional: 0,
-        },
-        logDeps,
-      );
-      return undefined;
-    }
-    recordSkillInjectionAttempt(
-      {
-        plan_id: planId,
-        status: "injected",
-        required: injection.required_paths.length,
-        optional: injection.optional_paths.length,
-      },
-      logDeps,
-    );
-    return {
-      required_paths: injection.required_paths,
-      optional_paths: injection.optional_paths,
-    };
-  } finally {
-    db.close();
-  }
-}
-
-function planIdFromPath(path: string | undefined): string | undefined {
-  if (!path) return undefined;
-  try {
-    const raw = readFileSync(path, "utf8");
-    return raw.match(/^plan_id:\s*([^\r\n]+)/m)?.[1]?.trim();
-  } catch {
-    return undefined;
-  }
 }
 
 function readHookInput(defaultEvent: string, sessionId?: string): SessionHookInput {
@@ -490,16 +399,6 @@ function parseHookInput<T>(raw: string): T | null {
   }
 }
 
-function resolveAgentFamilyFromRepo(repoRoot: string, subagentType: string): ResolvedFamily {
-  const md = join(repoRoot, ".claude", "agents", `${subagentType}.md`);
-  if (!existsSync(md)) return "missing";
-  const content = readFileSync(md, "utf8");
-  const fm = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!fm) return "unknown";
-  const modelLine = fm[1].match(/^model:[ \t]*(\S+)/m);
-  return normalizeModelFamily(modelLine?.[1]?.trim()) ?? "unknown";
-}
-
 function hookTargetPaths(input: { tool_input?: unknown } | null, repoRoot: string): string[] {
   return extractEditTargets(input?.tool_input).map((target) =>
     normalizeRepoRelative(target, repoRoot),
@@ -508,7 +407,7 @@ function hookTargetPaths(input: { tool_input?: unknown } | null, repoRoot: strin
 
 function writeHandoverWarnings(): void {
   const hdeps = nodeHandoverDeps(process.cwd());
-  for (const w of [...checkHandoverDiscipline(hdeps), ...checkHandoverBypass(hdeps)]) {
+  for (const w of checkHandoverBypass(hdeps)) {
     process.stderr.write(`[ut-tdd handover] ${w}\n`);
   }
 }
@@ -605,14 +504,7 @@ function readMemoryThroughService(
   }
 }
 
-/**
- * Read-only PR lifecycle observation at the CLI boundary.
- *
- * The inbox core accepts an observation port so it never owns GitHub/network
- * policy.  `gh pr view` is deliberately invoked without a shell and every
- * parse/network failure returns `undefined`; callers then leave the entry
- * live.  A missing observation must never become a terminal decision.
- */
+/** CLI 側で PR を観測する。観測できなければ inbox の項目を保留したままにする。 */
 function observeClaudeInboxPullRequest(
   repoRoot: string,
   pr: number,
@@ -621,7 +513,13 @@ function observeClaudeInboxPullRequest(
     const raw = execFileSync(
       "gh",
       ["pr", "view", String(pr), "--json", "state,mergedAt,headRefOid"],
-      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: GH_COMMAND_TIMEOUT_MS,
+        env: ghCommandEnv(process.env),
+      },
     );
     return parseClaudeInboxPullRequestObservation(pr, raw);
   } catch {
@@ -634,13 +532,6 @@ function surfaceSessionStartDigestToStdout(
   escalationBlock = "",
   outputTo: "stdout" | "stderr" = "stdout",
 ): void {
-  const writeOutput = (text: string) => {
-    if (outputTo === "stderr") {
-      process.stderr.write(text);
-      return;
-    }
-    process.stdout.write(text);
-  };
   // memory は DB 障害と独立に正本ファイルから読む (PLAN-L7-468 欠陥 3)。
   const memory = readMemoryThroughService(repoRoot, { limit: 5 });
   let unclaimedInbox: ReturnType<typeof recoverAndSummarizeClaudeInboxForSessionStart> | undefined;
@@ -662,7 +553,7 @@ function surfaceSessionStartDigestToStdout(
           unclaimedInbox,
         }),
       );
-      if (block) writeOutput(block);
+      if (block) (outputTo === "stderr" ? process.stderr : process.stdout).write(block);
       process.stderr.write(renderMemoryHealth(memory));
     } finally {
       db.close();
@@ -755,10 +646,6 @@ program
     "fail closed when populated telemetry tables have only projection provenance",
   )
   .option(
-    "--strict-green-command-digest",
-    "fail closed when green command digests do not match their evidence files",
-  )
-  .option(
     "--setup-smoke",
     "run only the fresh-consumer setup smoke checks for wrapper and adapter hooks",
   )
@@ -774,7 +661,6 @@ program
   .action(
     async (opts: {
       strictTelemetryProvenance?: boolean;
-      strictGreenCommandDigest?: boolean;
       setupSmoke?: boolean;
       profile?: string;
       profiles?: boolean;
@@ -836,7 +722,6 @@ program
       try {
         measured = runDoctorMeasured(undefined, {
           strictTelemetryProvenance: opts.strictTelemetryProvenance === true,
-          strictGreenCommandDigest: opts.strictGreenCommandDigest === true,
           setupSmoke: opts.setupSmoke === true,
           ...(profile ? { profile: profile as DoctorRunProfileId } : {}),
           scope,
@@ -860,7 +745,6 @@ program
                 ? measured.profile.id
                 : null,
             options: {
-              strict_green_command_digest: opts.strictGreenCommandDigest === true,
               strict_telemetry_provenance: opts.strictTelemetryProvenance === true,
               timing: opts.timing === true,
             },
@@ -1228,7 +1112,7 @@ session
   .action((opts: { session?: string }) => {
     const input = readHookInput(HOOK_EVENT_SESSION_START, opts.session);
     const repoRoot = requireRuntimeRepoRoot();
-    const deps = nodeDeps(repoRoot, gitBranch, gitHead);
+    const deps = nodeDeps(repoRoot, gitHead);
     dispatch(input, deps, HOOK_EVENT_SESSION_START);
     runSessionStartSideEffects({ repoRoot, input, deps });
     process.stdout.write(`session-log: start ${input.session_id ?? "ut-tdd-cli"}\n`);
@@ -1236,12 +1120,12 @@ session
 
 session
   .command("summary")
-  .description("compress session events into PLAN digest and surface handover discipline warnings")
+  .description("record session end and surface handover bypass warnings")
   .option("--session <id>", SESSION_OPTION_DESCRIPTION)
   .action((opts: { session?: string }) => {
     const input = readHookInput("Stop", opts.session);
     const repoRoot = requireRuntimeRepoRoot();
-    dispatch(input, nodeDeps(repoRoot, gitBranch, gitHead), "Stop");
+    dispatch(input, nodeDeps(repoRoot, gitHead), "Stop");
     writeHandoverWarnings();
     // PLAN-L7-365 Step 2 (issue #78): Stop 境界で on-disk harness.db を自動追従。
     // Stop hook の timeout 予算 (5s) を消費しないよう detached で fire-and-forget 起動し、
@@ -1332,30 +1216,21 @@ hook
       outcome?: "ok" | "error";
     }) => {
       const input = readHookInput("PostToolUse", opts.session);
-      const toolInput: Record<string, unknown> = {
-        ...(input.tool_input ?? {}),
-        ...(opts.path ? { file_path: opts.path } : {}),
-        ...(opts.command ? { command: opts.command } : {}),
-      };
       const repoRoot = requireRuntimeRepoRoot({ allowCwdFallback: true });
-      const postInput = {
-        ...input,
-        hook_event_name: "PostToolUse",
-        tool_name: opts.tool ?? input.tool_name ?? (opts.command ? "Bash" : "manual"),
-        tool_input: toolInput,
-        tool_response: opts.outcome
-          ? {
-              ...(typeof input.tool_response === "object" ? input.tool_response : {}),
-              outcome: opts.outcome,
-            }
-          : input.tool_response,
-      };
-      dispatch(postInput, nodeDeps(repoRoot, gitBranch, gitHead), "PostToolUse");
+      const postInput = createPostToolUseInput(input, opts);
+      dispatch(postInput, nodeDeps(repoRoot, gitHead), "PostToolUse");
       const encodingGuard = runWriteEncodingGuard(postInput, {
         repoRoot,
         changedFiles: () => loadChangedFiles(repoRoot),
       });
-      process.stdout.write(`session-log: post-tool-use ${input.session_id ?? "ut-tdd-cli"}\n`);
+      const warningEmitted = emitClaudeVersionWarning(
+        repoRoot,
+        input.session_id ?? "ut-tdd-cli",
+        input.transcript_path,
+      );
+      if (!warningEmitted) {
+        process.stdout.write(`session-log: post-tool-use ${input.session_id ?? "ut-tdd-cli"}\n`);
+      }
       for (const message of encodingGuard.messages) {
         process.stderr.write(`${message}\n`);
       }
@@ -1365,7 +1240,7 @@ hook
 hook
   .command("agent-guard")
   .description(
-    "PreToolUse(Agent|Task): enforce subagent allowlist and declared model family; exits: 0=pass, 1=error, 2=blocked",
+    "PreToolUse(Agent|Task): enforce generic subagent types and explicit non-fable model; exits: 0=pass, 1=error, 2=blocked",
   )
   .action(() => {
     const repoRoot = requireRuntimeRepoRoot();
@@ -1376,7 +1251,6 @@ hook
       return;
     }
     const decision = evaluateAgentGuard(input, {
-      resolveAgentFamily: (subagentType) => resolveAgentFamilyFromRepo(repoRoot, subagentType),
       allowRaw: process.env.UT_TDD_ALLOW_RAW_AGENT === "1",
     });
     if (decision.message) process.stderr.write(`${decision.message}\n`);
@@ -1501,178 +1375,30 @@ guard
     },
   );
 
-const plan = program.command("plan").description("PLAN 操作");
-registerPlanAssetCommands(plan);
-registerPlanAdmissionCommands(plan);
-registerPlanDraftCommand(plan, { runner: createNodePlanDraftRunner(process.cwd()) });
-registerPlanRevisionCommand(plan, { runner: createNodePlanRevisionRunner(process.cwd()) });
-plan
-  .command("lint [path]")
-  .description("PLAN lint")
-  .option(
-    "--gate <id>",
-    "run a named PLAN gate lint (schedule, governance/frontmatter, G1-trace, G3-trace)",
-  )
-  .action((path?: string, opts?: { gate?: string }) => {
-    const r = lintPlanWithGate(path, process.cwd(), opts?.gate);
-    for (const m of r.messages) process.stdout.write(`${m}\n`);
-    process.exitCode = r.ok ? 0 : 1;
-  });
-
-plan
-  .command("digest-migrate")
-  .description(
-    "green_command digest を記録時点 commit へ anchor 化する計画 (PLAN-L7-303、dry-run 既定)。" +
-      "履歴から claimed digest 一致 commit を特定し recoverable/suspect に分類する。",
-  )
-  .option("--json", "JSON 出力")
-  .option(
-    "--execute",
-    "recoverable entry に anchor_commit を追記する (既存 output_digest は変更しない)",
-  )
-  .action((opts: { json?: boolean; execute?: boolean }) => {
-    const repoRoot = process.cwd();
-    const plans = loadReviewPlans(repoRoot);
-    const candidates = planDigestMigration(plans, nodeHistoryScanDeps(repoRoot));
-    if (opts.json) {
-      process.stdout.write(`${JSON.stringify(candidates, null, 2)}\n`);
-      return;
-    }
-    const counts = { recoverable: 0, suspect: 0, "already-anchored": 0 } as Record<string, number>;
-    for (const c of candidates) counts[c.disposition] = (counts[c.disposition] ?? 0) + 1;
-    if (opts.execute) {
-      const byFile = new Map<string, typeof candidates>();
-      for (const c of candidates.filter((x) => x.disposition === "recoverable")) {
-        byFile.set(c.file, [...(byFile.get(c.file) ?? []), c]);
-      }
-      let touchedFiles = 0;
-      let applied = 0;
-      let skippedAlreadyAnchored = 0;
-      for (const [file, fileCandidates] of byFile) {
-        const path = join(repoRoot, "docs", "plans", file);
-        const before = readFileSync(path, "utf8");
-        const result = applyDigestAnchorCandidatesToContent(before, fileCandidates);
-        applied += result.applied;
-        skippedAlreadyAnchored += result.skippedAlreadyAnchored;
-        if (result.content !== before) {
-          writeFileSync(path, result.content, "utf8");
-          touchedFiles += 1;
-        }
-      }
-      process.stdout.write(
-        `plan digest-migrate --execute — applied=${applied} files=${touchedFiles} ` +
-          `skipped_already_anchored=${skippedAlreadyAnchored} suspect=${counts.suspect}\n`,
-      );
-      process.stdout.write(
-        "既存 output_digest は変更していない。suspect は履歴に claimed 一致 blob が無いため未更新。\n",
-      );
-      return;
-    }
-    process.stdout.write(
-      `plan digest-migrate (dry-run) — ${candidates.length} green_command: ` +
-        `recoverable=${counts.recoverable} suspect=${counts.suspect} already-anchored=${counts["already-anchored"]}\n`,
-    );
-    for (const c of candidates.filter((x) => x.disposition !== "already-anchored")) {
-      const anchor = c.anchor_candidate
-        ? `anchor=${c.anchor_candidate.slice(0, 12)}`
-        : "anchor=none";
-      process.stdout.write(`  [${c.disposition}] ${c.plan_id} ${c.evidence_path} ${anchor}\n`);
-    }
-    process.stdout.write(
-      "\nsuspect = どの commit にも claimed 一致 blob 無し (捏造/回復不能疑い、A-18x 台帳化)。" +
-        "\n書き込みは --execute で recoverable に anchor_commit のみ追記する。\n",
-    );
-  });
-
-plan
-  .command("use [id]")
-  .description(
-    "active PLAN を .ut-tdd/state/current-plan に記録 (session-log digest を活性化)。--clear で解除",
-  )
-  .option("--clear", "current-plan を clear")
-  .action((id: string | undefined, opts: { clear?: boolean }) => {
-    if (!opts.clear && !id) {
-      process.stderr.write("plan use <id> または --clear を指定してください\n");
-      process.exitCode = 1;
-      return;
-    }
-    setActivePlanCli(process.cwd(), opts.clear ? null : (id as string), gitBranch);
-    process.stdout.write(opts.clear ? "current-plan: cleared\n" : `current-plan: ${id}\n`);
-  });
-
-plan
-  .command("complete [id]")
-  .description("active PLAN を completed handover として記録し、current-plan を clear")
-  .option("--dry-run", "handover を生成するが書き込まない")
-  .option("--scope-active", "active plan family の digest のみで handover を生成")
-  .action((id: string | undefined, opts: { dryRun?: boolean; scopeActive?: boolean }) => {
+const handover = program
+  .command("handover")
+  .description("機械ポインタ CURRENT.json を生成")
+  .option("--dry-run", "書き込まず内容のみ表示")
+  .option("--complete", "status=completed として記録")
+  .action((opts: { dryRun?: boolean; complete?: boolean }) => {
     const date = new Date().toISOString().slice(0, 10);
     const deps = nodeHandoverDeps(process.cwd());
     const r = runHandover(
       {
         date,
         dryRun: Boolean(opts.dryRun),
-        complete: true,
-        scopeToActive: Boolean(opts.scopeActive),
-        ...(id ? { planId: id } : {}),
+        complete: Boolean(opts.complete),
       },
       deps,
     );
     process.stdout.write(
-      `plan complete: active=${r.pointer.active_plan ?? "-"} status=${r.pointer.status}${opts.dryRun ? " (dry-run)" : ""}\n`,
+      `handover: active=${r.pointer.active_plan ?? "-"} status=${r.pointer.status}${opts.dryRun ? " (dry-run)" : ""}\n`,
     );
     for (const w of r.written) process.stdout.write(`  + ${w}\n`);
+    if (opts.dryRun) {
+      process.stdout.write(`\n--- pointer ---\n${JSON.stringify(r.pointer, null, 2)}\n`);
+    }
   });
-
-const handover = program
-  .command("handover")
-  .description(
-    "session-log PLAN digest から handover を生成 (機械ポインタ CURRENT.json + 人間判断 markdown scaffold、要件 §6.8.5)",
-  )
-  .option("--dry-run", "書き込まず内容のみ表示")
-  .option("--complete", "status=completed として記録 (PLAN 完了時)")
-  .option("--plan <id>", "明示 active PLAN (省略時 current-plan/branch から解決)")
-  .option("--scope-active", "§1-§2 を active plan family の digest のみへ絞る (IMP-048 ノイズ低減)")
-  .option(
-    "--scope-session",
-    "§1-§2 を直近 session が触れた digest のみへ絞る (IMP-078 gap④ 前 session 混入排除)",
-  )
-  .option(
-    "--session <id>",
-    "session scope に使う session_id を明示 (省略時 --scope-session で直近を推定)",
-  )
-  .action(
-    (opts: {
-      dryRun?: boolean;
-      complete?: boolean;
-      plan?: string;
-      scopeActive?: boolean;
-      scopeSession?: boolean;
-      session?: string;
-    }) => {
-      const date = new Date().toISOString().slice(0, 10);
-      const deps = nodeHandoverDeps(process.cwd());
-      // IMP-078 gap④: --session 明示 > --scope-session 推定 (latestSessionId) > なし。
-      const sessionId =
-        opts.session ?? (opts.scopeSession ? (latestSessionId(deps) ?? undefined) : undefined);
-      const r = runHandover(
-        {
-          date,
-          dryRun: Boolean(opts.dryRun),
-          complete: Boolean(opts.complete),
-          scopeToActive: Boolean(opts.scopeActive),
-          ...(sessionId ? { sessionId } : {}),
-          ...(opts.plan ? { planId: opts.plan } : {}),
-        },
-        deps,
-      );
-      process.stdout.write(
-        `handover: active=${r.pointer.active_plan ?? "-"} status=${r.pointer.status}${opts.dryRun ? " (dry-run)" : ""}\n`,
-      );
-      for (const w of r.written) process.stdout.write(`  + ${w}\n`);
-      if (opts.dryRun) process.stdout.write(`\n--- scaffold ---\n${r.content}\n`);
-    },
-  );
 
 const providerHandover = handover.command("provider").description("Claude/Codex provider handover");
 providerHandover
@@ -1681,7 +1407,6 @@ providerHandover
   .requiredOption("--from <runtime>", "claude or codex")
   .requiredOption("--to <runtime>", "claude or codex")
   .requiredOption("--summary <text>", "handover context summary")
-  .option("--plan <id>", "active PLAN (defaults to current-plan/branch resolution)")
   .option("--budget <text>", "budget or constraint summary")
   .option("--next-action <text...>", "next actions")
   .option("--file <path...>", "relevant files")
@@ -1692,7 +1417,6 @@ providerHandover
         from: ProviderRuntime;
         to: ProviderRuntime;
         summary: string;
-        plan?: string;
         budget?: string;
         nextAction?: string[];
         file?: string[];
@@ -1701,27 +1425,15 @@ providerHandover
       cmd: Command,
     ) => {
       const localOpts = cmd.opts() as typeof opts;
-      const chainPlan = optionFromCommandChain<string>(cmd, "plan");
       const chainBudget = optionFromCommandChain<string>(cmd, "budget");
       const chainNextAction = optionFromCommandChain<string[]>(cmd, "nextAction");
       const chainFile = optionFromCommandChain<string[]>(cmd, "file");
       const chainDryRun = optionFromCommandChain<boolean>(cmd, "dryRun");
-      const planId =
-        localOpts.plan ??
-        opts.plan ??
-        chainPlan ??
-        resolveActivePlan(nodeDeps(process.cwd(), gitBranch));
-      if (!planId) {
-        process.stderr.write("provider handover requires --plan or active current-plan\n");
-        process.exitCode = 1;
-        return;
-      }
       try {
         const result = runProviderHandover(
           {
             from: opts.from,
             to: opts.to,
-            activePlan: planId,
             budget: localOpts.budget ?? opts.budget ?? chainBudget ?? null,
             summary: opts.summary,
             nextActions: localOpts.nextAction ?? opts.nextAction ?? chainNextAction ?? [],
@@ -1753,7 +1465,7 @@ providerHandover
     if (opts.json) process.stdout.write(`${JSON.stringify(current, null, 2)}\n`);
     else {
       process.stdout.write(
-        `provider handover: ${current.handover_id} ${current.from}->${current.to} plan=${current.active_plan}\n`,
+        `provider handover: ${current.handover_id} ${current.from}->${current.to} plan=${current.active_plan ?? "-"}\n`,
       );
     }
   });
@@ -1846,51 +1558,42 @@ db.command("rebuild")
     }
   });
 db.command("scope-preview")
-  .description("preview document/activation detection scope from harness.db profiles")
+  .description("preview document detection scope from harness.db profiles")
   .requiredOption("--profile <profile>", "document scale profile id (poc|standard|enterprise)")
-  .option("--activation-profile <profile>", "optional activation profile id")
   .option("--capability <flag...>", "capability flag(s) that resolve conditional documents")
   .option("--json", "JSON output")
-  .action(
-    (opts: {
-      profile: string;
-      activationProfile?: string;
-      capability?: string[];
-      json?: boolean;
-    }) => {
-      const repoRoot = process.cwd();
-      const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
-      try {
-        const result = buildScopeDryRunPreview(db, {
-          profileId: opts.profile,
-          activationProfileId: opts.activationProfile,
-          capabilityFlags: opts.capability,
-        });
-        if (opts.json) {
-          process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-        } else {
+  .action((opts: { profile: string; capability?: string[]; json?: boolean }) => {
+    const repoRoot = process.cwd();
+    const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
+    try {
+      const result = buildScopeDryRunPreview(db, {
+        profileId: opts.profile,
+        capabilityFlags: opts.capability,
+      });
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      } else {
+        process.stdout.write(
+          `scope-preview: profile=${result.profile_id} docs=${result.summary.documents_total} ` +
+            `in_scope=${result.summary.documents_in_scope} conditional=${result.summary.documents_conditional} ` +
+            `deferred=${result.summary.documents_deferred} skipped=${result.summary.documents_skipped}\n`,
+        );
+        process.stdout.write(`  gates=${result.gates.join(",") || "-"}\n`);
+        process.stdout.write(`  detectors=${result.detectors.join(",")}\n`);
+        for (const row of result.documents) {
           process.stdout.write(
-            `scope-preview: profile=${result.profile_id} docs=${result.summary.documents_total} ` +
-              `in_scope=${result.summary.documents_in_scope} conditional=${result.summary.documents_conditional} ` +
-              `deferred=${result.summary.documents_deferred} skipped=${result.summary.documents_skipped}\n`,
+            `  ${row.resolved_scope_status} ${row.doc_type_id} ${row.detail_override}/${row.status_override} gate=${row.gate_id} action=${row.required_action}\n`,
           );
-          process.stdout.write(`  gates=${result.gates.join(",") || "-"}\n`);
-          process.stdout.write(`  detectors=${result.detectors.join(",")}\n`);
-          for (const row of result.documents) {
-            process.stdout.write(
-              `  ${row.resolved_scope_status} ${row.doc_type_id} ${row.detail_override}/${row.status_override} gate=${row.gate_id} action=${row.required_action}\n`,
-            );
-          }
-          for (const finding of result.findings) {
-            process.stdout.write(`  ${finding.severity} ${finding.kind}: ${finding.message}\n`);
-          }
         }
-        if (!result.ok) process.exitCode = 1;
-      } finally {
-        db.close();
+        for (const finding of result.findings) {
+          process.stdout.write(`  ${finding.severity} ${finding.kind}: ${finding.message}\n`);
+        }
       }
-    },
-  );
+      if (!result.ok) process.exitCode = 1;
+    } finally {
+      db.close();
+    }
+  });
 
 const progress = program.command("progress").description("artifact progress read model");
 progress
@@ -2034,89 +1737,57 @@ telemetry
 const skill = program.command("skill").description("skill recommendation and invocation telemetry");
 skill
   .command("suggest")
-  .description("suggest skills for a PLAN id or a free-text task from harness.db context")
-  .option("--plan <id>", "PLAN id (harness.db plan/layer/drive context)")
-  .option("--text <task>", "free-text task (classify → context; mutually exclusive with --plan)")
-  .option("--record", "write recommendations to harness.db (--plan only)")
+  .description("suggest skills for a free-text task from harness.db context")
+  .requiredOption("--text <task>", "free-text task (classify → context)")
   .option("--buckets", "group ranked rows into required/recommended/optional (additive view)")
   .option("--inject", "emit provider context injection manifest (skill paths only)")
   .option("--json", "JSON output")
-  .action(
-    (opts: {
-      plan?: string;
-      text?: string;
-      record?: boolean;
-      buckets?: boolean;
-      inject?: boolean;
-      json?: boolean;
-    }) => {
-      // A-138 ITEM-2: --plan / --text のどちらか一方が必須 (相互排他、flat ranked list は不変)。
-      if (Boolean(opts.plan) === Boolean(opts.text)) {
-        process.stderr.write("skill suggest requires exactly one of --plan or --text\n");
-        process.exitCode = 1;
-        return;
-      }
-      // 自由文は登録 PLAN でないので DB record 不可 (--record は --plan 専用)。
-      if (opts.text && opts.record) {
-        process.stderr.write(
-          "--record requires --plan (free-text task is not a registered PLAN)\n",
-        );
-        process.exitCode = 1;
-        return;
-      }
-      const repoRoot = process.cwd();
-      const db = openHarnessDb(opts.record ? defaultHarnessDbPath(repoRoot) : ":memory:", {
-        repoRoot,
-      });
-      try {
-        rebuildHarnessDb({ repoRoot, db });
-        const rows = opts.plan
-          ? recommendSkillsForPlan(db, opts.plan)
-          : recommendSkillsForText(db, opts.text ?? "");
-        if (opts.record) recordSkillRecommendations(db, rows);
-        if (opts.inject) {
-          const injection = buildSkillInjectionSet(db, rows);
-          if (opts.json) process.stdout.write(`${JSON.stringify(injection, null, 2)}\n`);
-          else {
-            process.stdout.write(`${injection.plan_id} skill injection\n`);
-            for (const entry of injection.entries) {
-              process.stdout.write(
-                `  ${entry.tier} ${entry.inject_at} ${entry.skill_id} -> ${entry.skill_path} reason=${entry.reason}\n`,
-              );
-            }
-            for (const skillId of injection.missing_skill_ids) {
-              process.stdout.write(`  missing ${skillId}\n`);
-            }
-          }
-          return;
-        }
-        // A-138 ITEM-2 PO 残課題: --buckets で required/recommended/optional に再編成 (additive、flat は既定)。
-        if (opts.buckets) {
-          const buckets = bucketRecommendations(rows);
-          if (opts.json) process.stdout.write(`${JSON.stringify(buckets, null, 2)}\n`);
-          else {
-            for (const tier of ["required", "recommended", "optional"] as const) {
-              process.stdout.write(`# ${tier}\n`);
-              for (const row of buckets[tier]) {
-                process.stdout.write(
-                  `  ${row.skill_id}: score=${row.score} reason=${row.reason}\n`,
-                );
-              }
-            }
-          }
-        } else if (opts.json) process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+  .action((opts: { text: string; buckets?: boolean; inject?: boolean; json?: boolean }) => {
+    const repoRoot = process.cwd();
+    const db = openHarnessDb(":memory:", { repoRoot });
+    try {
+      rebuildHarnessDb({ repoRoot, db });
+      const rows = recommendSkillsForText(db, opts.text);
+      if (opts.inject) {
+        const injection = buildSkillInjectionSet(db, rows);
+        if (opts.json) process.stdout.write(`${JSON.stringify(injection, null, 2)}\n`);
         else {
-          for (const row of rows) {
+          process.stdout.write(`${injection.plan_id} skill injection\n`);
+          for (const entry of injection.entries) {
             process.stdout.write(
-              `${row.plan_id} ${row.skill_id}: rank=${row.rank} score=${row.score} reason=${row.reason}\n`,
+              `  ${entry.tier} ${entry.inject_at} ${entry.skill_id} -> ${entry.skill_path} reason=${entry.reason}\n`,
             );
           }
+          for (const skillId of injection.missing_skill_ids) {
+            process.stdout.write(`  missing ${skillId}\n`);
+          }
         }
-      } finally {
-        db.close();
+        return;
       }
-    },
-  );
+      // A-138 ITEM-2 PO 残課題: --buckets で required/recommended/optional に再編成 (additive、flat は既定)。
+      if (opts.buckets) {
+        const buckets = bucketRecommendations(rows);
+        if (opts.json) process.stdout.write(`${JSON.stringify(buckets, null, 2)}\n`);
+        else {
+          for (const tier of ["required", "recommended", "optional"] as const) {
+            process.stdout.write(`# ${tier}\n`);
+            for (const row of buckets[tier]) {
+              process.stdout.write(`  ${row.skill_id}: score=${row.score} reason=${row.reason}\n`);
+            }
+          }
+        }
+      } else if (opts.json) process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+      else {
+        for (const row of rows) {
+          process.stdout.write(
+            `${row.plan_id} ${row.skill_id}: rank=${row.rank} score=${row.score} reason=${row.reason}\n`,
+          );
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
 
 skill
   .command("new")
@@ -2360,92 +2031,9 @@ automation
     }
   });
 
-const guardrail = program.command("guardrail").description("guardrail decision ledger");
-guardrail
-  .command("status")
-  .description("list guardrail decisions from harness.db")
-  .option("--json", "JSON output")
-  .action((opts: { json?: boolean }) => {
-    const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
-    try {
-      const rows = db.prepare("SELECT * FROM guardrail_decisions ORDER BY decided_at").all();
-      if (opts.json) process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
-      else {
-        for (const row of rows) {
-          process.stdout.write(
-            `${row.plan_id ?? ""} ${row.guardrail ?? ""}: ${row.decision ?? ""} evidence=${row.evidence_path ?? ""}\n`,
-          );
-        }
-      }
-    } finally {
-      db.close();
-    }
-  });
-
-const issue = program.command("issue").description("external issue dry-run queue");
-issue
-  .command("queue")
-  .description("list GitHub issue dry-run queue entries")
-  .option("--json", "JSON output")
-  .action((opts: { json?: boolean }) => {
-    const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
-    try {
-      const rows = db
-        .prepare("SELECT * FROM issue_queue ORDER BY created_at, issue_queue_id")
-        .all();
-      if (opts.json) process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
-      else {
-        for (const row of rows) {
-          process.stdout.write(
-            `${row.issue_queue_id ?? ""} ${row.status ?? ""}: ${row.title ?? ""} approval=${row.human_approval_required ?? ""}\n`,
-          );
-        }
-      }
-    } finally {
-      db.close();
-    }
-  });
-
-issue
-  .command("mark-created")
-  .description("record externally created GitHub issue back-reference for a queued dry-run item")
-  .requiredOption("--queue-id <id>", "issue_queue_id")
-  .requiredOption("--issue-url <url>", "created GitHub issue URL")
-  .option("--issue-id <id>", "GitHub issue number or node id")
-  .option("--approved-by <name>", "human approver")
-  .action((opts: { queueId: string; issueUrl: string; issueId?: string; approvedBy?: string }) => {
-    const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
-    try {
-      const existing = db
-        .prepare("SELECT * FROM issue_queue WHERE issue_queue_id = ?")
-        .get(opts.queueId);
-      if (!existing) {
-        process.stderr.write(`issue queue entry not found: ${opts.queueId}\n`);
-        process.exitCode = 1;
-        return;
-      }
-      db.prepare(
-        `UPDATE issue_queue
-           SET status = ?,
-               human_approval_required = 0,
-               approved_by = ?,
-               approved_at = ?,
-               external_issue_id = ?,
-               external_issue_url = ?
-           WHERE issue_queue_id = ?`,
-      ).run(
-        "created",
-        opts.approvedBy ?? "",
-        new Date().toISOString(),
-        opts.issueId ?? "",
-        opts.issueUrl,
-        opts.queueId,
-      );
-      process.stdout.write(`issue queue updated: ${opts.queueId} -> ${opts.issueUrl}\n`);
-    } finally {
-      db.close();
-    }
-  });
+registerGuardrailCommands(program);
+registerLintGateCommands(program);
+registerIssueCommands(program);
 
 const trouble = program.command("trouble").description("trouble taxonomy events");
 trouble
@@ -2498,7 +2086,7 @@ improvement
 const asset = program.command("asset").description("automation asset catalog");
 asset
   .command("catalog")
-  .description("catalog skill/roster/command docs into harness.db")
+  .description("catalog skill/command docs into harness.db")
   .option("--json", "JSON output")
   .action((opts: { json?: boolean }) => {
     const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
@@ -2517,47 +2105,6 @@ asset
     }
   });
 
-const rosterCommand = program.command("roster").description("subagent roster registry");
-rosterCommand
-  .command("list")
-  .description("scan .claude/agents into a deterministic roster registry")
-  .option("--json", "JSON output")
-  .action((opts: { json?: boolean }) => {
-    const result = listRosterRegistry({
-      repoRoot: process.cwd(),
-      allowlist: SUBAGENT_ALLOWLIST,
-    });
-    if (opts.json) {
-      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    } else {
-      process.stdout.write(`roster list: ${result.count} agents\n`);
-      for (const entry of result.entries) {
-        process.stdout.write(
-          `  - ${entry.id} model=${entry.model_family} allowlisted=${entry.allowlisted}\n`,
-        );
-      }
-    }
-    process.exitCode = result.ok ? 0 : 1;
-  });
-rosterCommand
-  .command("check")
-  .description("compare .claude/agents roster with the guard allowlist")
-  .option("--json", "JSON output")
-  .action((opts: { json?: boolean }) => {
-    const result = checkRosterConsistency({
-      repoRoot: process.cwd(),
-      allowlist: SUBAGENT_ALLOWLIST,
-    });
-    if (opts.json) {
-      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    } else {
-      process.stdout.write(
-        `roster check: ${result.ok ? "ok" : "failed"} allowlistedPresent=${result.allowlistedPresent} missingFromRoster=${result.missingFromRoster.length} nameMismatches=${result.nameMismatches.length} nonAllowlisted=${result.nonAllowlisted.length}\n`,
-      );
-    }
-    process.exitCode = result.ok ? 0 : 1;
-  });
-
 const builder = program.command("builder").description("command and workflow builder catalog");
 builder
   .command("catalog")
@@ -2569,8 +2116,6 @@ builder
       { path: "src/cli.ts", command: "ut-tdd review --uncommitted", description: "review packet" },
       { path: "src/cli.ts", command: "ut-tdd cutover --to", description: "cutover dry-run" },
       { path: "src/cli.ts", command: "ut-tdd asset catalog", description: "asset catalog" },
-      { path: "src/cli.ts", command: "ut-tdd roster list", description: "roster registry" },
-      { path: "src/cli.ts", command: "ut-tdd roster check", description: "roster guard check" },
       { path: "src/cli.ts", command: "ut-tdd builder catalog", description: "builder catalog" },
     ];
     const surface = commandDocs.map((doc) => doc.command);
@@ -2817,7 +2362,6 @@ program
   )
   .option("--current-model <model>", "current orchestrator model that needs advice")
   .option("--reason <text>", "why upper-model advice is needed")
-  .option("--plan <id>", "PLAN id")
   .option("--execute", "execute provider CLI instead of dry-run")
   .option("--mode <mode>", MODE_OVERRIDE_OPTION_DESCRIPTION)
   .option("--json", "JSON output")
@@ -2829,7 +2373,6 @@ program
       decision?: string;
       currentModel?: string;
       reason?: string;
-      plan?: string;
       execute?: boolean;
       mode?: ReturnType<typeof detectMode>["mode"];
       json?: boolean;
@@ -2862,9 +2405,7 @@ program
         decisionKind: opts.decision as AdvisorDecisionKind | undefined,
         currentModel: opts.currentModel,
         reason: opts.reason,
-        planId: opts.plan,
         execute: Boolean(opts.execute),
-        contextInjection: resolveSkillContextInjection(opts.plan),
       });
       if (!decision.adapterPlan.available) {
         if (opts.json) process.stdout.write(`${JSON.stringify(decision, null, 2)}\n`);
@@ -2895,10 +2436,9 @@ program
         {
           sessionPrefix: `advisor-${decision.provider}`,
           toolName: "advisor",
-          planId: opts.plan,
           jsonOut: Boolean(opts.json),
         },
-        { gitBranch, gitHead, runSessionStartSideEffects, writeHandoverWarnings },
+        { gitHead, runSessionStartSideEffects, writeHandoverWarnings },
       );
       // 一次相談先のレスポンスエラーは advisor 全体を落とさず fallback へ切替える
       // (advisor-tool の advisor_tool_result_error と同じ fail-soft 思想)。
@@ -2912,10 +2452,9 @@ program
           {
             sessionPrefix: `advisor-${decision.fallback.provider}`,
             toolName: "advisor",
-            planId: opts.plan,
             jsonOut: Boolean(opts.json),
           },
-          { gitBranch, gitHead, runSessionStartSideEffects, writeHandoverWarnings },
+          { gitHead, runSessionStartSideEffects, writeHandoverWarnings },
         );
       }
       const output = {
@@ -2954,10 +2493,8 @@ program
   );
 
 registerDelegationCommands(program, {
-  gitBranch,
   gitHead,
   resolveTaskText,
-  resolveSkillContextInjection,
   runSessionStartSideEffects,
   taskFileOptionDescription: TASK_FILE_OPTION_DESCRIPTION,
   writeHandoverWarnings,
@@ -2972,7 +2509,6 @@ program
   .option("--reviewer-model <model>", "reviewer provider/model id")
   .option("--checklist <path>", "YAML checklist evidence for single-runtime review")
   .option("--coverage-summary <path>", "coverage/coverage-summary.json evidence for G7")
-  .option("--plan <id>", "plan_id to attach to gate run evidence")
   .option("--session <id>", "session_id to attach to gate run evidence")
   .option("--human-approved", "standalone human approval evidence")
   .option("--json", "JSON output")
@@ -2986,7 +2522,6 @@ program
         reviewerModel?: string;
         checklist?: string;
         coverageSummary?: string;
-        plan?: string;
         session?: string;
         humanApproved?: boolean;
         json?: boolean;
@@ -3033,10 +2568,6 @@ program
         const written = writeGateRunEvidence({
           repoRoot: process.cwd(),
           gateId: id,
-          planId:
-            opts.plan ??
-            process.env.UT_TDD_PLAN_ID ??
-            resolveActivePlan(nodeDeps(process.cwd(), gitBranch)),
           sessionId: opts.session ?? process.env.UT_TDD_SESSION_ID ?? null,
           status: result.passed ? "passed" : "failed",
           mode,
@@ -3082,7 +2613,7 @@ program
           `gate ${id}: ${result.passed ? "passed" : "failed"} mode=${result.mode} review=${result.review_kind ?? "-"} cross_agent_review=${result.cross_agent_review} static=${staticGate.applicable ? (staticGate.passed ? "passed" : "failed") : "n-a"}\n`,
         );
         if (gateRunEvidence) process.stdout.write(`  - evidence: ${gateRunEvidence.path}\n`);
-        if (gateRunEvidenceWarning) process.stdout.write(`  - ${gateRunEvidenceWarning}\n`);
+        if (gateRunEvidenceWarning) process.stderr.write(`  - ${gateRunEvidenceWarning}\n`);
         for (const m of result.messages) process.stdout.write(`  - ${m}\n`);
       }
       process.exitCode = result.passed ? 0 : 1;
@@ -3097,7 +2628,6 @@ task
   .description("classify a task into kind / drive / size / complexity / difficulty / risk")
   .option("--text <text>", "task text")
   .option("--text-file <path>", TASK_FILE_OPTION_DESCRIPTION)
-  .option("--plan <path>", "read task text from a PLAN file")
   .option("--files <list>", "comma-separated affected file paths")
   .option("--design-docs", "derive required design/test documents from proposal text")
   .option("--json", "JSON output")
@@ -3105,16 +2635,13 @@ task
     (opts: {
       text?: string;
       textFile?: string;
-      plan?: string;
       files?: string;
       designDocs?: boolean;
       json?: boolean;
     }) => {
-      const text = resolveTaskText({ task: opts.text, taskFile: opts.textFile ?? opts.plan });
+      const text = resolveTaskText({ task: opts.text, taskFile: opts.textFile });
       if (text === null || text.trim().length === 0) {
-        process.stderr.write(
-          "task classify requires exactly one of --text, --text-file, or --plan\n",
-        );
+        process.stderr.write("task classify requires exactly one of --text or --text-file\n");
         process.exitCode = 1;
         return;
       }
@@ -3153,7 +2680,7 @@ task
           process.stdout.write(`    - ${r.pattern}: ${r.disposition} (${r.reason})\n`);
         }
         process.stdout.write("  recommended subagents:\n");
-        for (const a of coverage.recommended_subagents) {
+        for (const a of coverage.recommended_lanes) {
           process.stdout.write(
             `    - ${a.role}: ${a.tier} ${a.model} slots=${a.parallel_slots} closing=${a.closing_authority} ownership=${a.ownership} (${a.purpose}; guard=${a.guard})\n`,
           );
@@ -3187,7 +2714,6 @@ task
   .requiredOption("--role <role>", `router role: ${ROUTER_ROLES.join("|")}`)
   .option("--text <text>", "task text")
   .option("--text-file <path>", TASK_FILE_OPTION_DESCRIPTION)
-  .option("--plan <path>", "read task text from a PLAN file")
   .option("--files <list>", "comma-separated affected file paths")
   .option("--primary <provider>", "override primary provider (claude|codex)")
   .option("--allow-frontier", "explicitly authorize T0 (opus/gpt-5.5)")
@@ -3199,7 +2725,6 @@ task
       role: string;
       text?: string;
       textFile?: string;
-      plan?: string;
       files?: string;
       primary?: string;
       allowFrontier?: boolean;
@@ -3212,9 +2737,9 @@ task
         process.exitCode = 1;
         return;
       }
-      const text = resolveTaskText({ task: opts.text, taskFile: opts.textFile ?? opts.plan });
+      const text = resolveTaskText({ task: opts.text, taskFile: opts.textFile });
       if (text === null || text.trim().length === 0) {
-        process.stderr.write("task route requires exactly one of --text, --text-file, or --plan\n");
+        process.stderr.write("task route requires exactly one of --text or --text-file\n");
         process.exitCode = 1;
         return;
       }
@@ -3242,7 +2767,6 @@ task
       const adapterPlan = opts.execute
         ? routeToAdapterPlan(decision, text, {
             mode: detection.mode,
-            contextInjection: resolveSkillContextInjection(planIdFromPath(opts.plan)),
           })
         : null;
       if (opts.json) {
@@ -3308,7 +2832,7 @@ team
       const result = recommendTeamLaunch({
         task: opts.task,
         mode,
-        proposalSubagents: coverage?.recommended_subagents,
+        proposalSubagents: coverage?.recommended_lanes,
       });
       const output = coverage ? { ...result, document_coverage: coverage } : result;
       if (opts.json) {
@@ -3331,7 +2855,6 @@ team
   .description("validate, plan, and optionally execute a hybrid team run")
   .requiredOption("--definition <path>", "team definition YAML")
   .option("--mode <mode>", MODE_OVERRIDE_OPTION_DESCRIPTION)
-  .option("--plan <id>", "PLAN id to attach to provider adapter metadata")
   .option("--execute", "execute provider adapters; default is dry-run planning only")
   .option(
     "--route",
@@ -3344,7 +2867,6 @@ team
     async (opts: {
       definition: string;
       mode?: ReturnType<typeof detectMode>["mode"];
-      plan?: string;
       execute?: boolean;
       route?: boolean;
       primary?: Provider;
@@ -3376,9 +2898,7 @@ team
         }
         const result = buildTeamRunPlan(definition, mode, {
           execute: Boolean(opts.execute),
-          planId: opts.plan,
           placements,
-          contextInjection: resolveSkillContextInjection(opts.plan),
         });
         if (!opts.execute) {
           if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -3399,13 +2919,8 @@ team
         let teamSessionSeq = 0;
         const repoRoot = process.cwd();
         const repoHasGitDir = existsSync(join(repoRoot, ".git"));
-        const cachedBranch = repoHasGitDir ? gitBranch() : null;
         const cachedHead = repoHasGitDir ? gitHead() : null;
-        const sessionDeps = nodeDeps(
-          repoRoot,
-          () => cachedBranch,
-          () => cachedHead,
-        );
+        const sessionDeps = nodeDeps(repoRoot, () => cachedHead);
         if (opts.json) {
           sessionDeps.warn = (message) => process.stderr.write(`${message}\n`);
         }
@@ -3417,7 +2932,6 @@ team
               const startInput: SessionHookInput = {
                 hook_event_name: HOOK_EVENT_SESSION_START,
                 session_id: sessionId,
-                ...(opts.plan ? { plan_id: opts.plan } : {}),
               };
               runSessionStartSideEffects({
                 repoRoot,
@@ -3470,7 +2984,6 @@ team
                   {
                     hook_event_name: "PostToolUse",
                     session_id: sessionId,
-                    ...(opts.plan ? { plan_id: opts.plan } : {}),
                     tool_name: provider,
                     tool_input: { command: `${command} ${args.join(" ")}` },
                     tool_response: { outcome: exitCode === 0 ? "ok" : "error" },
@@ -3482,7 +2995,6 @@ team
                   {
                     hook_event_name: "Stop",
                     session_id: sessionId,
-                    ...(opts.plan ? { plan_id: opts.plan } : {}),
                   },
                   sessionDeps,
                   "Stop",
@@ -3516,6 +3028,51 @@ team
 
 const audit = program.command("audit").description("read-only repository audits");
 
+function spawnNodeTestProbe(
+  invocation: ReturnType<typeof createNodeInvocation>,
+  repoRoot: string,
+  input?: string,
+): NodeBanTestProbeOutcome {
+  const child = spawnSync(invocation.command, invocation.args, {
+    cwd: repoRoot,
+    ...invocation.options,
+    ...(input ? { input } : {}),
+    encoding: "utf8",
+    stdio: "pipe",
+    timeout: 30_000,
+  });
+  return {
+    stdout: child.stdout ?? "",
+    stderr: child.stderr ?? "",
+    status: child.status,
+    spawnError: child.error?.message ?? null,
+    timedOut: (child.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT",
+  };
+}
+
+audit
+  .command("node-invocation-probe")
+  .description("audit the production Node child-invocation contract")
+  .requiredOption("--generation <path>", "verified Node generation directory")
+  .option("--json", "emit the successful probe result as JSON")
+  .action((opts: { generation: string; json?: boolean }) => {
+    try {
+      const repoRoot = process.cwd();
+      const subjectRevision = fullGitHead(repoRoot);
+      const generation = verifyNodeGeneration(
+        repoRoot,
+        resolve(repoRoot, opts.generation),
+        subjectRevision,
+      );
+      const result = runNodeInvocationProbe(generation);
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      process.exitCode = 0;
+    } catch (error) {
+      process.stderr.write(`node-invocation-probe failed: ${String(error)}\n`);
+      process.exitCode = 1;
+    }
+  });
+
 audit
   .command("node-ban")
   .description("Q0 Node-only Bun permanent-ban qualification audit")
@@ -3534,16 +3091,14 @@ audit
     }) => {
       try {
         const repoRoot = process.cwd();
-        const subjectRevision = execFileSync("git", ["rev-parse", "HEAD"], {
-          cwd: repoRoot,
-          encoding: "utf8",
-        }).trim();
+        const subjectRevision = fullGitHead(repoRoot);
         const generation = verifyNodeGeneration(
           repoRoot,
           resolve(repoRoot, opts.generation),
           subjectRevision,
         );
         const observer = new NodeOnlyProcessObserver();
+        let testProbeOutcome: NodeBanTestProbeOutcome | undefined;
         const runNodeScope = (
           scope: "status" | "doctor" | "test" | "hook",
           args: readonly string[],
@@ -3553,6 +3108,10 @@ audit
           observer.invoke(
             invocation,
             () => {
+              if (scope === "test") {
+                testProbeOutcome = spawnNodeTestProbe(invocation, repoRoot, input);
+                return;
+              }
               try {
                 execFileSync(invocation.command, invocation.args, {
                   cwd: repoRoot,
@@ -3573,9 +3132,11 @@ audit
         runNodeScope("status", ["status", "--json"]);
         runNodeScope("doctor", ["doctor", "--profile", "consumer-toolchain"]);
         runNodeScope("test", [
-          "plan",
-          "lint",
-          "docs/plans/PLAN-L7-458-node-self-hosted-bun-ban-foundation.md",
+          "audit",
+          "node-invocation-probe",
+          "--generation",
+          generation.generationPath,
+          "--json",
         ]);
         runNodeScope("hook", ["hook", "work-guard"], "{}\n");
         observer.proveNoFallback(
@@ -3598,6 +3159,7 @@ audit
             receipt_digest: generation.receipt.receipt_digest,
             runtime: "node",
           },
+          testProbeOutcome,
           f0cLanes: opts.f0cLane.map((path) => {
             const evidence = parseNodeGenerationCiEvidence(
               JSON.parse(readFileSync(resolve(repoRoot, path), "utf8")),
@@ -3650,10 +3212,7 @@ audit
         const repoRoot = process.cwd();
         const readJson = <T>(path: string): T =>
           JSON.parse(readFileSync(resolve(repoRoot, path), "utf8")) as T;
-        const retirementSubject = execFileSync("git", ["rev-parse", "HEAD"], {
-          cwd: repoRoot,
-          encoding: "utf8",
-        }).trim();
+        const retirementSubject = fullGitHead(repoRoot);
         const lanes = opts.f0cLane.map((path) => {
           const evidence = parseNodeGenerationCiEvidence(readJson<unknown>(path));
           if (!evidence) throw new Error("invalid F0c lane evidence");
@@ -3729,213 +3288,20 @@ branch
 
 const github = program.command("github").description("GitHub operations guards");
 
-const githubProject = github
-  .command("project")
-  .description("HARNESS DB正本からGitHub Project V2へForward状態を投影する");
-
-githubProject
-  .command("sync")
-  .description("Project item差分をdry-runし、--apply指定時だけ反映する")
-  .requiredOption("--owner <login>", "GitHub Project owner")
-  .requiredOption("--number <n>", "GitHub Project number", (value) => Number.parseInt(value, 10))
-  .requiredOption("--repository <id>", "repository identity (owner/name)")
-  .option("--db <path>", "harness.db path (default: .ut-tdd/harness.db)")
-  .option("--plan <id>", "1 PLANだけを同期する")
-  .option("--all-active", "完了・保留を除く全active PLANを同期する")
-  .option("--apply", "GitHubとbinding projectionへ反映する")
+github
+  .command("design-protection")
+  .description("実装 PR による設計書・テスト設計の書き換えをfail-closeで拒否")
+  .requiredOption("--base <ref>", "比較元commit/ref")
+  .requiredOption("--head <ref>", "比較先commit/ref")
   .option("--json", "JSON output")
-  .action(
-    (opts: {
-      owner: string;
-      number: number;
-      repository: string;
-      db?: string;
-      plan?: string;
-      allActive?: boolean;
-      apply?: boolean;
-      json?: boolean;
-    }) => {
-      if (!Number.isInteger(opts.number) || opts.number < 1) {
-        process.stderr.write("github project sync: --number must be a positive integer\n");
-        process.exitCode = 1;
-        return;
-      }
-      if (opts.plan && opts.allActive) {
-        process.stderr.write(
-          "github project sync: --plan and --all-active are mutually exclusive\n",
-        );
-        process.exitCode = 1;
-        return;
-      }
-      if (opts.apply && !opts.plan && !opts.allActive) {
-        process.stderr.write("github project sync: --apply requires --plan or --all-active\n");
-        process.exitCode = 1;
-        return;
-      }
-      const db = openHarnessDb(opts.db ?? defaultHarnessDbPath(process.cwd()), {
-        repoRoot: process.cwd(),
-      });
-      let outboxIds: string[] = [];
-      let outboxClaimed = false;
-      try {
-        if (opts.apply) migrate(db);
-        const projectedRows = deriveStoredForwardReadiness(db, process.cwd(), opts.repository);
-        const existingProjectPlans = selectExistingProjectPlans(db, opts.repository);
-        const activeRows = selectActiveProjectRows(projectedRows, existingProjectPlans);
-        const rows = opts.plan
-          ? projectedRows.filter((row) => row.planId === opts.plan)
-          : activeRows;
-        if (opts.plan && rows.length === 0) throw new Error(`PLAN not found: ${opts.plan}`);
-        outboxIds = opts.apply
-          ? rows.map((row) =>
-              queueGithubProjection({
-                db,
-                repositoryId: opts.repository,
-                planId: row.planId,
-                planRevision: row.revision,
-                operation: "project-item-upsert",
-                payload: {
-                  owner: opts.owner,
-                  projectNumber: opts.number,
-                  readiness: row.readiness,
-                  currentGate: row.currentGate,
-                  headSha: row.headSha,
-                },
-              }),
-            )
-          : [];
-        if (opts.apply) {
-          claimGithubProjection(db, outboxIds);
-          outboxClaimed = true;
-        }
-        const result = syncForwardProject({
-          rows,
-          owner: opts.owner,
-          projectNumber: opts.number,
-          port: new GhProjectV2Adapter(),
-          apply: Boolean(opts.apply),
-        });
-        if (opts.apply) {
-          persistProjectSync({
-            db,
-            repositoryId: opts.repository,
-            projectId: result.projectId,
-            rows,
-            result,
-            outboxIds,
-          });
-        }
-        if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-        else
-          process.stdout.write(
-            `github project sync: ${result.applied ? "applied" : "dry-run"} plans=${rows.length} mutations=${result.mutations.length}\n`,
-          );
-      } catch (error) {
-        if (opts.apply && outboxClaimed && outboxIds.length > 0)
-          markGithubProjectionFailed(db, outboxIds);
-        process.stderr.write(`github project sync failed: ${String(error)}\n`);
-        process.exitCode = 3;
-      } finally {
-        db.close();
-      }
-    },
-  );
-
-const githubBinding = github
-  .command("binding")
-  .description("Issue・branch・PR・CI・review・merge観測をPLANへ結合する");
-
-githubBinding
-  .command("sync")
-  .description("typed PR traceを持つGitHub PR群からlifecycle bindingを再構築する")
-  .requiredOption("--repository <id>", "repository identity (owner/name)")
-  .option("--db <path>", "harness.db path (default: .ut-tdd/harness.db)")
-  .option("--json", "JSON output")
-  .action((opts: { repository: string; db?: string; json?: boolean }) => {
-    const db = openHarnessDb(opts.db ?? defaultHarnessDbPath(process.cwd()), {
-      repoRoot: process.cwd(),
+  .action((options: { base: string; head: string; json?: boolean }) => {
+    const argv = ["--base", options.base, "--head", options.head];
+    if (options.json) argv.push("--json");
+    process.exitCode = runDesignProtectionCommand(argv, {
+      git: new SystemGitCommandPort(process.cwd()),
+      write: (line) => process.stdout.write(`${line}\n`),
     });
-    try {
-      migrate(db);
-      const result = syncRepositoryBindings({ db, repositoryId: opts.repository });
-      rebuildExecutionReadiness({ db });
-      if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-      else
-        process.stdout.write(
-          `github binding sync: inspected=${result.inspectedPullRequests} traced=${result.tracedPullRequests} bindings=${result.bindingIds.length} skipped=${result.skipped.length}\n`,
-        );
-    } catch (error) {
-      process.stderr.write(`github binding sync failed: ${String(error)}\n`);
-      process.exitCode = 3;
-    } finally {
-      db.close();
-    }
   });
-
-githubBinding
-  .command("observe")
-  .requiredOption("--repository <id>", "repository identity (owner/name)")
-  .requiredOption("--plan <id>", "PLAN ID")
-  .requiredOption("--revision <revision>", "PLAN revision/source hash")
-  .requiredOption("--kind <kind>", "project_item|issue|branch|pull_request")
-  .requiredOption("--object-id <id>", "provider object identity")
-  .requiredOption("--state <state>", "normalized object state")
-  .option("--project-item-id <id>", "Project item identity")
-  .option("--url <url>", "provider URL")
-  .option("--head <sha>", "subject HEAD SHA")
-  .option("--json", "JSON output")
-  .action(
-    (opts: {
-      repository: string;
-      plan: string;
-      revision: string;
-      kind: string;
-      objectId: string;
-      state: string;
-      projectItemId?: string;
-      url?: string;
-      head?: string;
-      json?: boolean;
-    }) => {
-      if (!isManualGithubObservationKind(opts.kind)) {
-        process.stderr.write(`github binding observe: unsupported kind ${opts.kind}\n`);
-        process.exitCode = 1;
-        return;
-      }
-      const db = openHarnessDb(defaultHarnessDbPath(process.cwd()), { repoRoot: process.cwd() });
-      try {
-        migrate(db);
-        const bindingId = recordGithubBinding(db, {
-          repositoryId: opts.repository,
-          planId: opts.plan,
-          planRevision: opts.revision,
-          projectItemId: opts.projectItemId,
-          objectKind: opts.kind as "project_item" | "issue" | "branch" | "pull_request",
-          objectId: opts.objectId,
-          objectUrl: opts.url,
-          headSha: opts.head,
-          state: opts.state,
-        });
-        const rows = rebuildExecutionReadiness({ db });
-        const output = {
-          ok: true,
-          bindingId: bindingId ?? null,
-          written: bindingId !== undefined,
-          readiness: rows.find((row) => row.planId === opts.plan),
-        };
-        if (opts.json) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
-        else
-          process.stdout.write(
-            bindingId ? `github binding observed: ${bindingId}\n` : "github binding unchanged\n",
-          );
-      } catch (error) {
-        process.stderr.write(`github binding observe failed: ${String(error)}\n`);
-        process.exitCode = 1;
-      } finally {
-        db.close();
-      }
-    },
-  );
 
 github
   .command("guard")
@@ -3957,16 +3323,13 @@ github
     }) => {
       const prBody =
         opts.prBodyFile && existsSync(opts.prBodyFile) ? readFileSync(opts.prBodyFile, "utf8") : "";
-      const commitSubjects =
-        opts.commitFile && existsSync(opts.commitFile)
-          ? readFileSync(opts.commitFile, "utf8").split(/\r?\n/).filter(Boolean)
-          : [];
-      const result = evaluateGithubOpsGuard({
+      const result = evaluateGithubOpsGuardWithCommitInput({
         headRef: opts.headRef,
         baseRef: opts.baseRef,
         prTitle: opts.prTitle,
         prBody,
-        commitSubjects,
+        commitFile: opts.commitFile,
+        cwd: process.cwd(),
       });
       if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       else process.stdout.write(renderGithubOpsGuard(result));
@@ -4038,25 +3401,21 @@ github
 
 const githubPr = github
   .command("pr")
-  .description("typed PR trace contract — <!-- ut-tdd:trace/v1 --> block (PLAN-L7-451 W4)");
+  .description("typed PR trace contract — <!-- ut-tdd:trace/v2 --> block");
 
 githubPr
   .command("render")
   .description("PR body へ貼る trace block を生成する (手入力しない)")
-  .requiredOption("--plan <planId>", "PLAN ID (PLAN-L7-451 など)")
   .requiredOption("--route-mode <mode>", "route mode (add-feature / recovery / reverse など)")
   .option("--head <sha>", "subject HEAD SHA (default: git rev-parse HEAD)")
   .option("--base <sha>", "base SHA (default: git rev-parse origin/main)")
-  .option("--plan-revision <n>", "PLAN revision")
   .option("--episode-id <id>", "execution episode ID (Forward 外のみ)")
   .requiredOption("--issue-number <n>", "GitHub issue number")
   .action(
     (opts: {
-      plan: string;
       routeMode: string;
       head?: string;
       base?: string;
-      planRevision?: string;
       episodeId?: string;
       issueNumber: string;
     }) => {
@@ -4064,11 +3423,9 @@ githubPr
         const resolve = (ref: string): string =>
           execFileSync("git", ["rev-parse", ref], { encoding: "utf8" }).trim();
         const block = renderPrTraceBlock({
-          plan_id: opts.plan,
           route_mode: opts.routeMode,
           subject_head: opts.head ?? resolve("HEAD"),
           base_sha: opts.base ?? resolve("origin/main"),
-          plan_revision: opts.planRevision,
           episode_id: opts.episodeId,
           issue_number: opts.issueNumber,
         });
@@ -4095,7 +3452,7 @@ githubPr
     if (opts.json) {
       process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     } else if (result.ok) {
-      process.stdout.write(`pr trace — OK (plan_id=${result.fields.plan_id})\n`);
+      process.stdout.write(`pr trace — OK (issue_number=${result.fields.issue_number})\n`);
     } else {
       process.stdout.write("pr trace — FAIL\n");
       for (const finding of result.findings) {
@@ -4116,12 +3473,16 @@ function fetchRulesetsViaGh(repository: string): unknown[] {
   const list = JSON.parse(
     execFileSync("gh", ["api", `repos/${repository}/rulesets?includes_parents=true`], {
       encoding: "utf8",
+      timeout: GH_COMMAND_TIMEOUT_MS,
+      env: ghCommandEnv(process.env),
     }),
   ) as Array<Record<string, unknown>>;
   return list.map((entry) =>
     JSON.parse(
       execFileSync("gh", ["api", `repos/${repository}/rulesets/${String(entry.id)}`], {
         encoding: "utf8",
+        timeout: GH_COMMAND_TIMEOUT_MS,
+        env: ghCommandEnv(process.env),
       }),
     ),
   );
@@ -4190,6 +3551,7 @@ program
     "sealed consumer runtime input JSON emitted by the release materializer",
   )
   .option("--consumer-runtime-release <path>", "offline Pack consumer runtime Release directory")
+  .option("--worktree <path>", "install the main runtime pin into a linked worktree")
   .option(
     "--expected-consumer-digest <digest>",
     "external sha256 anchor for the Release checksum asset",
@@ -4206,20 +3568,10 @@ program
       consumerRuntimeInput?: string;
       consumerRuntimeRelease?: string;
       expectedConsumerDigest?: string;
+      worktree?: string;
     }) => {
-      if (opts.solo && opts.team) {
-        process.stderr.write("--solo と --team は同時指定できません (どちらか一方)\n");
-        process.exitCode = 1;
-        return;
-      }
       const teamCount = [opts.tlTeam, opts.qaTeam, opts.poTeam].filter(Boolean).length;
-      if (opts.team && teamCount === 0) {
-        process.stderr.write(
-          "--team requires --tl-team / --qa-team / --po-team so generated CODEOWNERS never ships with unresolved team placeholders.\n",
-        );
-        process.exitCode = 1;
-        return;
-      }
+      if (invalidSetupMode({ ...opts, teamCount })) return;
       if (teamCount > 0 && teamCount < 3) {
         process.stderr.write(
           "--tl-team / --qa-team / --po-team は 3 つとも指定してください (CODEOWNERS の @TODO 混入防止)\n",
@@ -4237,6 +3589,7 @@ program
         process.exitCode = 1;
         return;
       }
+      if (await handleConsumerWorktreeSetupOption({ ...opts, teamCount })) return;
       const phase = opts.solo ? "0-A" : opts.team ? "0-B" : undefined;
       const teams =
         teamCount === 3
@@ -4262,10 +3615,7 @@ program
             executingModulePath: fileURLToPath(import.meta.url),
             setupDeps: () => nodeSetupDeps(realpathSync.native(process.cwd())),
           });
-          if (result.status === "already-installed") {
-            process.stdout.write("consumer runtime: already installed (no writes)\n");
-            return;
-          }
+          if (reportExistingRuntime(result)) return;
           const r = result.setup;
           process.stdout.write(`phase: ${r.phase}\n`);
           for (const w of r.written) process.stdout.write(`  + ${w}\n`);
@@ -4531,55 +3881,26 @@ memory
     process.stderr.write(renderMemoryHealth(result));
   });
 
-const elicit = program
-  .command("elicit")
-  .description("design-decision elicitation bound to the current V-model stage (PLAN-L7-428)");
-elicit
-  .command("context")
-  .description(
-    "resolve current stage + skill decision defaults + design coverage into an elicitation packet",
-  )
-  .option("--plan <plan_id>", "target PLAN (default: first ready schedule row)")
-  .option("--json", "JSON output")
-  .action((opts: { plan?: string; json?: boolean }) => {
-    const repoRoot = process.cwd();
-    const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
-    try {
-      const ctx = selectElicitationContext(db, { repoRoot, planId: opts.plan });
-      process.stdout.write(
-        opts.json ? `${JSON.stringify(ctx, null, 2)}\n` : renderElicitationContext(ctx),
-      );
-    } finally {
-      db.close();
-    }
-  });
+const elicit = program.command("elicit").description("append design-decision adoption records");
 elicit
   .command("record")
   .description(`append an adopted design decision to ${DESIGN_DECISION_LOG_PATH}`)
-  .requiredOption("--plan <plan_id>", "PLAN the decision belongs to")
+  .requiredOption("--issue <number>", "Issue number the decision belongs to")
   .requiredOption("--topic <text>", "what was decided (判断の種別)")
   .requiredOption("--chosen <text>", "adopted option")
   .requiredOption("--reason <text>", "why it was adopted")
   .option("--options <csv>", "comma-separated candidate options")
   .action(
-    (opts: { plan: string; topic: string; chosen: string; reason: string; options?: string }) => {
-      const repoRoot = process.cwd();
-      let currentLocation = "";
-      try {
-        const db = openHarnessDb(defaultHarnessDbPath(repoRoot), { repoRoot });
-        try {
-          const ctx = selectElicitationContext(db, { repoRoot, planId: opts.plan });
-          currentLocation = ctx.stage?.current_location ?? "";
-        } finally {
-          db.close();
-        }
-      } catch {
-        // fail-open: 工程表 stage が引けなくても記録は成立させる
+    (opts: { issue: string; topic: string; chosen: string; reason: string; options?: string }) => {
+      if (!/^[1-9][0-9]*$/.test(opts.issue) || !Number.isSafeInteger(Number(opts.issue))) {
+        process.stderr.write("--issue must be a positive integer\n");
+        process.exitCode = 1;
+        return;
       }
+      const repoRoot = process.cwd();
       try {
         const record = appendDesignDecision(repoRoot, {
-          planId: opts.plan,
-          currentLocation,
+          issueNumber: Number(opts.issue),
           topic: opts.topic,
           options: opts.options?.split(",") ?? [],
           chosen: opts.chosen,
@@ -4587,10 +3908,10 @@ elicit
           sessionId: resolveRuntimeSessionId(),
         });
         process.stdout.write(
-          `elicit: recorded ${record.plan_id}${record.current_location ? ` @ ${record.current_location}` : ""} → ${DESIGN_DECISION_LOG_PATH}\n`,
+          `elicit: recorded issue #${record.issue_number}${record.current_location ? ` @ ${record.current_location}` : ""} → ${DESIGN_DECISION_LOG_PATH}\n`,
         );
         process.stdout.write(
-          "elicit: 正本への転記を忘れずに (PLAN 設計判断節 / ADR、governance §共通ルール 7)\n",
+          "elicit: 正本の設計文書 / ADR に採択結果を反映してください (governance §共通ルール 7)\n",
         );
       } catch (error) {
         process.stderr.write(`elicit: ${error instanceof Error ? error.message : String(error)}\n`);

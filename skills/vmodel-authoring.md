@@ -23,12 +23,12 @@ triggers: "vmodel-docgen の docs/*.yaml を書く・編集するときの書式
 # vmodel-authoring
 
 > 移植元: zip `.claude/skills/vmodel-authoring/SKILL.md` (Apache-2.0、PLAN-L7-676 PR-T3)。
-> 原文の意味は書き換えていない (docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5)。
+> 原文の意味は書き換えていない (plans-archive-20261102:docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.5)。
 > 移植元の `docs/*.yaml` は `vmodel-docgen` (別ツール) の正本形式であり、本ハーネスの
 > `docs/design/` Markdown 形式とは別物。ID 命名・トレース宣言の**考え方**を読むための参照であり、
 > 本ハーネスでの実行対象は `ut-tdd vmodel template` / `vmodel lint` である。
 >
-> 注記 (PLAN-L7-676 PR-T3): 本文中の `python tools/build.py ...` は移植元 `vmodel-docgen` (別ツール) のコマンドであり、`tools/*.py` 自体は本リポジトリへ同梱しない (ADR-001)。UT-TDD harness では実行対象ではなく、検査の意味は各 gate (G8〜G14、docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.6) で TypeScript として再実装する。
+> 注記 (PLAN-L7-676 PR-T3): 本文中の `python tools/build.py ...` は移植元 `vmodel-docgen` (別ツール) のコマンドであり、`tools/*.py` 自体は本リポジトリへ同梱しない (ADR-001)。UT-TDD harness では実行対象ではなく、検査の意味は各 gate (G8〜G14、plans-archive-20261102:docs/plans/PLAN-L7-676-release-consumer-dev-start.md §3.6) で TypeScript として再実装する。
 
 
 # docs/*.yaml 執筆規約

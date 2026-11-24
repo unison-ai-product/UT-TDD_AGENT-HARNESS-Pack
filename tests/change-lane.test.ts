@@ -216,7 +216,7 @@ describe("change-lane classification (PLAN-L7-455)", () => {
   // (docs/**.md ・.ut-tdd/memory/**) を記述しており、orchestrator が lane を誤予測した。
   // コメントは人間と agent が最初に読む面なので、実装との集合一致を機械で固定する。
   describe("workflow header allowlist stays in sync with DOC_LANE_PREFIXES", () => {
-    const MARKER = "doc-safe allowlist (SSoT: src/github/change-lane.ts DOC_LANE_PREFIXES):";
+    const MARKER = "doc-safe allowlist (SSoT: src/shared/change-lane.ts DOC_LANE_PREFIXES):";
 
     function headerAllowlistPrefixes(): string[] {
       // live root ではなく detached HEAD snapshot を読む (U-TESTHYGIENE-015 /

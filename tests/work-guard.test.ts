@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import {
   normalizeRepoRelative,
   resolveForeignEditOverride,
 } from "../src/runtime/work-guard.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const hookRepoRoot = process.cwd();
 const workGuardHook = join(hookRepoRoot, ".claude", "hooks", "work-guard.ts");
@@ -248,7 +249,7 @@ describe("work-guard hook marker is one-shot (stale marker は恒久バイパス
       const second = runWorkGuardHook(cwd, input);
       expect(second.status).toBe(2);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      removeTestTree(cwd);
     }
   }, 20_000);
 });

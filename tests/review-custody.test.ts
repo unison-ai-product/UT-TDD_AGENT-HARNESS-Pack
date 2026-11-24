@@ -29,6 +29,11 @@ import {
   type RunnerEnvironment,
 } from "../src/feedback/review-custody-runner.ts";
 import { analyzeReviewDispatch } from "../src/feedback/review-dispatch.ts";
+import {
+  createRunnerEnvironment,
+  createRunnerPullRequestFactory,
+  registerPlanret007Oracles,
+} from "./support/planret-s4-review-custody-oracles.ts";
 
 const REPOSITORY = "unison-ai-product/UT-TDD_AGENT-HARNESS";
 const HEAD = "a".repeat(40);
@@ -36,13 +41,11 @@ const OTHER_HEAD = "b".repeat(40);
 const WORKFLOW_SHA = "c".repeat(40);
 const MERGE_SHA = "d".repeat(40);
 const MERGED_AT = "2026-08-07T07:28:00Z";
-const PLAN_REVISION = "1".repeat(64);
 const JUDGMENT_DIGEST = "2".repeat(64);
 const PROVIDER_EVIDENCE_REF = `d3b:${"3".repeat(64)}`;
 const WORKFLOW_REF = `${REPOSITORY}/.github/workflows/review-attestation.yml@refs/heads/main`;
-const ISSUER = "https://token.actions.githubusercontent.com";
-const RUN_ID = "17123456789";
-
+const ISSUER = "https://token.actions.githubusercontent.com",
+  RUN_ID = "17123456789";
 const REQUEST_IDENTITY: ReviewRequestIdentity = {
   schemaVersion: "review-request/v1",
   memoryId: "project-review-pr-283-exact-head",
@@ -58,8 +61,6 @@ function draft(overrides: Partial<CustodyReceiptDraft> = {}): CustodyReceiptDraf
     prNumber: 283,
     baseRef: "main",
     headSha: HEAD,
-    planId: "PLAN-L7-465-cross-review-author-binding",
-    planRevision: PLAN_REVISION,
     requestIdentity: REQUEST_IDENTITY,
     judgmentDigest: JUDGMENT_DIGEST,
     workflowRef: WORKFLOW_REF,
@@ -123,8 +124,6 @@ function expectation(
     baseRef: "main",
     headSha: HEAD,
     receiptKind: "pre_merge_review",
-    planId: "PLAN-L7-465-cross-review-author-binding",
-    planRevision: PLAN_REVISION,
     requestIdentity: REQUEST_IDENTITY,
     judgmentDigest: JUDGMENT_DIGEST,
     workflowRef: WORKFLOW_REF,
@@ -202,15 +201,19 @@ function admissionInput(overrides: Partial<CustodyAdmissionInput> = {}): Custody
   };
 }
 
+const runnerPullRequest = createRunnerPullRequestFactory({
+  repository: REPOSITORY,
+  headSha: HEAD,
+  mergeSha: MERGE_SHA,
+});
 function runnerEnvironment(input: {
   readonly pullRequest: Record<string, unknown>;
   readonly mergeMethod?: string;
+  readonly includePlanMetadata?: boolean;
 }): { env: RunnerEnvironment; written: () => string | null } {
   const values: Record<string, string> = {
     GITHUB_REPOSITORY: REPOSITORY,
     UT_TDD_CUSTODY_PR: "283",
-    UT_TDD_CUSTODY_PLAN_ID: "PLAN-L7-465",
-    UT_TDD_CUSTODY_PLAN_REVISION: PLAN_REVISION,
     UT_TDD_CUSTODY_MEMORY_ID: REQUEST_IDENTITY.memoryId,
     UT_TDD_CUSTODY_JUDGMENT_DIGEST: JUDGMENT_DIGEST,
     UT_TDD_CUSTODY_PROVIDER_EVIDENCE_REF: PROVIDER_EVIDENCE_REF,
@@ -223,41 +226,16 @@ function runnerEnvironment(input: {
     GITHUB_RUN_ATTEMPT: "1",
     UT_TDD_CUSTODY_RECEIPT_PATH: "review-custody-receipt.json",
   };
-  if (input.mergeMethod !== undefined) values.UT_TDD_CUSTODY_MERGE_METHOD = input.mergeMethod;
-  const stdout = JSON.stringify(input.pullRequest);
-  let output: string | null = null;
-  return {
-    env: {
-      get: (name) => values[name],
-      runGh: () => ({ status: 0, stdout }),
-      readFile: () => {
-        throw new Error("not used by issue");
-      },
-      writeFile: (_path, content) => {
-        output = content;
-      },
-      log: () => undefined,
-    },
-    written: () => output,
-  };
+  return createRunnerEnvironment(values, input);
 }
-
-function runnerPullRequest(input: {
-  readonly merged: boolean;
-  readonly mergedAt?: string;
-}): Record<string, unknown> {
-  return {
-    number: 283,
-    state: input.merged ? "closed" : "open",
-    merged: input.merged,
-    merged_at: input.mergedAt ?? null,
-    merge_commit_sha: input.merged ? MERGE_SHA : null,
-    base: { ref: "main" },
-    head: { sha: HEAD, repo: { full_name: REPOSITORY } },
-  };
-}
-
 describe("D3 trusted custody receipt", () => {
+  registerPlanret007Oracles({
+    buildText,
+    admissionInput,
+    expectation,
+    runnerEnvironment,
+    runnerPullRequest,
+  });
   it("U-RVGHA-D3C-001: 機械 custody が全て valid でも family authority 不在なら unverified_family で custody_admitted を出さない", async () => {
     const decision = await admitReviewCustody(admissionInput());
     expect(decision).toEqual({
@@ -290,13 +268,12 @@ describe("D3 trusted custody receipt", () => {
     expect(decision.familyAuthority).toBe("po-approved-provider-oidc-subject");
   });
 
-  it("U-RVGHA-D3C-002: repository / PR / baseRef / headSha / planRevision / reviewRevision の 1 軸変異を全件 replay 拒否する", async () => {
+  it("U-RVGHA-D3C-002: repository / PR / baseRef / headSha / reviewRevision の 1 軸変異を全件 replay 拒否する", async () => {
     const mutations: CustodySubjectExpectation[] = [
       expectation({ repository: "attacker/UT-TDD_AGENT-HARNESS" }),
       expectation({ prNumber: 284 }),
       expectation({ baseRef: "release" }),
       expectation({ headSha: OTHER_HEAD }),
-      expectation({ planRevision: "9".repeat(64) }),
       expectation({
         requestIdentity: { ...REQUEST_IDENTITY, memoryId: "project-other-review-request" },
       }),
@@ -330,7 +307,7 @@ describe("D3 trusted custody receipt", () => {
       { ...valid, extraField: "unexpected" },
       Object.fromEntries(Object.entries(valid).filter(([key]) => key !== "issuer")),
       { ...valid, prNumber: "283" },
-      { ...valid, schemaVersion: "review-custody/v2" },
+      { ...valid, schemaVersion: "review-custody/v1" },
     ];
     const outcomes = corrupted.map((entry) => decodeReviewCustodyReceipt(JSON.stringify(entry)));
     expect(outcomes.map((outcome) => outcome.ok)).toEqual([false, false, false, false]);

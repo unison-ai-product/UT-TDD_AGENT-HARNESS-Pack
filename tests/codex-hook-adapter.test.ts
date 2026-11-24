@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   analyzeCodexHookAdapter,
   CODEX_DEFERRED_SURFACE,
@@ -21,11 +20,16 @@ import {
   parseCodexCommandString,
   parseHookInvocation,
 } from "../src/lint/hook-invocation.ts";
-import { REQUIRED as CLAUDE_REQUIRED, wrapperHookArgs } from "../src/lint/project-hook.ts";
+import {
+  REQUIRED as CLAUDE_REQUIRED,
+  MISSING_RUNTIME_GUARD_BOOTSTRAP,
+  wrapperHookArgs,
+} from "../src/lint/project-hook.ts";
 import { analyzeReadability } from "../src/lint/readability.ts";
 import { evaluateAgentGuard } from "../src/runtime/agent-guard.ts";
 import { evaluateWorkGuard } from "../src/runtime/work-guard.ts";
 import { BUILTIN_GITHUB_TEMPLATES } from "../src/setup/templates.ts";
+import { describe, expect, heavyAfterAll, heavyBeforeAll, it } from "./support/hook-bounds.ts";
 import {
   createCleanPack,
   createConsumerProject,
@@ -189,8 +193,16 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139, PLAN-L7-6
       .flatMap((entries) => entries.flatMap((entry) => entry.hooks))
       .map((hook) => parseHookInvocation(hook))
       .filter((invocation) => invocation !== null)
-      .map((invocation) => [invocation.executable, ...invocation.args].join(" "))
-      // CodexにはClaude宛てwakeとSubagentStopの対応surfaceがない。
+      .map(({ executable, args }) => {
+        const isGuardBootstrap =
+          args.length === 5 &&
+          args[0] === "-e" &&
+          args[1] === MISSING_RUNTIME_GUARD_BOOTSTRAP &&
+          args[2] === ".ut-tdd/bin/ut-tdd.mjs" &&
+          args[3] === "hook" &&
+          (args[4] === "agent-guard" || args[4] === "work-guard");
+        return [executable, ...(isGuardBootstrap ? args.slice(2) : args)].join(" ");
+      })
       .filter(
         (command) =>
           !command.endsWith(" hook subagent-stop") && !command.endsWith(" hook claude-memory-wake"),
@@ -300,12 +312,12 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139, PLAN-L7-6
         bypass: false,
       }).decision,
     ).toBe("block");
-    // agent-guard allowlist ロジックは共有。Codex は spawn_agent 面を実際に持つので、agent-guard 相当を
+    // agent-guard の判定ロジックは共有。Codex は spawn_agent 面を実際に持つので、agent-guard 相当を
     // 配線すれば同 entrypoint・同判定になる (配線自体は deferred follow-up)。
     expect(
       evaluateAgentGuard(
-        { tool_name: "Agent", tool_input: { subagent_type: "be-logic", model: "sonnet" } },
-        { allowRaw: false, resolveAgentFamily: () => "missing" },
+        { tool_name: "Agent", tool_input: { subagent_type: "general-purpose" } },
+        { allowRaw: false },
       ).code,
     ).toBe(2);
   });
@@ -468,17 +480,16 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139, PLAN-L7-6
 
   describe("U-CXHOOKCMD-003/004/005: hooks.json の command 文字列を Codex と同じ shell 起動形で実行", () => {
     let consumer = "";
-
-    beforeAll(async () => {
+    heavyBeforeAll(["pack", 420_000], async () => {
       const pack = createCleanPack();
       consumer = createConsumerProject("fixture/consumer-cxhookcmd");
       const input = await writeConsumerRuntimeInput(pack, consumer);
       setupConsumerFromPack(pack, consumer, input);
       removeFixtureTree(pack);
       mkdirSync(join(consumer, "subdir"), { recursive: true });
-    }, 420_000);
+    });
 
-    afterAll(() => {
+    heavyAfterAll("teardown", () => {
       // Windows は直前に spawn した pwsh/node 子プロセスがファイルハンドルを解放しきる前に
       // rmSync が走ると EPERM になることがある (teardown のみの transient で、assertion の
       // 失敗ではない)。1 回 retry し、それでも失敗したら best-effort で諦める (残置は OS の
@@ -578,7 +589,7 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139, PLAN-L7-6
       expect(sessionLogLines(unrootedSessionId).length - unrootedBefore).toBe(0);
     }, 420_000);
 
-    it("U-CXHOOKCMD-004: work-guard/agent-guard は foreign 編集を block し、自 session のファイルと allowlist 内 spawn は pass する", () => {
+    it("U-CXHOOKCMD-004: work-guard/agent-guard は foreign 編集を block し、自 session のファイルと汎用の型の spawn は pass する", () => {
       const subdirectory = join(consumer, "subdir");
       const workGuardCommand = commandFor("PreToolUse", "apply_patch|write_file");
       const agentGuardCommand = commandFor("PreToolUse", "spawn_agent|spawn_agents_on_csv");
@@ -587,13 +598,7 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139, PLAN-L7-6
         "apply_patch|write_file|exec_command|local_shell|Bash",
       );
 
-      // setup が生成した AGENTS.md は consumer repo でまだ commit されておらず
-      // (setupConsumerFromPack が commit するのは ut-tdd.project.json だけ)、この hook
-      // 呼び出しの session_id とは無関係の "foreign uncommitted file" として扱われる。
-      // (`.claude/CLAUDE.md` のような「丸ごと新規の untracked ディレクトリ」配下のパスは
-      // `git status --porcelain` が既定でディレクトリ 1 行に畳んでしまい、work-guard の
-      // per-file 照合に乗らない。リポジトリ直下は project 作成時から tracked なので、
-      // 直下の untracked ファイルは個別行になる。)
+      // 直下の AGENTS.md は個別表示されるが、新規 untracked directory は git status が畳むため使わない。
       for (const cwd of [consumer, subdirectory]) {
         const foreignEdit = spawnCodexHookCommand(workGuardCommand, {
           cwd,
@@ -609,11 +614,7 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139, PLAN-L7-6
         );
       }
 
-      // U-CXHOOKCMD-004(b): 自 session のファイルへの apply_patch (uncommitted かつ同一 session が
-      // 既に touch 済み) は repo root / subdirectory の両方の cwd で pass する。README.md のような
-      // clean な既 commit ファイルは work-guard 判定に「foreign 判定を免れているだけ」で own-session
-      // 判定を検証しないため、oracle は uncommitted own file を要求する (frozen: test-design
-      // U-CXHOOKCMD-004)。
+      // U-CXHOOKCMD-004(b): uncommitted own file を使い、root / subdirectory の両 cwd で pass を確かめる。
       let ownSeq = 0;
       for (const [cwd, cwdLabel] of [
         [consumer, "root"],
@@ -664,19 +665,19 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139, PLAN-L7-6
         input: JSON.stringify({
           session_id: "cxhookcmd-004-agent",
           tool_name: "spawn_agent",
-          tool_input: { subagent_type: "not-allowlisted", model: "sonnet" },
+          tool_input: { subagent_type: "general-purpose" },
         }),
         env: { CLAUDE_PROJECT_DIR: consumer, UT_TDD_PROJECT_DIR: consumer },
       });
       expect(disallowedSpawn.status).toBe(2);
 
-      // allowlist 内 (pmo-haiku, model floor haiku) の spawn は pass する。
+      // model を指定しない spawn は、汎用の型でも block する (#1002)。許可された汎用の型 + 明示 model の spawn は pass する。
       const allowlistedSpawn = spawnCodexHookCommand(agentGuardCommand, {
         cwd: consumer,
         input: JSON.stringify({
           session_id: "cxhookcmd-004-agent-ok",
           tool_name: "spawn_agent",
-          tool_input: { subagent_type: "pmo-haiku", model: "haiku" },
+          tool_input: { subagent_type: "general-purpose", model: "haiku" },
         }),
         env: { CLAUDE_PROJECT_DIR: consumer, UT_TDD_PROJECT_DIR: consumer },
       });
@@ -686,11 +687,10 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139, PLAN-L7-6
       ).toBe(0);
     }, 420_000);
 
-    it("U-CXHOOKCMD-005: consumer launcher は active runtime 不在時 exit 78 (consumer_runtime_absent)", () => {
+    it("U-CXHOOKCMD-005: consumer launcher は active runtime 不在時、session hook は exit 0 で案内する", () => {
       const command = commandFor("SessionStart");
       expect(command).toContain(".ut-tdd/bin/ut-tdd.mjs");
 
-      // 構成済み consumer (active runtime あり) では launcher が正常起動する。
       const configured = spawnCodexHookCommand(command, {
         cwd: consumer,
         input: JSON.stringify({ session_id: "cxhookcmd-005-configured" }),
@@ -698,9 +698,7 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139, PLAN-L7-6
       });
       expect(configured.status, `${configured.stdout}\n${configured.stderr}`).toBe(0);
 
-      // active runtime pointer を取り除くと、同じ launcher command が
-      // exit 78 / consumer_runtime_absent を返す (U-HOOKEXEC-001 と同じ契約)。
-      // args が落ちて bare `node` の SyntaxError になる旧 args 形式の失敗経路とは区別する。
+      // active runtime pointer を外すと session hook は fail-open (exit 0、契約 §4 (b)) で案内を返し、bare `node` の SyntaxError とは区別する。
       const pointerPath = join(consumer, ".ut-tdd", "runtime", "activation", "active.json");
       const pointerBytes = readFileSync(pointerPath);
       rmSync(pointerPath, { force: true });
@@ -710,8 +708,9 @@ describe("codex-hook-adapter — Codex hooks.json parity (PLAN-L7-139, PLAN-L7-6
           input: JSON.stringify({ session_id: "cxhookcmd-005-absent" }),
           env: { CLAUDE_PROJECT_DIR: consumer, UT_TDD_PROJECT_DIR: consumer },
         });
-        expect(absent.status, `${absent.stdout}\n${absent.stderr}`).toBe(78);
+        expect(absent.status, `${absent.stdout}\n${absent.stderr}`).toBe(0);
         expect(absent.stderr).toContain("consumer_runtime_absent");
+        expect(absent.stderr).toContain("setup --worktree");
         expect(absent.stderr).not.toMatch(/SyntaxError/);
       } finally {
         writeFileSync(pointerPath, pointerBytes);

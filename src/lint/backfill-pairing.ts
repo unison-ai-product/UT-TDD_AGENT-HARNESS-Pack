@@ -1,5 +1,3 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { fmValue } from "./shared.ts";
 
 export type BackfillReq = "required" | "conditional" | "none";
@@ -245,32 +243,6 @@ export function analyzeBackfill(
       conditionalDecisionMissing.length === 0 &&
       glossaryGaps.length === 0,
   };
-}
-
-export interface BackfillDocs {
-  plans: ParsedPlan[];
-  glossaryText: string;
-  auditedLegacyIds: Set<string>;
-}
-
-export function loadBackfillDocs(repoRoot: string = process.cwd()): BackfillDocs {
-  const plansDir = join(repoRoot, "docs", "plans");
-  const plans: ParsedPlan[] = [];
-  for (const f of readdirSync(plansDir)) {
-    if (!f.endsWith(".md")) continue;
-    plans.push(parsePlan(f, readFileSync(join(plansDir, f), "utf8")));
-  }
-  const concept = readFileSync(
-    join(repoRoot, "docs", "governance", "ut-tdd-agent-harness-concept_v3.1.md"),
-    "utf8",
-  );
-  const glossaryText =
-    concept.match(/#\s*(?:§|ﾂｧ)10[\s\S]*?(?=\n#\s*(?:§|ﾂｧ)11|$)/)?.[0] ?? concept;
-  const audit = readFileSync(
-    join(repoRoot, "docs", "governance", "conditional-backfill-decision-audit-2026-06-22.md"),
-    "utf8",
-  );
-  return { plans, glossaryText, auditedLegacyIds: parseConditionalBackfillAuditPlanIds(audit) };
 }
 
 export function backfillMessages(result: BackfillResult): string[] {

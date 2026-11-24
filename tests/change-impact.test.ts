@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -15,6 +15,7 @@ import {
 } from "../src/lint/change-impact.ts";
 import { analyzeDependencyDrift } from "../src/lint/dependency-drift.ts";
 import { assessReviewSession } from "../src/runtime/review-guard.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 describe("change-impact lint", () => {
   it("src changes require both design and test/test-design updates", () => {
@@ -186,7 +187,7 @@ describe("parseUntrackedAddedPaths (issue #721 Sol r1 FLAG 1 — -z NUL-separate
       const paths = loadUntrackedAddedFiles(root);
       expect(paths.sort()).toEqual([".ut-tdd/memory/a.md", ".ut-tdd/memory/b.md"]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -207,7 +208,7 @@ describe("parseUntrackedAddedPaths (issue #721 Sol r1 FLAG 1 — -z NUL-separate
 
       expect(loadUntrackedAddedFiles(root)).toEqual([]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });
@@ -252,7 +253,7 @@ describe("review-guard と production loader の合成 (issue #721 Sol r2)", () 
       expect(withEdits.mutatedPaths).not.toContain(".ut-tdd/memory/日本語.md");
       expect(withEdits.mutatedPaths).not.toContain(".ut-tdd/memory/dir/a.md");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

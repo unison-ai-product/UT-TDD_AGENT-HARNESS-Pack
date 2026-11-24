@@ -563,7 +563,7 @@ L0 → L1 → L4 のドメイン継承チェーンを `ut-tdd plan lint` (sub_do
 
 - [ ] **SSoT 参照宣言ブロック** = `ユビキタス言語 = <L0 §10 用語集 path> / 業界標準整合 = <L0 §11 path> / Bounded Context = <L0 §2.5 9-mode>。本 doc は L0 を parent_doc reference とし、用語独自定義は行わない (anti-corruption layer)` のテンプレ文字列が存在 (欠落 → exit 1)
 - [ ] **件数確定宣言** = `<sub-doc 種別> は <要求 prefix> <NN> 件で確定 (根拠: <TL/PMO レビュー record path>)` のパターンが存在 (欠落 → P1 warning)
-- [ ] **L3 接続規約** = `next_pair_freeze: <L3 or L4 doc path>` の frontmatter フィールド + 本文 §関連 doc に `L3 PLAN は本 sub-doc 全件を dependencies.requires に列挙する` の記載 (欠落 → exit 1、§G.2 frontmatter と連動)
+- [ ] **L3 接続規約** = `next_pair_freeze: <L3 or L4 doc path>` の frontmatter フィールド + 本文 §関連 doc に `L3 PLAN は本 sub-doc 全件を dependencies.requires に列挙する` の記載 (欠落 → exit 1、§G.2 frontmatter と連動) （撤去: PLAN 撤去（#1078）で退役。この規約の機械検証は無効。L1 → L3 の降下の確認は #1196 の降下検査へ移る）
 
 ##### G.9 用語更新 (glossary delta) 検証 (living glossary、構想書 §3.1.2.2)
 
@@ -677,11 +677,11 @@ DD2=a 採用根拠: P0 = dashboard 表出必須機能、P1/P2 は背景機能を
 
 ##### H.4 ルール R4: screen sub-doc `requires` 整合
 
-検証式: PLAN-L1-03-screen-requirements 等の screen 関連 PLAN frontmatter `dependencies.requires` に **business + functional の両方が明示列挙** されていること。
+検証式: PLAN-L1-03-screen-requirements 等の screen 関連 PLAN frontmatter `dependencies.requires` に **business + functional の両方が明示列挙** されていること。（撤去: PLAN 撤去（#1078）で退役。この規約の機械検証は無効。L1 → L3 の降下の確認は #1196 の降下検査へ移る）
 
 不整合検出時の動作: **warn** (G1-trace 通過に影響しない)。
 
-- [ ] screen sub-doc の PLAN frontmatter `dependencies.requires` に business sub-doc PLAN-ID と functional sub-doc PLAN-ID が両方含まれる (欠落 → P1 warning)
+- [ ] screen sub-doc の PLAN frontmatter `dependencies.requires` に business sub-doc PLAN-ID と functional sub-doc PLAN-ID が両方含まれる (欠落 → P1 warning) （撤去: PLAN 撤去（#1078）で退役。この規約の機械検証は無効。L1 → L3 の降下の確認は #1196 の降下検査へ移る）
 
 ##### H.5 検証実装
 

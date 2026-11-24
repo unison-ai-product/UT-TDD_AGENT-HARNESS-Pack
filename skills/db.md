@@ -26,10 +26,10 @@ decision_points:
     over: "Adding it as NOT NULL in a single migration"
     because: "Migration design rules require migrations to be additive first"
   - when: "A migration drops a column or transforms data destructively"
-    choose: "Require a PLAN review_evidence entry confirming the data loss is intentional and approved before merging"
+    choose: "Record approval evidence on the Issue and PR confirming the data loss is intentional and approved before merging"
     over: "Merging the destructive migration once tests pass"
-    because: "Destructive migrations require explicit review_evidence confirming approved data loss"
-  - when: "A PLAN needs to record new harness state (e.g. a new gate_runs row)"
+    because: "Destructive migrations require explicit approval evidence confirming approved data loss"
+  - when: "A change needs to record new harness state (e.g. a new gate_runs row)"
     choose: "Add it through the projection writer (src/state-db/projection-writer.ts)"
     over: "Writing a bare SQL INSERT against harness.db"
     because: "Bare SQL inserts are explicitly called out as not authoritative"
@@ -43,13 +43,13 @@ decision_points:
 
 Schema design, state-model design, migration strategy, and the harness.db
 projection obligations that accompany any persistent storage change in UT-TDD
-(FR-L1-06 harness DB gate_runs / state projection). Apply when a PLAN adds,
+(FR-L1-06 harness DB gate_runs / state projection). Apply when a change adds,
 modifies, or removes a table, column, index, or migration.
 
 ## When to load this skill
 
 - Authoring an L4 basic-design doc that introduces or changes a DB schema.
-- A PLAN must extend `harness.db` tables (`plan_registry`, `artifact_registry`,
+- A change extends `harness.db` projection tables (
   `model_runs`, `trace_edges`, `coverage`, `findings`, `gate_runs`).
 - A Reverse R1 pass must extract an undocumented schema into a design doc.
 - A migration script must be designed before any column/table rename or drop.
@@ -62,7 +62,7 @@ vmodel lint`, and `ut-tdd metrics skill`. It is not an application database; it 
 harness state. Rules:
 
 - Never hand-edit `harness.db`; always regenerate via `ut-tdd db rebuild`.
-- Any new PLAN that adds harness state must add a row to the appropriate table
+- Record harness state changes in the appropriate projection table
   through the projection writer — bare SQL inserts are not authoritative.
 - When `ut-tdd doctor` reports a projection mismatch, run `ut-tdd db rebuild`
   and re-run `ut-tdd doctor` before diagnosing further.
@@ -70,7 +70,7 @@ harness state. Rules:
 ## V-model obligations for a schema change
 
 **L3 (functional):** name each entity and its role; state invariants in plain
-language ("a `plan_registry` row must always have a non-null `layer`").
+language ("a gate run records its source and subject").
 
 **L4 (basic design):** produce an ER diagram (Mermaid `erDiagram`) in the L4 doc.
 Each table: columns, types, PK/FK, nullable flags. Include a migration section:
@@ -89,19 +89,18 @@ constraint-violation path, and one migration-step idempotency check.
   `src/state-db/migrations/` (format: `NNN_<description>.sql`).
 - Migrations must be additive first: add columns as nullable before making them
   required; add tables before dropping old ones.
-- Destructive migrations require a PLAN `review_evidence` entry confirming the
+- Destructive migrations require Issue and PR evidence confirming the
   data loss is intentional and approved.
 - `ut-tdd doctor` must exit 0 after migration files are added — governance checks
   that migration ordering is monotonic and no gaps exist.
 
-## Pair-freeze checklist for a schema PLAN
+## Pair-freeze checklist for a schema change
 
 - [ ] L4 doc with ER diagram exists at `docs/design/.../L4-basic/`.
 - [ ] Migration section in the L4 doc lists each DDL step in order.
 - [ ] Migration file(s) exist under `src/state-db/migrations/` and are numbered
       without gaps.
 - [ ] L6 unit-test design covers constraint violations and migration idempotency.
-- [ ] `ut-tdd plan lint` exits 0.
 - [ ] `ut-tdd doctor` exits 0.
 - [ ] For harness.db changes: `ut-tdd db rebuild` succeeds and projection-writer
       tests are green (`npm run test`).

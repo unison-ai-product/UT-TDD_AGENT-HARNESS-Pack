@@ -20,7 +20,6 @@ describe("review-guard (IMP-137 / PLAN-L7-85)", () => {
         "review",
         "security",
         "audit",
-        "code-reviewer",
         "blind-review",
         "blind-reviewer",
       ]) {

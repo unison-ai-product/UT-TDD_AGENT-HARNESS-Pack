@@ -54,6 +54,17 @@ queued → [S1 plan] → testing → [S3 verify pass] → confirmed
 
 fail-close: confirmed は verify script 成功が必須。S3 verify 失敗時は sprint を completed にしない。
 
+### PoC のログ証拠 (PO 判断 2026-09-29)
+
+PoC (S2〜S4) に限り、プロトへ差し込んだログを検証証拠として認め、ログ設計の入力にする。
+
+- 保存先は `docs/research/<issue>/` とし、head・コマンド・digest を付ける。
+- ログ点は marker / helper で列挙できる形で書く。
+- Forward への昇格時は、ログ点の一覧をログ設計へ上げ、採用分を正式実装とテストで固定し、不採用分は撤去する
+  (marker が残っていれば fail-close)。
+- Forward の `review_evidence` は従来どおりテスト / コマンドの引用で書く。
+- 契約の freeze は #765 の PLAN が持つ。
+
 ---
 
 ## 4. Forward 合流点

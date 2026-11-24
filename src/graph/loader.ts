@@ -3,8 +3,7 @@
  *
  * repo → RelationGraphSourceSet の I/O 組み立て層。既存 loader を最大限再利用し
  * 重複 I/O / 重複ロジックを避ける:
- *   - sourceFiles / tracedPaths: loadImplPlanTraceInput (src/lint/impl-plan-trace.ts)
- *   - plans:                     loadReviewPlans (src/lint/review-evidence.ts) + yaml frontmatter
+ *   - sourceFiles:                loadImplPlanTraceInput (src/lint/impl-plan-trace.ts)
  *   - designDocs / pairArtifact: loadPairDocs (src/vmodel/lint.ts)
  *   - testDesignDocs:            docs/test-design/** walk
  *   - tests:                     tests/**\/*.ts walk
@@ -15,21 +14,18 @@
  * fail-open 原則: 各ディレクトリ不在 / parse 失敗は空集合として扱う (既存 loader と同一方針)。
  * sanitization invariant: raw MCP response / browser trace / secret / credential を行へ複製しない。
  */
-import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { type Dirent, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { loadFrDocs, parseFrRows } from "../lint/fr-registry-audit.ts";
 import { loadImplPlanTraceInput } from "../lint/impl-plan-trace.ts";
 import type {
   DesignDocInput,
-  PlanInput,
   RelationGraphSourceSet,
   RequirementInput,
   SourceFileInput,
   TestDesignDocInput,
   TestFileInput,
 } from "../lint/relation-graph.ts";
-import { loadReviewPlans } from "../lint/review-evidence.ts";
 import { normalizePath } from "../shared/source-text.ts";
 import { loadPairDocs } from "../vmodel/lint.ts";
 
@@ -182,15 +178,6 @@ function buildCoveredByMap(
   return covered;
 }
 
-// ---- plan frontmatter parse -------------------------------------------------
-
-interface PlanFrontmatter {
-  plan_id?: string;
-  status?: string;
-  generates?: { artifact_path?: string; artifact_type?: string }[];
-  dependencies?: { requires?: string[] };
-}
-
 /** requirement node の provenance path (FR-L1 SSoT)。change-impact 突合の基準。 */
 const FR_REGISTRY_DOC = "docs/design/harness/L1-requirements/functional-requirements.md";
 
@@ -202,7 +189,7 @@ const GOVERNANCE_DOCS = [
 ] as const;
 const ROOT_CANONICAL_DOCS = ["README.md", "AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md"] as const;
 /**
- * docs/ 直下に置かれ、どのサブディレクトリ walk (design/process/adr/governance/test-design/plans)
+ * docs/ 直下に置かれ、どのサブディレクトリ walk (design/process/adr/governance/test-design)
  * にも入らない ledger doc (PLAN-L7-397)。未登録だと該当 doc 単独の変更で
  * missing-projection (gate error) が毎回発生する (docs/improvement-backlog.md 実例)。
  */
@@ -241,32 +228,10 @@ function loadRegistryFrIds(repoRoot: string): string[] {
   }
 }
 
-function parsePlanFrontmatter(content: string): PlanFrontmatter {
-  const m = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!m) return {};
-  try {
-    return (parseYaml(m[1]) as PlanFrontmatter) ?? {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * FR reference IDs を PLAN 本文から抽出する (FR-L1-NN 形式)。
- * derives-from edge 用 (requirement id = FR-L1-NN)。
- */
-function extractFrRefs(content: string): string[] {
-  const refs = new Set<string>();
-  for (const m of content.matchAll(/\bFR-L\d+-\d+\b/g)) {
-    refs.add(m[0]);
-  }
-  return [...refs];
-}
-
 // ---- main loader ------------------------------------------------------------
 
 /**
- * 実 repo の docs/plans / src / tests / docs/design / docs/test-design を走査し
+ * 実 repo の src / tests / docs/design / docs/test-design を走査し
  * RelationGraphSourceSet を組み立てる。
  *
  * @param repoRoot  absolute path to repo root (process.cwd() 相当)
@@ -296,61 +261,8 @@ export function loadRelationGraphSourceSet(repoRoot: string): RelationGraphSourc
   // 5. tests input
   const tests: TestFileInput[] = testPaths.map((path) => ({ path }));
 
-  // 6. plans: loadReviewPlans → frontmatter parse で generates + FR refs を取得。
-  // loadReviewPlans は docs/plans 不在で throw する (fail-close) ため、loader の fail-open
-  // 原則を保つために全体を try/catch で包む (docs/plans 不在 repo = 空 plans)。
-  const plans: PlanInput[] = [];
-  // plan が derives-from する全 requirement id を集約 (requirement node 供給用、stale-edge 是正)。
-  const referencedReqs = new Set<string>();
-  try {
-    const reviewPlans = loadReviewPlans(repoRoot);
-    const plansDir = join(repoRoot, "docs", "plans");
-    for (const rp of reviewPlans) {
-      let content = "";
-      try {
-        content = readFileSync(join(plansDir, rp.file), "utf8");
-      } catch {
-        // fail-open
-      }
-      const fm = parsePlanFrontmatter(content);
-      // archived plan は live graph に edge/node を出さない (historical、generates が削除済 artifact を
-      // 指して dangling 化するのを防ぐ)。status は frontmatter から判定 (PLAN-L7-142)。
-      if (fm.status === "archived") continue;
-      const generatedPaths = (fm.generates ?? []).map((g) => g.artifact_path ?? "").filter(Boolean);
-      // source の宣言は存在有無にかかわらず保持する。draft の未実装 source は availability を
-      // planned とし、relation edgeのlifecycleで正規に追跡する。
-      const generatesSrc = generatedPaths.filter((p) => p.startsWith("src/") && p.endsWith(".ts"));
-      const availability =
-        fm.status === "draft"
-          ? Object.fromEntries(
-              generatesSrc
-                .filter((p) => !existsSync(join(repoRoot, p)))
-                .map((p) => [p, "planned"] as const),
-            )
-          : {};
-      // requirements: frontmatter dependencies.requires の FR-L1-NN + 本文 FR refs
-      const fmRequires = (fm.dependencies?.requires ?? []).filter((r) => /^FR-L\d+-\d+$/.test(r));
-      const bodyRefs = extractFrRefs(content);
-      const allRefs = [...new Set([...fmRequires, ...bodyRefs])];
-      for (const r of allRefs) referencedReqs.add(r);
-      plans.push({
-        id: rp.plan_id,
-        path: `docs/plans/${rp.file}`,
-        status: fm.status,
-        generates: generatesSrc.length > 0 ? generatesSrc : undefined,
-        availability: Object.keys(availability).length > 0 ? availability : undefined,
-        requirements: allRefs.length > 0 ? allRefs : undefined,
-      });
-    }
-  } catch {
-    // fail-open: docs/plans 不在は空 plans
-  }
-
-  // requirement node 供給 (PLAN-L7-32 loader の被覆欠落是正、PLAN-L7-142):
-  // FR-L1 レジストリ (SSoT) ∪ plan が実参照する FR id。前者で SSoT 完全性、後者で
-  // derives-from edge の端点を確実に実在化 (body-ref など未登録 FR でも dangling を出さない)。
-  const requirementIds = [...new Set([...loadRegistryFrIds(repoRoot), ...referencedReqs])];
-  const requirements: RequirementInput[] = requirementIds.map((id) => ({
+  // 6. requirements: FR-L1 registry
+  const requirements: RequirementInput[] = [...new Set(loadRegistryFrIds(repoRoot))].map((id) => ({
     id,
     path: FR_REGISTRY_DOC,
   }));
@@ -376,7 +288,6 @@ export function loadRelationGraphSourceSet(repoRoot: string): RelationGraphSourc
     // fail-open
   }
 
-  // 8. testDesignDocs: docs/test-design/**/*.md 走査
   const processDocs: string[] = [];
   walkMd(join(repoRoot, "docs", "process"), repoRoot, processDocs);
   for (const path of processDocs) {
@@ -485,6 +396,7 @@ export function loadRelationGraphSourceSet(repoRoot: string): RelationGraphSourc
     }
   }
 
+  // 8. testDesignDocs: docs/test-design/**/*.md
   const testDesignDocs: TestDesignDocInput[] = [];
   try {
     const tdDir = join(repoRoot, "docs", "test-design");
@@ -501,7 +413,7 @@ export function loadRelationGraphSourceSet(repoRoot: string): RelationGraphSourc
     requirements,
     sourceFiles,
     tests,
-    plans,
+    plans: [],
     designDocs,
     testDesignDocs,
     // dbTables: 省略 (projection-writer 経由で供給)

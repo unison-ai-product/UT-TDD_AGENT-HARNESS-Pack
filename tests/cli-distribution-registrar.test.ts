@@ -12,6 +12,7 @@ describe("CLI distribution registrar", () => {
     expect(distribution).toBeDefined();
     expect(distribution?.commands.map((command) => command.name()).sort()).toEqual([
       "authoring-smoke",
+      "c2-manifest",
       "package",
       "plan",
       "release-plan",

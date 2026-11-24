@@ -1,4 +1,4 @@
-import type { LintResult } from "../plan/lint.ts";
+import type { LintResult } from "../lint/lint-result.ts";
 import {
   analyzeWorktreeTopology,
   type TopologyFinding,

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { requireRuntimeRepoRoot, resolveRuntimeRepoRoot } from "../src/runtime/repo-root.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 describe("U-TESTHYGIENE-002: runtime repo root", () => {
   it("walks from a nested hook cwd to the nearest UT-TDD root", () => {
@@ -13,7 +14,7 @@ describe("U-TESTHYGIENE-002: runtime repo root", () => {
       writeFileSync(join(root, "ut-tdd.project.json"), "{}\n");
       expect(resolveRuntimeRepoRoot({ cwd: nested, env: {} })).toBe(root);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -32,8 +33,8 @@ describe("U-TESTHYGIENE-002: runtime repo root", () => {
         requireRuntimeRepoRoot({ cwd: isolated, env: { CLAUDE_PROJECT_DIR: "relative" } }),
       ).toThrow("runtime state write blocked");
     } finally {
-      rmSync(root, { recursive: true, force: true });
-      rmSync(isolated, { recursive: true, force: true });
+      removeTestTree(root);
+      removeTestTree(isolated);
     }
   });
 
@@ -44,7 +45,7 @@ describe("U-TESTHYGIENE-002: runtime repo root", () => {
         isolated,
       );
     } finally {
-      rmSync(isolated, { recursive: true, force: true });
+      removeTestTree(isolated);
     }
   });
 
@@ -56,7 +57,7 @@ describe("U-TESTHYGIENE-002: runtime repo root", () => {
       writeFileSync(join(root, "ut-tdd.project.json"), "{}\n");
       expect(resolveRuntimeRepoRoot({ cwd: nested, env: {} })).toBe(root);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -79,7 +80,7 @@ describe("U-TESTHYGIENE-002: runtime repo root", () => {
       rmSync(join(root, "CLAUDE.md"));
       expect(resolveRuntimeRepoRoot({ cwd: root, env: {} })).toBeNull();
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

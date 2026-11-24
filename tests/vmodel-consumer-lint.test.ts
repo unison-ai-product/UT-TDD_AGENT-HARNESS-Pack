@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { lintVmodel } from "../src/vmodel/lint.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const consumerTemplateSlots = [
   [
@@ -39,7 +40,7 @@ function fixtureRoot(): string {
     });
     return root;
   } catch (error) {
-    rmSync(root, { recursive: true, force: true });
+    removeTestTree(root);
     throw error;
   }
 }
@@ -83,7 +84,7 @@ describe("release-consumer vmodel lint (PLAN-L7-676 PR-VL)", () => {
       expect(result.messages.join("\n")).toContain(`双方向 ${expectedDocumentCount - 1} pair`);
       expect(result.messages.join("\n")).toContain("孤児 0");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -96,7 +97,7 @@ describe("release-consumer vmodel lint (PLAN-L7-676 PR-VL)", () => {
       expect(result.messages.join("\n")).toContain("未作成");
       expect(result.messages.join("\n")).not.toContain("ENOENT");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -119,7 +120,7 @@ describe("release-consumer vmodel lint (PLAN-L7-676 PR-VL)", () => {
       expect(result.ok).toBe(false);
       expect(result.messages.join("\n")).toContain("逆参照なし");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 
@@ -148,7 +149,7 @@ describe("release-consumer vmodel lint (PLAN-L7-676 PR-VL)", () => {
       expect(result.ok).toBe(true);
       expect(result.messages.join("\n")).toContain("双方向 1 pair");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removeTestTree(root);
     }
   });
 });

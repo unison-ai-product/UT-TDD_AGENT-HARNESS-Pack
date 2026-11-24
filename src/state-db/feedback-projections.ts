@@ -657,7 +657,7 @@ export function projectRetryEvents(db: HarnessDb, deps: FeedbackProjectionDeps):
   const rows = db
     .prepare(
       `SELECT plan_id, workflow, phase, COUNT(*) AS attempt_count
-       FROM workflow_runs
+       FROM workflow_runs WHERE COALESCE(workflow, '') <> 'routine-gate'
        GROUP BY plan_id, workflow, phase
        HAVING COUNT(*) > 1
        ORDER BY plan_id, workflow, phase`,

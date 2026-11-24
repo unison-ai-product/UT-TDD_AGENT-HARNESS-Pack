@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -43,9 +43,71 @@ function trackedSourcePaths(): string[] {
   return execFileSync("git", ["ls-files", "-z"]).toString("utf8").split("\0").filter(Boolean);
 }
 
+const planRetirementInputs = (() => {
+  const root = process.cwd();
+  const walkFiles = (directory: string): string[] =>
+    readdirSync(join(root, directory), { withFileTypes: true }).flatMap((entry) => {
+      const path = `${directory}/${entry.name}`;
+      return entry.isDirectory() ? walkFiles(path) : entry.isFile() ? [path] : [];
+    });
+  const templatePaths = walkFiles("docs/templates");
+  const templateBytes = templatePaths.map((path) => ({
+    path,
+    bytes: readFileSync(join(root, path), "utf8"),
+  }));
+  const vmodelIndex =
+    templateBytes.find(({ path }) => path === "docs/templates/vmodel/README.md")?.bytes ?? "";
+  const slotPaths = [...vmodelIndex.matchAll(/^\|\s*`DOC-[^`]+`\s*\|\s*`([^`]+\.md)`/gm)].map(
+    ([, path]) => `docs/templates/vmodel/${path}`,
+  );
+  const optionalPaths = [
+    ...vmodelIndex.matchAll(/^\|\s*\d{3}\s*\|.*`optional\/([^`]+\.md)`\s*\|/gm),
+  ].map(([, path]) => `docs/templates/vmodel/optional/${path}`);
+  const section6Paths = [
+    "docs/templates/design/L6-function-spec-template.md",
+    "docs/templates/vmodel/README.md",
+    ...slotPaths,
+    ...optionalPaths,
+  ];
+  const frontmatter = new Map<string, string | null>(
+    templateBytes
+      .filter(({ path }) => path.endsWith(".md"))
+      .map(({ path, bytes }): [string, string | null] => [
+        path,
+        /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(bytes)?.[1] ?? null,
+      ]),
+  );
+  const mirror = readFileSync(join(root, "src", "setup", "templates.ts"), "utf8");
+  return {
+    frontmatter,
+    section6Paths,
+    slotPaths,
+    optionalPaths,
+    templateBytes,
+    trackedPaths: trackedSourcePaths(),
+    templateAndMirrorBytes: [...templateBytes, { path: "src/setup/templates.ts", bytes: mirror }],
+    mirror,
+    inventory: readFileSync(join(root, "src", "setup", "authoring-template-inventory.ts"), "utf8"),
+    canary: readFileSync(join(root, "scripts", "pack-canary-acceptance.mjs"), "utf8"),
+    vmodelState: readFileSync(join(root, "docs", "templates", "state", "vmodel.json"), "utf8"),
+  };
+})();
+
+const retiredPlanTemplatePaths = [
+  "docs/templates/plan/design/template.md",
+  "docs/templates/plan/impl/template.md",
+];
+
 describe("Issue #482 canonical Pack authoring inventory", () => {
-  it("U-PACKTPL-001: has six required artifacts and one canonical family inventory", () => {
-    expect(AUTHORING_TEMPLATE_ARTIFACT_PATHS).toHaveLength(6);
+  it("U-PACKTPL-001: has four required artifacts and one canonical family inventory", () => {
+    expect([...AUTHORING_TEMPLATE_ARTIFACT_PATHS].sort()).toEqual(
+      [
+        "docs/templates/design/L6-function-spec-template.md",
+        "docs/templates/state/vmodel.json",
+        "docs/templates/prompts/effort-classify.md",
+        "docs/templates/team/example-review-team.yaml",
+      ].sort(),
+    );
     expect(validateAuthoringTemplateInventory()).toMatchObject({
       ok: true,
       missingFamilies: [],
@@ -176,7 +238,17 @@ describe("Issue #482 canonical Pack authoring inventory", () => {
       checked: AUTHORING_TEMPLATE_ARTIFACT_PATHS,
       errors: [],
     });
-    expect(inspectPackAuthoringEntries(entries.slice(1)).ok).toBe(false);
+    for (const entry of entries) {
+      const missing = inspectPackAuthoringEntries(
+        entries.filter((candidate) => candidate.path !== entry.path),
+      );
+      expect(missing.ok, `missing ${entry.path}`).toBe(false);
+      expect(missing.errors).toContain(`missing:${entry.path}`);
+
+      const duplicate = inspectPackAuthoringEntries([...entries, entry]);
+      expect(duplicate.ok, `duplicate ${entry.path}`).toBe(false);
+      expect(duplicate.errors).toContain(`duplicate:${entry.path}`);
+    }
     expect(
       inspectPackAuthoringEntries([
         ...entries,
@@ -187,6 +259,34 @@ describe("Issue #482 canonical Pack authoring inventory", () => {
       ok: false,
       sourcePaths: [teamSource],
     });
+  });
+
+  it.each(
+    retiredPlanTemplatePaths,
+  )("U-PACKTPL-004: retired PLAN template entry is fail-close (%s)", (path) => {
+    expect(
+      inspectPackAuthoringEntries([...authoringEntries, { ...authoringEntries[0], path }]),
+    ).toMatchObject({
+      ok: false,
+      errors: [`unknown:${path}`],
+    });
+  });
+
+  it("U-PACKTPL-004: generic artifact sets remain valid but a retired-only set is denied", () => {
+    expect(validateAuthoringArtifactSet(["docs/design/consumer-note.md"])).toMatchObject({
+      ok: true,
+      missingArtifactPaths: [],
+      unknownArtifactPaths: [],
+    });
+
+    const retiredPath = retiredPlanTemplatePaths[0];
+    expect(validateAuthoringArtifactSet([retiredPath])).toMatchObject({
+      ok: false,
+      unknownArtifactPaths: [retiredPath],
+    });
+    expect(inspectPackAuthoringEntries([{ ...authoringEntries[0], path: retiredPath }]).ok).toBe(
+      false,
+    );
   });
 
   it("U-PACKTPL-006: broad docs/templates and .ut-tdd wildcard mutations are denied", () => {
@@ -208,11 +308,104 @@ describe("Issue #482 canonical Pack authoring inventory", () => {
     const entries = authoringEntries;
     const legacyTemplateName = "he" + "lix";
     for (const path of [
-      "docs/templates/plan/personal.md",
-      "docs/templates/plan/run-bun.md",
+      "docs/templates/design/personal.md",
+      "docs/templates/design/run-bun.md",
       `docs/templates/design/${legacyTemplateName}.md`,
     ]) {
       expect(inspectPackAuthoringEntries([...entries, { ...entries[0], path }]).ok).toBe(false);
     }
+  });
+
+  it("U-PLANRET-017 fixture: §6 template set exists after #1512", () => {
+    const { section6Paths, slotPaths, optionalPaths, frontmatter, templateBytes } =
+      planRetirementInputs;
+    expect(slotPaths).toHaveLength(21);
+    expect(optionalPaths).toHaveLength(27);
+    expect(section6Paths).toHaveLength(50);
+    expect(new Set(section6Paths).size).toBe(50);
+    expect(section6Paths[0]).toBe("docs/templates/design/L6-function-spec-template.md");
+    const availablePaths = new Set(templateBytes.map(({ path }) => path));
+    expect(section6Paths.filter((path) => !availablePaths.has(path))).toEqual([]);
+    expect(section6Paths.filter((path) => !frontmatter.get(path)?.trim())).toEqual([]);
+    expect(retiredPlanTemplatePaths).toHaveLength(2);
+    expect(new Set(retiredPlanTemplatePaths).size).toBe(2);
+    expect(planRetirementInputs.trackedPaths).toContain("docs/templates/state/vmodel.json");
+    expect(planRetirementInputs.vmodelState.trim().length).toBeGreaterThan(0);
+    expect(JSON.parse(planRetirementInputs.vmodelState)).toMatchObject({
+      schema_version: expect.any(Number),
+    });
+    expect(planRetirementInputs.inventory.trim().length).toBeGreaterThan(0);
+    expect(planRetirementInputs.canary.trim().length).toBeGreaterThan(0);
+    expect(planRetirementInputs.mirror.trim().length).toBeGreaterThan(0);
+  });
+
+  it("U-PLANRET-017: no Pack template has plan frontmatter", () => {
+    const violations = [...planRetirementInputs.frontmatter]
+      .filter(([, bytes]) => bytes?.match(/^\s*plan\s*:/m))
+      .map(([path]) => path);
+    expect(violations).toEqual([]);
+  });
+
+  it("U-PLANRET-017: all §6 templates use issue frontmatter", () => {
+    const violations = planRetirementInputs.section6Paths.filter(
+      (path) => !planRetirementInputs.frontmatter.get(path)?.match(/^\s*issue\s*:\s*\S+/m),
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it("U-PLANRET-017: authoring inventory has no PLAN template family", () => {
+    const inventoryPaths = AUTHORING_TEMPLATE_INVENTORY.flatMap((entry) =>
+      "sourcePath" in entry
+        ? [entry.sourcePath, entry.artifactPath]
+        : [entry.sourcePrefix, entry.artifactPrefix],
+    );
+    expect(
+      inventoryPaths.some((path) => path.toLowerCase().startsWith("docs/templates/plan/")),
+    ).toBe(false);
+  });
+
+  it("U-PLANRET-017: retired PLAN templates are not tracked", () => {
+    const stillTracked = retiredPlanTemplatePaths.filter((path) =>
+      planRetirementInputs.trackedPaths.includes(path),
+    );
+    expect(stillTracked).toEqual([]);
+  });
+
+  it("U-PLANRET-017: state vmodel template has no plan_id field", () => {
+    const state = JSON.parse(planRetirementInputs.vmodelState) as Record<string, unknown>;
+    expect(Object.hasOwn(state, "plan_id")).toBe(false);
+  });
+
+  it("U-PLANRET-017: canary does not invoke plan draft or plan lint", () => {
+    expect(planRetirementInputs.canary).not.toMatch(
+      /\[\s*["']plan["']\s*,\s*["'](?:draft|lint)["']/i,
+    );
+  });
+
+  it("U-PLANRET-017: templates and mirror do not point to docs/plans", () => {
+    const violations = planRetirementInputs.templateAndMirrorBytes
+      .filter(({ bytes }) => /docs[\\/]plans/i.test(bytes))
+      .map(({ path }) => path);
+    expect(violations).toEqual([]);
+  });
+
+  it("U-PLANRET-017: templates and mirror have no ut-tdd plan command", () => {
+    const planCommand =
+      /(?:[`"'|]|(?:^|\r?\n)\s*(?:[$>]\s*)?|\b(?:run|use|invoke|execute)\s+)(?:\.\/)?ut-tdd(?:\.cmd)?\s+plan\b/i;
+    const violations = planRetirementInputs.templateAndMirrorBytes
+      .filter(({ bytes }) => planCommand.test(bytes))
+      .map(({ path }) => path);
+    expect(violations).toEqual([]);
+  });
+
+  it("U-PLANRET-017: templates and mirror have no PLAN-prefixed required values", () => {
+    const violations = planRetirementInputs.templateAndMirrorBytes.flatMap(({ path, bytes }) =>
+      bytes
+        .split(/\r?\n/)
+        .flatMap((line, index) =>
+          /["'`]?[\w-]+["'`]?:\s*["'`]?\s*PLAN-/i.test(line) ? [`${path}:${index + 1}`] : [],
+        ),
+    );
+    expect(violations).toEqual([]);
   });
 });

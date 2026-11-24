@@ -92,12 +92,12 @@ export interface ResearchAdoptionDecision {
   reason: string;
 }
 
-export type RecommendedSubagentRole = "docs" | "se" | "qa" | "uiux" | "tl";
-export type RecommendedSubagentTier = ProposalSubagentLaneName;
+export type RecommendedLaneRole = "docs" | "se" | "qa" | "uiux" | "tl";
+export type RecommendedLaneTier = ProposalSubagentLaneName;
 
-export interface RecommendedSubagent {
-  role: RecommendedSubagentRole;
-  tier: RecommendedSubagentTier;
+export interface RecommendedLane {
+  role: RecommendedLaneRole;
+  tier: RecommendedLaneTier;
   model: string;
   purpose: string;
   parallelizable: boolean;
@@ -117,7 +117,7 @@ export interface ProposalDocumentCoverage {
   required_gates: string[];
   research_adoption: ResearchAdoptionDecision[];
   research_rejections: ResearchAdoptionDecision[];
-  recommended_subagents: RecommendedSubagent[];
+  recommended_lanes: RecommendedLane[];
   risk_flags: string[];
   escalators: string[];
   guardrails: string[];
@@ -262,13 +262,13 @@ function rejectedResearchForText(normalizedText: string): ResearchAdoptionDecisi
   ).map(({ decision }) => decision);
 }
 
-function subagent(input: {
-  role: RecommendedSubagentRole;
-  tier: RecommendedSubagentTier;
+function buildLane(input: {
+  role: RecommendedLaneRole;
+  tier: RecommendedLaneTier;
   purpose: string;
   parallelizable: boolean;
   reason: string;
-}): RecommendedSubagent {
+}): RecommendedLane {
   const { role, tier, purpose, parallelizable, reason } = input;
   const lane = PROPOSAL_SUBAGENT_LANES[tier];
   return {
@@ -285,12 +285,12 @@ function subagent(input: {
   };
 }
 
-function recommendedSubagentsForCoverage(input: {
+function recommendedLanesForCoverage(input: {
   task: TaskClassification;
   granularity: DesignDocGranularity;
   patterns: string[];
   escalators: string[];
-}): RecommendedSubagent[] {
+}): RecommendedLane[] {
   const risky = input.task.risk_flags.length > 0 || LEVEL_RANK[input.granularity] >= LEVEL_RANK.G4;
   const discovery = input.patterns.includes("discovery");
   const uiux = input.patterns.some((pattern) =>
@@ -310,8 +310,8 @@ function recommendedSubagentsForCoverage(input: {
       "agent-orchestration",
     ].includes(pattern),
   );
-  const recommendations: RecommendedSubagent[] = [
-    subagent({
+  const recommendations: RecommendedLane[] = [
+    buildLane({
       role: "docs",
       tier: "T2-mini",
       purpose: "template research, adoption split, and document inventory expansion",
@@ -327,7 +327,7 @@ function recommendedSubagentsForCoverage(input: {
       ["trivial", "simple"].includes(input.task.difficulty));
   if (cheapWorker) {
     recommendations.push(
-      subagent({
+      buildLane({
         role: "se",
         tier: "T2-spark",
         purpose: "bounded low-risk implementation or lint/test patch",
@@ -339,7 +339,7 @@ function recommendedSubagentsForCoverage(input: {
 
   if (implementationHeavy || input.escalators.includes("multi_pattern_union")) {
     recommendations.push(
-      subagent({
+      buildLane({
         role: "se",
         tier: "T1-worker",
         purpose: "cross-artifact implementation or classifier/lint wiring",
@@ -351,7 +351,7 @@ function recommendedSubagentsForCoverage(input: {
 
   if (uiux) {
     recommendations.push(
-      subagent({
+      buildLane({
         role: "uiux",
         tier: risky ? "T0-frontier" : "T2-mini",
         purpose: "screen, usability, accessibility, and visual evidence review",
@@ -365,7 +365,7 @@ function recommendedSubagentsForCoverage(input: {
 
   if (risky || discovery) {
     recommendations.push(
-      subagent({
+      buildLane({
         role: "qa",
         tier: risky ? "T0-frontier" : "T1-worker",
         purpose: risky
@@ -381,7 +381,7 @@ function recommendedSubagentsForCoverage(input: {
 
   if (input.escalators.includes("low_drive_confidence")) {
     recommendations.push(
-      subagent({
+      buildLane({
         role: "tl",
         tier: "T0-frontier",
         purpose: "routing decision when drive classification is uncertain",
@@ -476,7 +476,7 @@ export function classifyProposalDocumentCoverage(
     required_gates: gates,
     research_adoption: researchAdoption,
     research_rejections: researchRejections,
-    recommended_subagents: recommendedSubagentsForCoverage({
+    recommended_lanes: recommendedLanesForCoverage({
       task,
       granularity,
       patterns: packs.map((pack) => pack.pattern),

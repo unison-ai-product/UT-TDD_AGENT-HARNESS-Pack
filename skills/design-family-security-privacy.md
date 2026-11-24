@@ -56,20 +56,20 @@ supply chain, secrets/keys, session-layer web risk, platform-specific device
 risk, and the diagnosis plan that verifies all of the above. Eight documents
 form this family; each owns a distinct concern and none substitutes for
 another. Load this skill when authoring or reviewing any of them, or when a
-PLAN's security-relevant change touches more than one.
+The security-relevant change touches more than one.
 
 ## When to load this skill
 
-- An L4/L5 PLAN introduces or modifies an authentication, authorization,
+- An L4/L5 change introduces or modifies an authentication, authorization,
   session, encryption, or dependency-ingestion surface.
 - A design review needs to check whether a security/privacy obligation is
   documented in its correct owning document rather than scattered across
   several.
-- A Recovery or Incident PLAN must show that the exploited or at-risk surface
+- A Recovery or Incident Issue must show that the exploited or at-risk surface
   is now represented in the design-document family, not just patched.
 - A security test/diagnosis pass (L10) finds a gap or an undocumented control
   and needs to know which design document owns the fix.
-- Deciding how much of the family a PLAN actually needs (see decision points
+- Deciding how much of the family an Issue actually needs (see decision points
   above) before writing any of it.
 
 ## The eight documents and what each must contain
@@ -363,7 +363,7 @@ that would answer that question is filed somewhere else entirely.
   the harness's own guard rails.
 - `skills/threat-model.md` owns the STRIDE-lite *procedure* (how to run a
   threat-modeling pass, the trust-surface inventory, where to record the
-  output as `docs/design/L3/<plan-id>-threat-model.md`). This skill's
+  output as `docs/design/L3/<subject>-threat-model.md`). This skill's
   security design document is the artifact a completed threat-model pass
   feeds into as its permanent home — `threat-model.md` is the technique,
   this document family is the durable specification the technique populates

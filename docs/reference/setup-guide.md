@@ -116,6 +116,76 @@ launcher (`.ut-tdd/bin/ut-tdd.mjs`) が参照するのは、`.ut-tdd/runtime/act
 
 上の表で解決しないときは、[README のバグ報告](../../README.md#-バグ報告) の手順で知らせてください。
 
+### 5.1 エージェント向けの切り分け手順
+
+導入に失敗した AI エージェントが、順に実行して原因を絞るための手順です。上から進み、止まる線引き (手順 4) に当たったら、そこで作業を止めて人に聞いてください。
+
+**手順 1: `doctor --setup-smoke` の出力を読む**
+
+```sh
+node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke
+```
+
+- 1 行目が `doctor: setup-smoke - OK (checked=23, failed=0)` なら、導入は成り立っています。症状が別の所にあるので、手順 2 に進まず、症状を人に確認してください。
+- 1 行目が `doctor: setup-smoke - violation (checked=N, failed=M)` なら、続く行に最大 12 件、`doctor: setup-smoke - missing <検査名>: <説明>` が出ます。`<検査名>` を下の「検査名の見方」で引いてください。
+- コマンド自体が起動しない (`.ut-tdd/bin/ut-tdd.mjs` が無い、`consumer_runtime_*` で終わる) 場合は、setup が最後まで終わっていません。手順 2 でエラーコードを引いてください。
+- `doctor` をフラグなしで実行した結果の赤は、導入の失敗ではありません (§2)。判定には使いません。
+
+検査名の見方 (`src/doctor/setup-smoke.ts` の検査と同じ):
+
+| 検査名 | 意味と次の確認 |
+|---|---|
+| `.ut-tdd/bin/ut-tdd.mjs`、`AGENTS.md`、`CLAUDE.md`、`.claude/CLAUDE.md`、`.claude/settings.json`、`.codex/config.toml`、`.codex/hooks.json` | そのファイルが repository の root に無い。setup が途中で止まったか、別の場所で実行しています。`pwd` と `git rev-parse --show-toplevel` が一致するか確かめ、一致するなら §4 のとおり `setup --solo` を流し直します (既存ファイルは上書きされません) |
+| `wrapper-placeholder-free` | launcher にテンプレートの未置換が残っています。launcher を手で直さず、setup を流し直すか、人に聞きます |
+| `wrapper-launcher-contract` | launcher の起動方法が契約と違います (shell 経由になっている等)。手で直さず、人に聞きます |
+| `claude-hooks-json`、`codex-hooks-json` | hook 設定の JSON が読めません。ファイルの先頭と末尾を見て、壊れた箇所を人に示します。Windows では `>>` で書いた UTF-16 のファイルでないかも見ます (§1) |
+| `claude-hook:<コマンド>`、`codex-hook:<コマンド>` | その hook が設定に無い、または形が違います。`.claude/settings.json` / `.codex/hooks.json` が setup の出力のままか、`git diff` で確かめます |
+| `portable-hook-paths` | hook が `.ut-tdd/bin/ut-tdd.mjs` 以外の場所を指しています (絶対パス、環境変数など)。手で直さず、人に聞きます |
+
+**手順 2: エラーコードを表で引く**
+
+setup や launcher の標準エラー出力に、`consumer_runtime_...` または `identity_repository_unbound` が出ていれば、次の表で引きます。§5 の表に同じコードがあるものは、そちらを優先します。
+
+| コード | 主な原因 | 確かめること |
+|---|---|---|
+| `consumer_runtime_anchor_mismatch` | `--expected-consumer-digest` が `sha256:` + 64 桁の形でない、`<版>.consumer.sha256` が読めない、またはその SHA-256 が anchor と違う。`--consumer-runtime-release` と `--expected-consumer-digest` の片方だけを指定した場合にも出る | release notes の anchor を一字ずつ照合する。2 つのフラグを両方付けたか確かめる。anchor を asset 側に合わせて変えない |
+| `consumer_runtime_asset_set_mismatch` | asset のフォルダが読めない、5 つの asset と名前が違う、またはサブフォルダがある | フォルダに 5 つだけがあるか `ls` で確かめる |
+| `consumer_runtime_checksum_invalid` | `<版>.consumer.sha256` の形が違う (2 行 + 末尾の改行ではない) | ダウンロードが壊れていないか。取り直しは人に確認する |
+| `consumer_runtime_digest_mismatch` | asset の中身が、checksum に書かれた SHA-256 と違う (ダウンロードの破損、または改ざん)。導入後の launcher が出す場合は、実行中の runtime の digest 不一致 | asset を取り直すかどうかは人に確認する。同じ asset で再試行しない |
+| `consumer_runtime_schema_invalid` | `<版>.consumer-runtime.json` が JSON として読めない、または schema が違う | ファイルが途中で切れていないか |
+| `consumer_runtime_release_binding_mismatch` | ファイル名の版と、runtime 文書の中の版が違う | 異なる版の asset を混ぜていないか |
+| `consumer_runtime_self_digest_mismatch` | 実行した `<版>.ut-tdd.mjs` が、runtime 文書の digest と一致しない。ファイル名が `<版>.ut-tdd.mjs` の形でない場合にも出る | 入口のファイル名を変えていないか。asset を取り直すかは人に確認する |
+| `consumer_runtime_update_unsupported` | すでに別の版の runtime が入っている (§3) | 新しい repository を使う。既存の runtime を消さない |
+| `consumer_runtime_identity_mismatch`、`consumer_runtime_receipt_mismatch` | 入っている runtime が、この repository・この版の記録と合わない | `.ut-tdd/` を手で触らず、人に聞く |
+| `consumer_runtime_absent` | launcher が参照する activation pointer (`.ut-tdd/runtime/activation/active.json`) が無い | `.ut-tdd/runtime/` があるか。無ければ setup が終わっていないので、手順 3 に進む |
+| `consumer_runtime_resolution_denied`、`consumer_runtime_external_path` | runtime の場所の解決が拒否された (repository の外を指している、またはリンク等) | `.ut-tdd/` の中にシンボリックリンクや junction が無いか見る。消さずに人に報告する |
+| `consumer_runtime_permission` | runtime のファイルへの権限が足りない | 権限を変える前に、人に聞く (手順 4) |
+| `consumer_runtime_indeterminate`、`consumer_runtime_install_failed`、`consumer_runtime_lock_cleanup_incomplete` | 導入・切り替えの途中で状態を確定できなかった | 同じコマンドを繰り返さず、標準エラー出力の全文を人に渡す |
+| `identity_repository_unbound` | origin remote が無い | §5 の表のとおり。`git remote add origin <url>` の `<url>` は人に確認する |
+
+**手順 3: 表に無いとき、何を確かめるか**
+
+次を順に実行し、結果を控えます。どれも読み取りだけです。
+
+1. `node -v` が 24 系か、`git --version` が通るか (§0)。
+2. `git rev-parse --show-toplevel` と `git remote -v` — 導入先の repository で、origin があるか。
+3. `ls .ut-tdd; ls .ut-tdd/bin; ls .ut-tdd/runtime` — setup がどこまで書いたか。bash と PowerShell のどちらでもこの形で実行できます。無いディレクトリがあっても次へ進むので、エラーになった行も控えます。
+4. `node .ut-tdd/bin/ut-tdd.mjs status` — 先頭に `mode:` が出るか。
+5. `git status --short` — setup が作ったファイル以外の変更が混ざっていないか。
+
+出力のうち、エラーコード・標準エラー出力の全文・上のコマンドの結果を揃えて、[README のバグ報告](../../README.md#-バグ報告) の手順で知らせてください。
+
+**手順 4: ここで止まって人に聞く線引き**
+
+次に当たったら、回避せずに作業を止めて、状況を人に伝えます。
+
+- **上書きの確認** (`上書きしますか？ [y/N]`) — 既存のファイルを失う操作です。`y` を自分で答えず、別の手段で上書きして押し切りません (§4)。
+- **権限** — `consumer_runtime_permission`、書き込み拒否 (`EACCES` 等)。`chmod`・管理者権限での再実行・所有者の変更をしません。
+- **secret・認証情報** — API キー、トークン、`gh` や provider のログインが要る場面。値を取得・入力・記録しません (§0)。
+- **asset の検証不一致** — `consumer_runtime_anchor_mismatch`、`consumer_runtime_digest_mismatch`、`consumer_runtime_checksum_invalid`、`consumer_runtime_self_digest_mismatch`。anchor や checksum を asset に合わせて書き換えません。asset の取り直しも、人が anchor を確認してからにします。
+- **`.ut-tdd/` と、setup が作ったファイルの手編集・削除** — runtime や状態が壊れる原因になります。
+- **origin の URL と、チームの指定** (`--tl-team` など) — 値は人が決めます。推測で入れません。
+
 ## 6. 次の一歩
 
 - `node .ut-tdd/bin/ut-tdd.mjs status` — いまの実行モードと、未完了の作業を確認する

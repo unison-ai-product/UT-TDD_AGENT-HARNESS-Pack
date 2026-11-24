@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import type { LintResult } from "../plan/lint.ts";
+import type { LintResult } from "../lint/lint-result.ts";
 import { buildFullDoctorCheckDefinitions } from "./check-definitions.ts";
 import {
   type DoctorRunProfileId,
@@ -12,7 +12,6 @@ import type { DoctorDeps } from "./runtime-state.ts";
 
 export interface DoctorOptions {
   strictTelemetryProvenance?: boolean;
-  strictGreenCommandDigest?: boolean;
   setupSmoke?: boolean;
   timing?: boolean;
   scope?: DoctorScope;

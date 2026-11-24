@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ensureDir } from "../src/shared/fs.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 describe("shared fs", () => {
   const mkRoot = () => mkdtempSync(join(tmpdir(), "ut-tdd-shared-fs-"));
@@ -12,7 +13,7 @@ describe("shared fs", () => {
     const target = join(root, "a", "b", "c");
     ensureDir(target, { recursive: true });
     expect(existsSync(target)).toBe(true);
-    rmSync(root, { recursive: true, force: true });
+    removeTestTree(root);
   });
 
   it("U-FS-002: ensureDir does not throw on existing directory", () => {
@@ -20,7 +21,7 @@ describe("shared fs", () => {
     const target = join(root, "existing");
     mkdirSync(target);
     expect(() => ensureDir(target)).not.toThrow();
-    rmSync(root, { recursive: true, force: true });
+    removeTestTree(root);
   });
 
   it("U-FS-003: ensureDir throws when path is existing file", () => {
@@ -28,6 +29,6 @@ describe("shared fs", () => {
     const target = join(root, "file.txt");
     writeFileSync(target, "x");
     expect(() => ensureDir(target)).toThrow();
-    rmSync(root, { recursive: true, force: true });
+    removeTestTree(root);
   });
 });

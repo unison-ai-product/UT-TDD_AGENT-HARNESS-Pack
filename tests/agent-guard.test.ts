@@ -4,8 +4,6 @@ import {
   type AgentGuardInput,
   evaluateAgentGuard,
   normalizeModelFamily,
-  type ResolvedFamily,
-  SUBAGENT_ALLOWLIST,
 } from "../src/runtime/agent-guard.ts";
 import {
   AGENT_GUARD_BYPASS_HINT,
@@ -13,26 +11,10 @@ import {
   CLAUDE_MODEL_FAMILY_CATALOG,
 } from "../src/runtime/agent-guard-policy.ts";
 
-const FAMILIES: Record<string, ResolvedFamily> = {
-  "be-api": "sonnet",
-  "be-logic": "sonnet",
-  "db-schema": "sonnet",
-  "devops-deploy": "sonnet",
-  "pmo-sonnet": "sonnet",
-  "pmo-haiku": "haiku",
-  "refactor-scout": "haiku",
-  "pdm-tech-innovation": "opus",
-  "code-reviewer": "sonnet",
-  "blind-reviewer": "opus",
-  "ut-tdd-tl": "sonnet",
-};
 const legacyRuntimeCommand = `${["he", "lix"].join("")} codex`;
 
 function ctx(allowRaw = false): AgentGuardContext {
-  return {
-    allowRaw,
-    resolveAgentFamily: (s) => FAMILIES[s] ?? "missing",
-  };
+  return { allowRaw };
 }
 
 function agent(tool_input: AgentGuardInput["tool_input"]): AgentGuardInput {
@@ -45,7 +27,7 @@ describe("normalizeModelFamily", () => {
       haiku: "claude-haiku-5-5",
       sonnet: "claude-sonnet-5-5",
       opus: "claude-opus-5-5",
-      fable: "claude-fable-5-1",
+      fable: "claude-fable-5-2",
     });
   });
 
@@ -58,6 +40,7 @@ describe("normalizeModelFamily", () => {
     // Legacy model IDs remain normalizable; this is not the active guard catalog.
     expect(normalizeModelFamily("claude-fable-5")).toBe("fable");
     expect(normalizeModelFamily("claude-fable-5-1")).toBe("fable");
+    expect(normalizeModelFamily("claude-fable-5-2")).toBe("fable");
     expect(normalizeModelFamily("claude-opus-5-5")).toBe("opus");
     expect(normalizeModelFamily("claude-sonnet-5-5")).toBe("sonnet");
     expect(normalizeModelFamily("claude-haiku-5-5")).toBe("haiku");
@@ -84,14 +67,23 @@ describe("evaluateAgentGuard", () => {
     expect(evaluateAgentGuard({ tool_name: "Edit" }, ctx()).code).toBe(0);
   });
 
-  it("blocks missing subagent_type (general-purpose default route)", () => {
+  it("blocks an envelope without tool_name (empty stdin parses to {}), even with allowRaw", () => {
+    for (const allowRaw of [false, true]) {
+      const d = evaluateAgentGuard({}, ctx(allowRaw));
+      expect(d.code).toBe(2);
+      expect(d.message).toContain("no tool_name");
+      expect(evaluateAgentGuard({ tool_name: "" }, ctx(allowRaw)).code).toBe(2);
+    }
+  });
+
+  it("blocks the default route (no subagent_type) when the model is missing", () => {
     expect(evaluateAgentGuard(agent({}), ctx()).code).toBe(2);
   });
 
   it("treats Task as a Claude subagent tool alias", () => {
     expect(
       evaluateAgentGuard(
-        { tool_name: "Task", tool_input: { subagent_type: "pmo-sonnet", model: "sonnet" } },
+        { tool_name: "Task", tool_input: { subagent_type: "Explore", model: "sonnet" } },
         ctx(),
       ).code,
     ).toBe(0);
@@ -101,13 +93,13 @@ describe("evaluateAgentGuard", () => {
   it("treats Codex spawn_agent as a guarded subagent spawn surface", () => {
     expect(
       evaluateAgentGuard(
-        { tool_name: "spawn_agent", tool_input: { subagent_type: "pmo-sonnet", model: "sonnet" } },
+        { tool_name: "spawn_agent", tool_input: { subagent_type: "Plan", model: "sonnet" } },
         ctx(),
       ).code,
     ).toBe(0);
     expect(
       evaluateAgentGuard(
-        { tool_name: "spawn_agent", tool_input: { agent: "pmo-sonnet", model_family: "sonnet" } },
+        { tool_name: "spawn_agent", tool_input: { agent: "claude", model_family: "sonnet" } },
         ctx(),
       ).code,
     ).toBe(0);
@@ -119,135 +111,38 @@ describe("evaluateAgentGuard", () => {
     expect(evaluateAgentGuard({ tool_name: "Agent" }, ctx()).code).toBe(2);
   });
 
-  it("blocks non-allowlisted subagent even with valid model", () => {
-    const d = evaluateAgentGuard(agent({ subagent_type: "rogue-agent", model: "sonnet" }), ctx());
-    expect(d.code).toBe(2);
-    expect(d.message).toContain("not allowlisted");
-    expect(d.message).toContain("ut-tdd codex --role");
-    expect(d.message).not.toContain(legacyRuntimeCommand);
+  it("passes a generic subagent with an explicit model (#1002)", () => {
+    for (const subagent_type of ["general-purpose", "Explore", "Plan", "claude", undefined]) {
+      for (const model of ["sonnet", "haiku", "opus", "claude-sonnet-5-5"]) {
+        expect(evaluateAgentGuard(agent({ subagent_type, model }), ctx()).code).toBe(0);
+      }
+    }
   });
 
-  it("blocks an unnormalizable or ambiguous model on an allowlisted agent", () => {
+  it("blocks a generic subagent without a model, with an unnormalizable model, or with fable", () => {
+    const missing = evaluateAgentGuard(agent({ subagent_type: "general-purpose" }), ctx());
+    expect(missing.code).toBe(2);
+    expect(missing.message).toContain("missing model");
+    expect(missing.message).not.toContain(legacyRuntimeCommand);
     expect(
-      evaluateAgentGuard(agent({ subagent_type: "pmo-sonnet", model: "gpt-5.5" }), ctx()).code,
-    ).toBe(2);
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "pmo-sonnet", model: "sonnet-opus" }), ctx()).code,
-    ).toBe(2);
-  });
-
-  it("blocks omitted model (strict explicit model required)", () => {
-    const d = evaluateAgentGuard(agent({ subagent_type: "pmo-sonnet" }), ctx());
-    expect(d.code).toBe(2);
-    expect(d.message).toContain("model");
-  });
-
-  it("allows explicit model matching the agent's frontmatter family", () => {
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "be-logic", model: "sonnet" }), ctx()).code,
-    ).toBe(0);
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "pmo-sonnet", model: "sonnet" }), ctx()).code,
-    ).toBe(0);
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "pmo-haiku", model: "haiku" }), ctx()).code,
-    ).toBe(0);
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "refactor-scout", model: "haiku" }), ctx()).code,
-    ).toBe(0);
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "ut-tdd-tl", model: "sonnet" }), ctx()).code,
-    ).toBe(0);
-  });
-
-  // PLAN-L7-399: model family is a capability *floor*, not an exact pin. An opus-tier
-  // orchestrator must be able to escalate a review-critical subagent to its own tier
-  // (review >= orchestrator, matching tier-router's tierFor() T0-for-consult/verify
-  // invariant) instead of being stuck asking a permanently-lower-tier subagent to
-  // review its work.
-  it("allows escalating a sonnet-family agent to opus (upgrade, not a downgrade)", () => {
-    const d = evaluateAgentGuard(agent({ subagent_type: "pmo-sonnet", model: "opus" }), ctx());
-    expect(d.code).toBe(0);
-  });
-
-  it("blocks haiku on a sonnet-family agent (downgrade)", () => {
-    const d = evaluateAgentGuard(agent({ subagent_type: "pmo-sonnet", model: "haiku" }), ctx());
-    expect(d.code).toBe(2);
-    expect(d.message).toContain("downgrade");
-  });
-
-  it("blocks sonnet or haiku on an opus-family agent (downgrade)", () => {
-    const sonnetDowngrade = evaluateAgentGuard(
-      agent({ subagent_type: "pdm-tech-innovation", model: "sonnet" }),
-      ctx(),
-    );
-    expect(sonnetDowngrade.code).toBe(2);
-    expect(sonnetDowngrade.message).toContain("downgrade");
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "pdm-tech-innovation", model: "haiku" }), ctx())
+      evaluateAgentGuard(agent({ subagent_type: "general-purpose", model: "gpt-6-luna" }), ctx())
         .code,
     ).toBe(2);
+    const fable = evaluateAgentGuard(agent({ subagent_type: "Explore", model: "fable" }), ctx());
+    expect(fable.code).toBe(2);
+    expect(fable.message).toContain("fable");
   });
 
-  it("allows opus for an opus-frontmatter agent (pdm-*)", () => {
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "pdm-tech-innovation", model: "opus" }), ctx())
-        .code,
-    ).toBe(0);
-  });
-
-  it("allows escalating review-critical subagents (code-reviewer/ut-tdd-tl) to opus", () => {
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "code-reviewer", model: "opus" }), ctx()).code,
-    ).toBe(0);
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "ut-tdd-tl", model: "opus" }), ctx()).code,
-    ).toBe(0);
-  });
-
-  it("allows fable only for quality-check subagents", () => {
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "code-reviewer", model: "fable" }), ctx()).code,
-    ).toBe(0);
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "blind-reviewer", model: "fable" }), ctx()).code,
-    ).toBe(0);
-  });
-
-  it("blocks fable for worker subagents even when it satisfies their capability floor", () => {
-    const d = evaluateAgentGuard(agent({ subagent_type: "be-logic", model: "fable" }), ctx());
-    expect(d.code).toBe(2);
-    expect(d.message).toContain("apex-tier policy");
-  });
-
-  it("allows opus on the blind-reviewer gate subagent and blocks any downgrade", () => {
-    expect(SUBAGENT_ALLOWLIST.has("blind-reviewer")).toBe(true);
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "blind-reviewer", model: "opus" }), ctx()).code,
-    ).toBe(0);
-    const sonnetDowngrade = evaluateAgentGuard(
-      agent({ subagent_type: "blind-reviewer", model: "sonnet" }),
-      ctx(),
-    );
-    expect(sonnetDowngrade.code).toBe(2);
-    expect(sonnetDowngrade.message).toContain("downgrade");
-    expect(
-      evaluateAgentGuard(agent({ subagent_type: "blind-reviewer", model: "haiku" }), ctx()).code,
-    ).toBe(2);
-  });
-
-  it("blocks an allowlisted subagent whose definition file is missing", () => {
-    // pmo-tech-docs is allowlisted but intentionally absent from this test resolver.
-    expect(SUBAGENT_ALLOWLIST.has("pmo-tech-docs")).toBe(true);
-    const d = evaluateAgentGuard(agent({ subagent_type: "pmo-tech-docs", model: "sonnet" }), ctx());
-    expect(d.code).toBe(2);
+  it("blocks a retired definition-based type even with a valid model", () => {
+    for (const subagent_type of ["pmo-sonnet", "blind-reviewer", "be-api", "unknown-type"]) {
+      const d = evaluateAgentGuard(agent({ subagent_type, model: "sonnet" }), ctx());
+      expect(d.code, subagent_type).toBe(2);
+      expect(d.message, subagent_type).toContain("general-purpose");
+    }
   });
 
   it("bypasses block when allowRaw is set", () => {
-    const d = evaluateAgentGuard(
-      agent({ subagent_type: "rogue-agent", model: "sonnet" }),
-      ctx(true),
-    );
+    const d = evaluateAgentGuard(agent({ subagent_type: "general-purpose" }), ctx(true));
     expect(d.code).toBe(0);
     expect(d.bypassed).toBe(true);
   });

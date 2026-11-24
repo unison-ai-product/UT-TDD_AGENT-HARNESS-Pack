@@ -1,7 +1,13 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openHarnessDb, upsertRow } from "../src/state-db/index.ts";
 import { migrate } from "../src/state-db/migration.ts";
+import { rebuildHarnessDb } from "../src/state-db/projection-writer.ts";
 import { buildScopeDryRunPreview } from "../src/state-db/scope-preview.ts";
+import { frozenSchema } from "./support/plan-mechanism-retirement-s3-migration.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 function insertDocumentReview(
   db: ReturnType<typeof openHarnessDb>,
@@ -33,37 +39,6 @@ function insertDocumentReview(
   });
 }
 
-function insertActivationReview(
-  db: ReturnType<typeof openHarnessDb>,
-  input: Record<string, unknown>,
-) {
-  upsertRow(db, {
-    table: "activation_schedule_reviews",
-    primaryKey: "activation_schedule_review_id",
-    row: {
-      activation_schedule_review_id: `${input.profile_id}:${input.plan_id}`,
-      profile_id: input.profile_id,
-      plan_id: input.plan_id,
-      schedule_entry_id: `schedule:${input.plan_id}`,
-      activation_entry_id: `activation:${input.profile_id}:${input.plan_id}`,
-      target_kind: "plan",
-      target_id: input.plan_id,
-      scope_status: input.scope_status,
-      enabled: input.enabled,
-      target_version: "fixture",
-      defer_reason: input.defer_reason ?? "",
-      current_location: input.current_location,
-      rag: input.rag,
-      schedule_status: input.schedule_status,
-      layer: input.layer,
-      sub_doc: input.sub_doc ?? "",
-      v_pair: input.v_pair ?? "",
-      source_path: "docs/governance/vmodel-activation-profiles.md",
-      indexed_at: "2026-07-09T00:00:00.000Z",
-    },
-  });
-}
-
 describe("scope dry-run preview", () => {
   it("resolves document scale profile decisions without mutating source truth", () => {
     const db = openHarnessDb(":memory:");
@@ -90,16 +65,6 @@ describe("scope dry-run preview", () => {
         catalog_layer: "L4",
         catalog_sub_doc: "security",
       });
-      upsertRow(db, {
-        table: "plan_registry",
-        primaryKey: "plan_id",
-        row: {
-          plan_id: "PLAN-L4-16-security-design-slot",
-          kind: "add-design",
-          layer: "L4",
-          status: "draft",
-        },
-      });
 
       const result = buildScopeDryRunPreview(db, {
         profileId: "standard",
@@ -122,7 +87,7 @@ describe("scope dry-run preview", () => {
           expect.objectContaining({
             doc_type_id: "DOC-L4-SECURITY",
             resolved_scope_status: "deferred",
-            required_action: "follow required plan PLAN-L4-16-security-design-slot",
+            required_action: "route defer target before implementation",
           }),
         ]),
       );
@@ -138,7 +103,7 @@ describe("scope dry-run preview", () => {
     }
   });
 
-  it("reports missing profiles and unresolved required plans as dry-run findings", () => {
+  it("reports missing profiles and does not resolve required_plan_id against PLAN projections", () => {
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
@@ -158,12 +123,8 @@ describe("scope dry-run preview", () => {
       const missing = buildScopeDryRunPreview(db, { profileId: "missing-profile" });
 
       expect(enterprise.ok).toBe(true);
-      expect(enterprise.findings).toEqual([
-        expect.objectContaining({
-          kind: "scope-preview-required-plan-missing",
-          severity: "warn",
-        }),
-      ]);
+      expect(enterprise.findings).toEqual([]);
+      expect(enterprise.documents[0]).not.toHaveProperty("required_plan_id");
       expect(missing.ok).toBe(false);
       expect(missing.findings).toEqual([
         expect.objectContaining({
@@ -176,7 +137,115 @@ describe("scope dry-run preview", () => {
     }
   });
 
-  it("surfaces activation rows, empty activation options, and unknown decisions", () => {
+  it("preserves legacy schedule data through rebuild and returns the same document preview", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "ut-tdd-scope-preview-legacy-db-"));
+    const fresh = openHarnessDb(":memory:", { repoRoot });
+    const legacy = openHarnessDb(":memory:", { repoRoot });
+    try {
+      const governance = join(repoRoot, "docs", "governance");
+      mkdirSync(governance, { recursive: true });
+      writeFileSync(
+        join(governance, "vmodel-document-catalog.md"),
+        [
+          "# Document catalog",
+          "| doc_type_id | layer | sub_doc | category | requirement_class | applicability | default_status |",
+          "| --- | --- | --- | --- | --- | --- | --- |",
+          "| DOC-L4-REPORT | L4 | report | deliverable | product-select | profile_controlled | skipped |",
+        ].join("\n"),
+        "utf8",
+      );
+      const tables = ["schedule_entries", "activation_entries", "activation_schedule_reviews"];
+      const legacyDdls = frozenSchema().schemaDdls.filter((ddl) =>
+        tables.some(
+          (table) =>
+            ddl.startsWith("CREATE TABLE IF NOT EXISTS " + table + " (") ||
+            (ddl.startsWith("CREATE INDEX ") && ddl.includes(" ON " + table + " (")),
+        ),
+      );
+      expect(legacyDdls).toHaveLength(9);
+      for (const ddl of legacyDdls) legacy.exec(ddl);
+      legacy
+        .prepare(
+          "INSERT INTO schedule_entries (schedule_entry_id, plan_id, layer) VALUES (?, ?, ?)",
+        )
+        .run("legacy-schedule", "PLAN-L0-999-legacy", "L0");
+      legacy
+        .prepare(
+          "INSERT INTO activation_entries (activation_entry_id, profile_id, plan_id) VALUES (?, ?, ?)",
+        )
+        .run("legacy-activation", "fixture", "PLAN-L0-999-legacy");
+      legacy
+        .prepare(
+          "INSERT INTO activation_schedule_reviews (activation_schedule_review_id, profile_id, plan_id, schedule_entry_id, activation_entry_id, layer) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          "legacy-join",
+          "fixture",
+          "PLAN-L0-999-legacy",
+          "legacy-schedule",
+          "legacy-activation",
+          "L0",
+        );
+
+      const schemaRows = (db: typeof legacy) =>
+        db
+          .prepare(
+            "SELECT name, sql FROM sqlite_schema WHERE tbl_name IN (?, ?, ?) AND sql IS NOT NULL ORDER BY name",
+          )
+          .all(...tables);
+      const legacyRows = () =>
+        tables.map((table) => legacy.prepare("SELECT * FROM " + table).all());
+      const beforeSchema = schemaRows(legacy);
+      const beforeRows = legacyRows();
+      expect(beforeSchema).toHaveLength(9);
+      expect(beforeRows.map((rows) => rows.length)).toEqual([1, 1, 1]);
+
+      for (const db of [fresh, legacy]) {
+        rebuildHarnessDb({ repoRoot, db, skipTokenTelemetry: true });
+        expect(db.prepare("SELECT doc_type_id FROM document_catalog_entries").all()).toEqual([
+          { doc_type_id: "DOC-L4-REPORT" },
+        ]);
+        insertDocumentReview(db, {
+          profile_id: "fixture",
+          doc_type_id: "DOC-L4-REPORT",
+          decision: "conditional",
+          detail_override: "standard",
+          status_override: "profile_controlled",
+          reason: "report capability",
+          catalog_layer: "L4",
+          catalog_sub_doc: "report",
+        });
+      }
+
+      const input = { profileId: "fixture", capabilityFlags: ["report"] };
+      const preview = buildScopeDryRunPreview(fresh, input);
+      expect(preview).toMatchObject({
+        ok: true,
+        gates: ["G4"],
+        detectors: ["document-catalog", "document-scale-profile", "spec-ir-integrity"],
+        findings: [],
+        documents: [
+          expect.objectContaining({
+            doc_type_id: "DOC-L4-REPORT",
+            resolved_scope_status: "in_scope",
+          }),
+        ],
+        summary: { documents_total: 1, documents_in_scope: 1 },
+      });
+      expect(buildScopeDryRunPreview(legacy, input)).toEqual(preview);
+      expect(preview).not.toHaveProperty("activations");
+      expect(preview.summary).not.toHaveProperty("activations_total");
+      expect(schemaRows(fresh)).toEqual([]);
+      expect(schemaRows(legacy)).toEqual(beforeSchema);
+      expect(legacyRows()).toEqual(beforeRows);
+    } finally {
+      fresh.close();
+      legacy.close();
+      removeTestTree(repoRoot);
+    }
+  });
+
+  it("surfaces unknown document decisions", () => {
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
@@ -190,44 +259,11 @@ describe("scope dry-run preview", () => {
         catalog_layer: "L4",
         catalog_sub_doc: "report",
       });
-      insertActivationReview(db, {
-        profile_id: "vmodel-clean-core",
-        plan_id: "PLAN-L0-01-vmodel-harness-upgrade-charter",
-        scope_status: "in_scope",
-        enabled: 1,
-        current_location: "U0 fixture",
-        rag: "green",
-        schedule_status: "confirmed",
-        layer: "L0",
-        sub_doc: "charter",
-      });
+      const result = buildScopeDryRunPreview(db, { profileId: "enterprise" });
 
-      const result = buildScopeDryRunPreview(db, {
-        profileId: "enterprise",
-        activationProfileId: "vmodel-clean-core",
-      });
-      const emptyActivation = buildScopeDryRunPreview(db, {
-        profileId: "enterprise",
-        activationProfileId: "   ",
-      });
-
-      expect(result.activations).toEqual([
-        expect.objectContaining({
-          profile_id: "vmodel-clean-core",
-          plan_id: "PLAN-L0-01-vmodel-harness-upgrade-charter",
-          gate_id: "G0.5",
-        }),
-      ]);
-      expect(result.detectors).toContain("activation-schedule-review");
       expect(result.findings).toEqual([
         expect.objectContaining({ kind: "scope-preview-document-decision-unknown" }),
       ]);
-      expect(emptyActivation.findings).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ kind: "scope-preview-activation-profile-empty" }),
-          expect.objectContaining({ kind: "scope-preview-document-decision-unknown" }),
-        ]),
-      );
     } finally {
       db.close();
     }

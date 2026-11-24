@@ -1,4 +1,4 @@
-export type TargetKind = "plan_alias" | "artifact_path" | "artifact_family" | "target_slot";
+export type TargetKind = "artifact_path" | "artifact_family" | "target_slot";
 
 export interface TypedTarget {
   readonly kind: TargetKind;
@@ -6,7 +6,6 @@ export interface TypedTarget {
 }
 
 export interface TargetRegistry {
-  readonly aliases: Readonly<Record<string, readonly string[]>>;
   readonly pathAliases: Readonly<Record<string, readonly string[]>>;
   readonly trackedPaths: ReadonlySet<string>;
   readonly familyMembers: Readonly<Record<string, readonly string[]>>;
@@ -18,7 +17,8 @@ export interface TargetFinding {
     | "target-unresolved"
     | "target-ambiguous"
     | "target-existence-missing"
-    | "target-canonical-mismatch";
+    | "target-canonical-mismatch"
+    | "target-kind-unknown";
   readonly subjectId: string;
   readonly message: string;
 }
@@ -62,8 +62,6 @@ export function reconcileDispositionTarget(
 
 function resolveRefs(target: TypedTarget, registry: TargetRegistry): Result<string[]> {
   switch (target.kind) {
-    case "plan_alias":
-      return resolveAlias(target.ref, registry.aliases);
     case "artifact_path":
       if (registry.trackedPaths.has(target.ref)) return success([target.ref]);
       return resolvePathAlias(target.ref, registry.pathAliases);
@@ -73,19 +71,14 @@ function resolveRefs(target: TypedTarget, registry: TargetRegistry): Result<stri
       return registry.targetSlots.has(target.ref)
         ? success([target.ref])
         : failed("target-existence-missing", target.ref);
+    default:
+      return failed("target-kind-unknown", target.ref);
   }
 }
 
 function resolvePathAlias(ref: string, aliases: TargetRegistry["pathAliases"]): Result<string[]> {
   const candidates = uniqueSorted(aliases[ref] ?? []);
   if (candidates.length === 0) return failed("target-existence-missing", ref);
-  if (candidates.length > 1) return failed("target-ambiguous", ref);
-  return success(candidates);
-}
-
-function resolveAlias(ref: string, aliases: TargetRegistry["aliases"]): Result<string[]> {
-  const candidates = uniqueSorted(aliases[ref] ?? []);
-  if (candidates.length === 0) return failed("target-unresolved", ref);
   if (candidates.length > 1) return failed("target-ambiguous", ref);
   return success(candidates);
 }

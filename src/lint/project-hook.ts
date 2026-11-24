@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { invocationEquals, parseHookInvocation } from "./hook-invocation.ts";
-import { PERSONAL_ABSOLUTE_PATH_PATTERN } from "./personal-path.ts";
+import { LEGACY_SOURCE_REPO, PERSONAL_ABSOLUTE_PATH_PATTERN } from "./personal-path.ts";
 
 export interface ProjectHookDoc {
   file: string;
@@ -17,7 +17,8 @@ export interface ProjectHookViolation {
     | "missing_hook"
     | "missing_project_dir"
     | "shell_form"
-    | "missing_block_on_failure"
+    | "missing_on_failure_block"
+    | "legacy_block_on_failure"
     | "missing_async_rewake"
     | "tracked_permissions"
     | "forbidden_path";
@@ -33,7 +34,8 @@ interface HookCommand {
   type?: string;
   command?: unknown;
   args?: unknown;
-  blockOnFailure?: boolean;
+  onFailure?: unknown;
+  blockOnFailure?: unknown;
   asyncRewake?: boolean;
 }
 
@@ -55,7 +57,7 @@ interface RequiredProjectHook {
   wrapperCommand: string;
   sourceArgs: readonly string[];
   wrapperArgs: readonly string[];
-  blockOnFailure?: boolean;
+  onFailure?: "block";
   asyncRewake?: boolean;
 }
 
@@ -80,7 +82,7 @@ export const REQUIRED = [
     wrapperCommand: wrapperCommand("hook agent-guard"),
     sourceArgs: args(`\${CLAUDE_PROJECT_DIR}/.claude/hooks/agent-guard.ts`),
     wrapperArgs: args(WRAPPER_CLI, "hook", "agent-guard"),
-    blockOnFailure: true,
+    onFailure: "block",
   },
   {
     id: "work-guard",
@@ -90,7 +92,7 @@ export const REQUIRED = [
     wrapperCommand: wrapperCommand("hook work-guard"),
     sourceArgs: args(`\${CLAUDE_PROJECT_DIR}/.claude/hooks/work-guard.ts`),
     wrapperArgs: args(WRAPPER_CLI, "hook", "work-guard"),
-    blockOnFailure: true,
+    onFailure: "block",
   },
   {
     id: "session-start",
@@ -152,11 +154,26 @@ export function wrapperHookArgs(id: RequiredProjectHookId): readonly string[] {
   return entry.wrapperArgs;
 }
 
+/**
+ * Claude guard preflight for the generated consumer wrapper. This is kept here
+ * so setup templates and the project-hook lint accept exactly the same source.
+ * Record/session hooks intentionally continue to invoke the launcher directly.
+ */
+export const MISSING_RUNTIME_GUARD_BOOTSTRAP =
+  'const fs=require("node:fs"),path=require("node:path"),cp=require("node:child_process");let root;try{root=fs.realpathSync.native(process.env.CLAUDE_PROJECT_DIR||cp.execFileSync("git",["rev-parse","--show-toplevel"],{encoding:"utf8",windowsHide:true}).trim())}catch{root=path.resolve(process.cwd())}const launcher=path.resolve(root,".ut-tdd","bin","ut-tdd.mjs");if(fs.existsSync(launcher)){const result=cp.spawnSync(process.execPath,[launcher,...process.argv.slice(2)],{cwd:root,stdio:"inherit",windowsHide:true});if(result.error){console.error("consumer_runtime_resolution_denied");process.exit(78)}process.exit(result.status??1)}let mainLauncher="<main worktree>/.ut-tdd/bin/ut-tdd.mjs";let mainExplanation=" (resolve <main worktree> from git rev-parse --git-common-dir)";try{const common=path.resolve(root,cp.execFileSync("git",["rev-parse","--git-common-dir"],{cwd:root,encoding:"utf8",windowsHide:true}).trim());mainLauncher=path.join(path.dirname(common),".ut-tdd","bin","ut-tdd.mjs");mainExplanation=""}catch{}const q=String.fromCharCode(34);console.error("consumer_runtime_absent: runtime is missing from this worktree. Run: node "+q+mainLauncher+q+" setup --worktree "+q+root+q+mainExplanation);process.exit(2)';
+
+export type ProjectGuardHookId = "agent-guard" | "work-guard";
+
+/** Claude-only argv used for the two blocking guards; Codex keeps wrapperHookArgs. */
+export function guardBootstrapHookArgs(id: ProjectGuardHookId): readonly string[] {
+  return ["-e", MISSING_RUNTIME_GUARD_BOOTSTRAP, ...wrapperHookArgs(id)];
+}
+
 const LEGACY_RUNTIME_NAME = ["he", "lix"].join("");
 const LEGACY_ENV_PREFIX = ["HE", "LIX_"].join("");
 export const FORBIDDEN_PATH_RE = new RegExp(
   [
-    "ai-dev-kit-vscode",
+    LEGACY_SOURCE_REPO,
     `vendor/${LEGACY_RUNTIME_NAME}-source`,
     String.raw`\.${LEGACY_RUNTIME_NAME}`,
     PERSONAL_ABSOLUTE_PATH_PATTERN,
@@ -194,11 +211,15 @@ function isSourceForm(hook: HookCommand, required: RequiredProjectHook): boolean
 
 function isWrapperForm(hook: HookCommand, required: RequiredProjectHook): boolean {
   const invocation = parseHookInvocation(hook);
+  const args =
+    required.id === "agent-guard" || required.id === "work-guard"
+      ? guardBootstrapHookArgs(required.id)
+      : required.wrapperArgs;
   return (
     invocation !== null &&
     invocationEquals(invocation, {
       executable: "node",
-      args: [...required.wrapperArgs],
+      args: [...args],
     })
   );
 }
@@ -219,6 +240,9 @@ export function analyzeProjectHooks(docs: ProjectHookDoc[]): ProjectHookResult {
       for (const entry of entries ?? []) {
         for (const hook of entry.hooks ?? []) {
           const invocation = parseHookInvocation(hook);
+          if (Object.hasOwn(hook, "blockOnFailure")) {
+            violations.push({ file: doc.file, hook: event, reason: "legacy_block_on_failure" });
+          }
           if (invocation && FORBIDDEN_PATH_RE.test(invocation.display)) {
             violations.push({ file: doc.file, hook: event, reason: "forbidden_path" });
           }
@@ -270,11 +294,11 @@ export function analyzeProjectHooks(docs: ProjectHookDoc[]): ProjectHookResult {
           if (FORBIDDEN_PATH_RE.test(invocation.display)) {
             violations.push({ file: doc.file, hook: required.event, reason: "forbidden_path" });
           }
-          if (required.blockOnFailure && hook.blockOnFailure !== true) {
+          if (required.onFailure && hook.onFailure !== required.onFailure) {
             violations.push({
               file: doc.file,
               hook: required.event,
-              reason: "missing_block_on_failure",
+              reason: "missing_on_failure_block",
             });
           }
           if (required.asyncRewake && hook.asyncRewake !== true) {

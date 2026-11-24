@@ -163,16 +163,64 @@ function ports(
   return {
     getPullRequest: input.getFacts ?? (() => facts()),
     mergePullRequest: input.merge ?? (() => undefined),
+    checkBaselineConflict: () => null,
   };
+}
+
+function seedRefactorReview(
+  root: string,
+  input: {
+    headSha?: string;
+    memoryId?: string;
+    reviewRevision?: string;
+    verdict?: "PASS" | "FLAG";
+    refactorJudgement?: string;
+  } = {},
+): void {
+  const reviewHead = input.headSha ?? head;
+  const memoryId = input.memoryId ?? "review:465:refactor";
+  const reviewRevision = input.reviewRevision ?? "review-refactor";
+  writeRequest(root, {
+    file: `${memoryId.replaceAll(":", "-")}-request.json`,
+    memoryId,
+    exactHead: reviewHead,
+    reviewRevision,
+  });
+  writeVerdict(root, {
+    file: `${memoryId.replaceAll(":", "-")}-receipt.json`,
+    memoryId,
+    head: reviewHead,
+    reviewRevision,
+    verdict: input.verdict ?? "PASS",
+  });
+  if (input.refactorJudgement !== undefined) {
+    const receiptPath = join(
+      root,
+      ".ut-tdd",
+      "review",
+      "receipts",
+      `${memoryId.replaceAll(":", "-")}-receipt.json`,
+    );
+    const receiptValue = JSON.parse(readFileSync(receiptPath, "utf8")) as Record<string, unknown>;
+    receiptValue.refactorJudgement = input.refactorJudgement;
+    writeFileSync(receiptPath, JSON.stringify(receiptValue), "utf8");
+  }
+}
+
+function refactorPorts(
+  input: { changes?: () => unknown; getFacts?: () => MergeGateFacts; merge?: () => void } = {},
+): GhPrMergePorts {
+  return {
+    ...ports(input),
+    getPullRequestChanges: input.changes ?? (() => [{ kind: "modified", path: "src/a.ts" }]),
+  } as never;
 }
 
 function receipt(root: string): Record<string, unknown> {
   const log = readdirSync(join(root, ".ut-tdd", "logs")).find((name) => name.endsWith(".jsonl"));
   if (!log) throw new Error("merge receipt not written");
-  const lines = readFileSync(join(root, ".ut-tdd", "logs", log), "utf8")
-    .trim()
-    .split("\n");
-  return JSON.parse(lines.at(-1) ?? "") as Record<string, unknown>;
+  const text = readFileSync(join(root, ".ut-tdd", "logs", log), "utf8").trim();
+  return JSON.parse(text.split("\n").at(-1) ?? "") as Record<string, unknown>;
 }
 
 describe("D2-B PR merge gate", () => {
@@ -785,6 +833,133 @@ describe("D2-B PR merge gate", () => {
     }
   });
 
+  const rollupFacts = (statusCheckRollup: unknown[]) => {
+    const output = JSON.stringify({ headRefOid: head, state: "OPEN", statusCheckRollup });
+    const exec = ((..._args: unknown[]) => output) as never;
+    return createGhPrMergePorts({ execFileSync: exec }).getPullRequest(465);
+  };
+  const run = (
+    conclusion: string,
+    startedAt: string | undefined,
+    runId: number,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    __typename: "CheckRun",
+    workflowName: "harness-check",
+    name: "harness-check-linux",
+    status: conclusion ? "COMPLETED" : "IN_PROGRESS",
+    conclusion,
+    ...(startedAt ? { startedAt } : {}),
+    completedAt: conclusion ? "2026-10-16T09:00:00Z" : "0001-01-01T00:00:00Z",
+    detailsUrl: `https://github.com/o/r/actions/runs/${runId}/job/${runId}9`,
+    ...extra,
+  });
+
+  it("U-RVMG-035: 同じ check 名は古い FAILURE run より新しい SUCCESS run を採り checksGreen=true とする", () => {
+    const result = rollupFacts([
+      run("FAILURE", "2026-10-16T01:00:00Z", 1),
+      run("SUCCESS", "2026-10-16T02:00:00Z", 2),
+    ]);
+    expect(result.checksGreen).toBe(true);
+  });
+
+  it("U-RVMG-036: 最新 run が FAILURE なら古い SUCCESS があっても checksGreen=false とする", () => {
+    const result = rollupFacts([
+      run("SUCCESS", "2026-10-16T01:00:00Z", 1),
+      run("FAILURE", "2026-10-16T02:00:00Z", 2),
+    ]);
+    expect(result.checksGreen).toBe(false);
+  });
+
+  it("U-RVMG-037: 開始順と完了順が逆転しても開始が新しい未完了 run を最新とし checksGreen=false とする", () => {
+    const old = {
+      ...run("SUCCESS", "2026-10-16T01:00:00Z", 1),
+      completedAt: "2026-10-16T03:00:00Z",
+    };
+    const result = rollupFacts([old, run("", "2026-10-16T02:00:00Z", 2)]);
+    expect(result.checksGreen).toBe(false);
+  });
+
+  it("U-RVMG-038: 最新 run を開始時刻で決められなければ checksGreen=false とする", () => {
+    const tied = rollupFacts([
+      run("FAILURE", "2026-10-16T01:00:00Z", 1),
+      run("SUCCESS", "2026-10-16T01:00:00Z", 2),
+    ]);
+    const missing = rollupFacts([
+      run("FAILURE", undefined, 1),
+      run("SUCCESS", "2026-10-16T02:00:00Z", 2),
+    ]);
+    expect(tied.checksGreen).toBe(false);
+    expect(missing.checksGreen).toBe(false);
+  });
+
+  it("U-RVMG-039: 同じ run 内の同名 job は統合せず FAILURE が残れば checksGreen=false とする", () => {
+    const result = rollupFacts([
+      run("FAILURE", "2026-10-16T01:00:00Z", 1),
+      run("SUCCESS", "2026-10-16T01:05:00Z", 1),
+    ]);
+    expect(result.checksGreen).toBe(false);
+  });
+
+  it("U-RVMG-040: workflowName 欠落の同名エントリは統合せず checksGreen=false とする", () => {
+    const result = rollupFacts([
+      run("FAILURE", "2026-10-16T01:00:00Z", 1, { workflowName: "" }),
+      run("SUCCESS", "2026-10-16T02:00:00Z", 2, { workflowName: "" }),
+    ]);
+    expect(result.checksGreen).toBe(false);
+  });
+
+  it("U-RVMG-041: StatusContext 混在の同名エントリは統合せず checksGreen=false とする", () => {
+    const status = {
+      __typename: "StatusContext",
+      context: "harness-check-linux",
+      state: "SUCCESS",
+      startedAt: "2026-10-16T02:00:00Z",
+    };
+    const result = rollupFacts([run("FAILURE", "2026-10-16T01:00:00Z", 1), status]);
+    expect(result.checksGreen).toBe(false);
+  });
+
+  it("U-RVMG-042: 全件 SUCCESS でも一方の startedAt 欠落で順序を決められない重複は checksGreen=false とする", () => {
+    const result = rollupFacts([
+      run("SUCCESS", undefined, 1),
+      run("SUCCESS", "2026-10-16T02:00:00Z", 2),
+    ]);
+    expect(result.checksGreen).toBe(false);
+  });
+
+  it("U-RVMG-043: 全件 SUCCESS でも startedAt が parse 不能な重複は checksGreen=false とする", () => {
+    const result = rollupFacts([
+      run("SUCCESS", "not-a-time", 1),
+      run("SUCCESS", "2026-10-16T02:00:00Z", 2),
+    ]);
+    expect(result.checksGreen).toBe(false);
+  });
+
+  it("U-RVMG-044: 全件 SUCCESS でも最早 startedAt が同時刻の重複は checksGreen=false とする", () => {
+    const result = rollupFacts([
+      run("SUCCESS", "2026-10-16T01:00:00Z", 1),
+      run("SUCCESS", "2026-10-16T01:00:00Z", 2),
+    ]);
+    expect(result.checksGreen).toBe(false);
+  });
+
+  it("U-RVMG-045: 全件 SUCCESS でも同じ run 内の同名 job は識別不能な重複として checksGreen=false とする", () => {
+    const result = rollupFacts([
+      run("SUCCESS", "2026-10-16T01:00:00Z", 1),
+      run("SUCCESS", "2026-10-16T01:05:00Z", 1),
+    ]);
+    expect(result.checksGreen).toBe(false);
+  });
+
+  it("U-RVMG-046: 全件 SUCCESS でも workflowName 欠落の同名エントリは checksGreen=false とする", () => {
+    const result = rollupFacts([
+      run("SUCCESS", "2026-10-16T01:00:00Z", 1, { workflowName: "" }),
+      run("SUCCESS", "2026-10-16T02:00:00Z", 2, { workflowName: "" }),
+    ]);
+    expect(result.checksGreen).toBe(false);
+  });
+
   it("U-RVMG-011: adapter の第二観測と gh merge は exact HEAD に束縛される", () => {
     const snapshots = [
       JSON.stringify({ headRefOid: head, state: "OPEN", statusCheckRollup: [] }),
@@ -797,8 +972,8 @@ describe("D2-B PR merge gate", () => {
     expect(result.headSha).toBe(head);
     expect(result.evaluatedHeadSha).toBe(otherHead);
     const calls: unknown[][] = [];
-    const mergeExec = ((...args: unknown[]) => {
-      calls.push(args);
+    const mergeExec = ((command: unknown, args: unknown, options: { stdio: unknown }) => {
+      calls.push([command, args, { stdio: options.stdio }]);
       return "";
     }) as never;
     createGhPrMergePorts({ execFileSync: mergeExec }).mergePullRequest(465, head);
@@ -850,6 +1025,278 @@ describe("D2-B PR merge gate", () => {
       });
       expect(result.ok).toBe(false);
       expect(result.reason).toContain("result_receipt_write_failed");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("refactor judgement merge integration candidates", () => {
+  it.fails("CANDIDATE-U-REFACTORGATE-073: 対象で判定欄なしなら intent を書かず merge しない", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvmg-refactor-deny-"));
+    let merges = 0;
+    try {
+      seedRefactorReview(root);
+      const result = runPrMerge({
+        repoRoot: root,
+        pr: 465,
+        now: () => now,
+        ports: refactorPorts({ merge: () => merges++ }),
+      });
+      const lines = readFileSync(join(root, ".ut-tdd", "logs", "review-merge-gate.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(result).toMatchObject({
+        ok: false,
+        decision: "deny",
+        reason: "refactor_judgement_missing",
+      });
+      expect(merges).toBe(0);
+      expect(lines.some((line) => line.receiptKind === "merge_intent")).toBe(false);
+      expect(lines.at(-1)).toMatchObject({
+        decision: "deny",
+        reason: "refactor_judgement_missing",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-074: review deny と判定欄 deny の reason を併記する", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvmg-refactor-both-"));
+    let merges = 0;
+    try {
+      seedRefactorReview(root, { verdict: "FLAG", refactorJudgement: "none-rejected" });
+      const result = runPrMerge({
+        repoRoot: root,
+        pr: 465,
+        now: () => now,
+        ports: refactorPorts({ merge: () => merges++ }),
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        decision: "deny",
+        reason:
+          "blocking_finding:finding,flagged,refactor_judgement_rejected:none-rejected,state:verdict",
+      });
+      expect(merges).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("CANDIDATE-U-REFACTORGATE-075: docs-only PR is not blocked by missing judgement", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvmg-refactor-docs-"));
+    let merges = 0;
+    try {
+      seedRefactorReview(root);
+      const result = runPrMerge({
+        repoRoot: root,
+        pr: 465,
+        now: () => now,
+        ports: refactorPorts({
+          changes: () => [{ kind: "modified", path: "docs/guide.md" }],
+          merge: () => merges++,
+        }),
+      });
+      expect(result).toMatchObject({ ok: true, decision: "merge", reason: "merge_ready" });
+      expect(merges).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("CANDIDATE-U-REFACTORGATE-075: 対象PRのcommit-okはmergeできる", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvmg-refactor-commit-ok-"));
+    let merges = 0;
+    try {
+      seedRefactorReview(root, { refactorJudgement: "commit-ok" });
+      const result = runPrMerge({
+        repoRoot: root,
+        pr: 465,
+        now: () => now,
+        ports: refactorPorts({
+          changes: () => [{ kind: "modified", path: "src/a.ts" }],
+          merge: () => merges++,
+        }),
+      });
+      expect(result).toMatchObject({ ok: true, decision: "merge", reason: "merge_ready" });
+      expect(merges).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-076: changes 取得失敗はfail-closeでdenyする", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvmg-refactor-unavailable-"));
+    let merges = 0;
+    try {
+      seedRefactorReview(root, { refactorJudgement: "commit-ok" });
+      const result = runPrMerge({
+        repoRoot: root,
+        pr: 465,
+        now: () => now,
+        ports: refactorPorts({
+          changes: () => {
+            throw new Error("HTTP 502");
+          },
+          merge: () => merges++,
+        }),
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        decision: "deny",
+        reason: "refactor_target_unavailable:gh_failed:HTTP 502",
+      });
+      expect(merges).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("CANDIDATE-U-REFACTORGATE-076: facts取得失敗時はchanges adapterを呼ばない", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvmg-refactor-facts-failed-"));
+    let changesCalls = 0;
+    try {
+      const result = runPrMerge({
+        repoRoot: root,
+        pr: 465,
+        now: () => now,
+        ports: refactorPorts({
+          getFacts: () => {
+            throw new Error("HTTP 503");
+          },
+          changes: () => {
+            changesCalls++;
+            return [];
+          },
+        }),
+      });
+      expect(result.reason).toBe("gh_fetch_failed:HTTP 503");
+      expect(changesCalls).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-077: CLI は判定欄 deny を固定形式で出力する", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvmg-refactor-cli-"));
+    const priorExitCode = process.exitCode;
+    let stdout = "";
+    const writeStdout = process.stdout.write;
+    try {
+      seedRefactorReview(root);
+      process.exitCode = 0;
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        stdout += String(chunk);
+        return true;
+      }) as typeof process.stdout.write;
+      const program = new Command();
+      registerPrMergeCommands(program, {
+        ports: refactorPorts(),
+        now: () => now,
+        repoRoot: root,
+      });
+      await program.parseAsync(["node", "ut-tdd", "pr", "merge", "--pr", "465"]);
+      expect(stdout).toBe(
+        `pr merge — DENY pr=#465 head=${head} reason=refactor_judgement_missing\n`,
+      );
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.stdout.write = writeStdout;
+      process.exitCode = priorExitCode;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.fails("CANDIDATE-U-REFACTORGATE-078: 新 HEAD の entry だけを使い旧 receipt を保持する", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-tdd-rvmg-refactor-head-"));
+    const nextHead = "c".repeat(40);
+    try {
+      seedRefactorReview(root, {
+        headSha: otherHead,
+        memoryId: "review:465:old-head",
+        reviewRevision: "review-old",
+      });
+      seedRefactorReview(root, {
+        headSha: nextHead,
+        memoryId: "review:465:new-head",
+        reviewRevision: "review-new",
+        refactorJudgement: "commit-ok",
+      });
+      const oldReceipt = join(
+        root,
+        ".ut-tdd",
+        "review",
+        "receipts",
+        "review-465-old-head-receipt.json",
+      );
+      const oldBytes = readFileSync(oldReceipt, "utf8");
+      const decision = evaluateMergeGate({
+        pr: 465,
+        requests: [
+          {
+            memoryId: "review:465:old-head",
+            pr: 465,
+            exactHead: otherHead,
+            reviewRevision: "review-old",
+            authorFamily: "claude",
+            requestedAt: "2026-08-07T00:30:00.000Z",
+          },
+          {
+            memoryId: "review:465:new-head",
+            pr: 465,
+            exactHead: nextHead,
+            reviewRevision: "review-new",
+            authorFamily: "claude",
+            requestedAt: "2026-08-07T00:30:00.000Z",
+          },
+        ],
+        receipts: [
+          {
+            memoryId: "review:465:old-head",
+            pr: 465,
+            head: otherHead,
+            reviewRevision: "review-old",
+            reviewerFamily: "codex",
+            kind: "verdict",
+            verdict: "PASS",
+            blockingFindings: [],
+            at: "2026-08-07T00:45:00.000Z",
+          },
+          {
+            memoryId: "review:465:new-head",
+            pr: 465,
+            head: nextHead,
+            reviewRevision: "review-new",
+            reviewerFamily: "codex",
+            kind: "verdict",
+            verdict: "PASS",
+            blockingFindings: [],
+            at: "2026-08-07T00:45:00.000Z",
+            refactorJudgement: "commit-ok",
+          },
+        ] as never,
+        facts: facts({ headSha: nextHead, evaluatedHeadSha: nextHead }),
+        now,
+      });
+      // L6 §4 / L7 C078 require this public decision field; the cast bridges only its intentional
+      // absence in the current Red-stage source and must disappear when the contract is implemented.
+      expect(
+        (decision as unknown as { entriesForHead: Array<{ exactHead: string }> }).entriesForHead,
+      ).toEqual([expect.objectContaining({ exactHead: nextHead })]);
+      const result = runPrMerge({
+        repoRoot: root,
+        pr: 465,
+        now: () => now,
+        ports: refactorPorts({
+          getFacts: () => facts({ headSha: nextHead, evaluatedHeadSha: nextHead }),
+          changes: () => [{ kind: "modified", path: "src/a.ts" }],
+        }),
+      });
+      expect(result).toMatchObject({ ok: true, decision: "merge", headSha: nextHead });
+      expect(readFileSync(oldReceipt, "utf8")).toBe(oldBytes);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

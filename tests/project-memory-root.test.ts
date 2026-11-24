@@ -6,20 +6,19 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { Command } from "commander";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { registerLiveReviewCommands, resolveLiveReviewTaskFile } from "../src/cli/review-live.ts";
-import { writeMemory } from "../src/memory/service.ts";
 import {
   canonicalProjectIdentityBytes,
   loadProjectIdentityFromHead,
-} from "../src/plan-asset/adapters/project-identity-loader.ts";
+} from "../src/kernel/project-identity.ts";
+import { writeMemory } from "../src/memory/service.ts";
 import {
   buildClaudeInboxEntry,
   claudeWorkspaceId,
@@ -29,16 +28,12 @@ import {
   resolveProjectMemoryRoot,
   resolveProjectMemoryRootWithPorts,
 } from "../src/runtime/project-memory-root.ts";
+import { gitTextTrimmed as git } from "./support/git.ts";
+import { heavyAfterEach } from "./support/hook-bounds.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const cliPath = resolve("src/cli.ts");
 const fixtures: Array<{ root: string; primary: string; linked: string }> = [];
-
-function git(cwd: string, args: readonly string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
-}
 
 function createLinkedProject(projectId = "example/project-memory-routing"): {
   root: string;
@@ -78,7 +73,7 @@ function runCli(cwd: string, args: readonly string[]) {
   });
 }
 
-afterEach(() => {
+heavyAfterEach("teardown", () => {
   while (fixtures.length > 0) {
     const fixture = fixtures.pop();
     if (!fixture) continue;
@@ -89,7 +84,7 @@ afterEach(() => {
         // The enclosing temporary repository is removed below.
       }
     }
-    rmSync(fixture.root, { recursive: true, force: true });
+    removeTestTree(fixture.root);
   }
 });
 
@@ -367,8 +362,8 @@ describe("project-scoped canonical Memory root (PLAN-L7-512)", () => {
         reason: "runtime_root_escape",
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
+      removeTestTree(root);
+      removeTestTree(outside);
     }
   });
 });

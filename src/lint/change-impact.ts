@@ -219,6 +219,7 @@ export function loadChangedFiles(repoRoot: string = process.cwd()): string[] {
   const output = execFileSync("git", ["-C", repoRoot, "status", "--porcelain"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
+    windowsHide: true,
   });
   return parseGitPorcelain(output);
 }

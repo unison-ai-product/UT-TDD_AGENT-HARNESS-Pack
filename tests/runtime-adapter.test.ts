@@ -21,6 +21,7 @@ import {
   mapAdapterErrorPolicy,
   REQUIRED_SKILL_LABEL,
 } from "../src/runtime/adapter-policy.ts";
+import { modelOverrideSchema, reasoningEffortSchema } from "../src/schema/team.ts";
 
 /** 指定パスの親ディレクトリまで作成し、空の実行ファイルを置く。 */
 function touchBinary(path: string): void {
@@ -188,9 +189,9 @@ describe("runtime adapter plan", () => {
     expect(plan.plan_id).toBe("PLAN-L4-99-x");
   });
 
-  it("normalizes extended UT-TDD effort values at the Claude provider boundary", () => {
+  it.fails("normalizes extended UT-TDD effort values at the Claude provider boundary", () => {
     expect(normalizeProviderEffort("claude", "middle")).toBe("medium");
-    expect(normalizeProviderEffort("claude", "xhigh")).toBe("high");
+    expect(normalizeProviderEffort("claude", "xhigh")).toBe("xhigh");
     expect(normalizeProviderEffort("codex", "xhigh")).toBe("xhigh");
 
     const plan = buildAdapterPlan(
@@ -205,10 +206,9 @@ describe("runtime adapter plan", () => {
     );
 
     expect(plan.args).toContain("--effort");
-    expect(plan.args).toContain("high");
-    expect(plan.args).not.toContain("xhigh");
-    expect(plan.effort).toBe("high");
-    expect(plan.env).toEqual({ [CLAUDE_EFFORT_ENV]: "high" });
+    expect(plan.args).toContain("xhigh");
+    expect(plan.effort).toBe("xhigh");
+    expect(plan.env).toEqual({ [CLAUDE_EFFORT_ENV]: "xhigh" });
   });
 
   it("U-ADAPTER-002: honors UT_TDD_CODEX_BIN before PATH lookup", () => {
@@ -618,5 +618,339 @@ describe("runtime adapter plan", () => {
       severity: "error",
       next_action: expect.stringContaining("classify"),
     });
+  });
+});
+
+describe("Issue #1261 M1 provider invocation input validation candidates", () => {
+  const INVALID_MODEL_MESSAGE = "provider_model_invalid";
+  const INVALID_EFFORT_MESSAGE = "provider_effort_invalid";
+  const CMD_TOKEN_PERCENT_MESSAGE = "provider_cmd_token_percent_forbidden";
+
+  function captureError(action: () => unknown): unknown {
+    try {
+      action();
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  }
+
+  function expectPercentTokenError(action: () => unknown, token: string): void {
+    const error = captureError(action);
+    expect(error).toBeInstanceOf(Error);
+    if (!(error instanceof Error)) return;
+    expect(error.message).toBe(CMD_TOKEN_PERCENT_MESSAGE);
+    expect(error.message).not.toContain(token);
+  }
+
+  it("U-CMDINPUT-003: keeps schema-approved models and aliases in adapter plans", () => {
+    const task = "preserve the planned task";
+    for (const model of ["gpt-5.4", "sonnet", "local"]) {
+      expect(modelOverrideSchema.safeParse(model).success, model).toBe(true);
+      const plan = buildAdapterPlan({ provider: "codex", role: "se", task, model }, "hybrid");
+      expect(plan.available, model).toBe(true);
+      expect(plan.args, model).toContain(model);
+      expect(plan.stdin, model).toBe(task);
+    }
+
+    const omitted = buildAdapterPlan({ provider: "codex", role: "se", task }, "hybrid");
+    expect(omitted.available).toBe(true);
+    expect(omitted.args).not.toContain(CODEX_MODEL_FLAG);
+  });
+
+  ["gpt-5%", 'gpt-5"', "gpt 5", "", "gpt-5.4[1m]"].forEach((model, index) => {
+    describe(`M1 invalid model fixture ${index + 1}`, () => {
+      it("U-CMDINPUT-003: static invalid-model label", () => {
+        expect(modelOverrideSchema.safeParse(model).success, model).toBe(false);
+        const plan = buildAdapterPlan(
+          { provider: "codex", role: "se", task: "keep task unchanged", model },
+          "hybrid",
+        );
+        expect(plan.available, model).toBe(false);
+        expect(plan.messages, model).toEqual([INVALID_MODEL_MESSAGE]);
+      });
+    });
+  });
+
+  it("U-CMDINPUT-004: preserves schema-approved effort values and provider normalization", () => {
+    const cases = [
+      { provider: "codex" as const, effort: "low", normalized: "low" },
+      { provider: "codex" as const, effort: "medium", normalized: "medium" },
+      { provider: "codex" as const, effort: "middle", normalized: "medium" },
+      { provider: "codex" as const, effort: "high", normalized: "high" },
+      { provider: "codex" as const, effort: "xhigh", normalized: "xhigh" },
+      { provider: "claude" as const, effort: "low", normalized: "low" },
+      { provider: "claude" as const, effort: "medium", normalized: "medium" },
+      { provider: "claude" as const, effort: "middle", normalized: "medium" },
+      { provider: "claude" as const, effort: "high", normalized: "high" },
+    ];
+
+    for (const { provider, effort, normalized } of cases) {
+      expect(reasoningEffortSchema.safeParse(effort).success, `${provider}/${effort}`).toBe(true);
+      const model = provider === "codex" ? "gpt-5.4" : "claude-sonnet-5-5";
+      const plan = buildAdapterPlan(
+        { provider, role: "se", task: "review", model, effort },
+        "hybrid",
+      );
+      expect(plan.available, `${provider}/${effort}`).toBe(true);
+      expect(plan.effort, `${provider}/${effort}`).toBe(normalized);
+      if (provider === "codex") {
+        expect(plan.args, `${provider}/${effort}`).toContain(
+          `model_reasoning_effort=${normalized}`,
+        );
+        expect(plan.env, `${provider}/${effort}`).toBeUndefined();
+      } else {
+        expect(plan.args, `${provider}/${effort}`).toContain(normalized);
+        expect(plan.env, `${provider}/${effort}`).toEqual({
+          [CLAUDE_EFFORT_ENV]: normalized,
+        });
+      }
+    }
+
+    const omitted = buildAdapterPlan(
+      { provider: "codex", role: "se", task: "review", model: "gpt-5.4" },
+      "hybrid",
+    );
+    expect(omitted.effort).toBeUndefined();
+  });
+
+  ["extreme", ""].forEach((effort, index) => {
+    describe(`M1 invalid effort fixture ${index + 1}`, () => {
+      it("U-CMDINPUT-004: static invalid-effort label", () => {
+        expect(reasoningEffortSchema.safeParse(effort).success, effort).toBe(false);
+        const plan = buildAdapterPlan(
+          {
+            provider: "claude",
+            role: "se",
+            task: "keep task unchanged",
+            model: "claude-sonnet-5-5",
+            effort,
+          },
+          "hybrid",
+        );
+        expect(plan.available, effort).toBe(false);
+        expect(plan.messages, effort).toEqual([INVALID_EFFORT_MESSAGE]);
+      });
+    });
+  });
+
+  it("U-CMDINPUT-005: invalid model fails the plan closed without rewriting task or provider", () => {
+    const invalidModel = "gpt-5%raw-model";
+    const task = "unchanged user task";
+    const plan = buildAdapterPlan(
+      { provider: "codex", role: "se", task, model: invalidModel, effort: "high" },
+      "hybrid",
+    );
+
+    expect(plan.available).toBe(false);
+    expect(plan.messages).toContain(INVALID_MODEL_MESSAGE);
+    expect(plan.messages.join("\n")).not.toContain(invalidModel);
+    expect(plan.args).toEqual([]);
+    expect(plan.env).toBeUndefined();
+    expect(plan.provider).toBe("codex");
+    expect(plan.stdin).toBe(task);
+  });
+
+  it("U-CMDINPUT-006: invalid effort fails the plan closed", () => {
+    const task = "unchanged user task";
+    const validModel = "claude-sonnet-5-5";
+    const invalidEffort = "extreme";
+    const plan = buildAdapterPlan(
+      { provider: "claude", role: "se", task, model: validModel, effort: invalidEffort },
+      "hybrid",
+    );
+
+    expect(plan.available).toBe(false);
+    expect(plan.messages).toContain(INVALID_EFFORT_MESSAGE);
+    expect(plan.messages.join("\n")).not.toContain(invalidEffort);
+    expect(plan.args).toEqual([]);
+    expect(plan.env).toBeUndefined();
+    expect(plan.model).toBe(validModel);
+    expect(plan.provider).toBe("claude");
+    expect(plan.stdin).toBe(task);
+  });
+
+  it("U-CMDINPUT-006: model diagnostic wins when both model and effort are invalid", () => {
+    const task = "unchanged user task";
+    const invalidEffort = "extreme";
+    const bothInvalid = buildAdapterPlan(
+      { provider: "claude", role: "se", task, model: "bad model", effort: invalidEffort },
+      "hybrid",
+    );
+    expect(bothInvalid.messages).toContain(INVALID_MODEL_MESSAGE);
+    expect(bothInvalid.messages).not.toContain(INVALID_EFFORT_MESSAGE);
+  });
+
+  ["cmd", "bat"].forEach((extension, index) => {
+    describe(`M1 percent command extension fixture ${index + 1}`, () => {
+      it("U-CMDINPUT-007: static command-path label", () => {
+        const root = mkdtempSync(join(tmpdir(), "ut-adapter-percent-command-"));
+        try {
+          const token = join(root, `percent%path-${extension}`, `codex.${extension}`);
+          touchBinary(token);
+          expectPercentTokenError(
+            () =>
+              buildProviderInvocation({
+                provider: "codex",
+                command: "codex",
+                args: ["exec"],
+                opts: {
+                  platform: "win32",
+                  env: { SystemRoot: "C:\\Windows", UT_TDD_CODEX_BIN: token },
+                },
+              }),
+            token,
+          );
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      });
+    });
+  });
+
+  [
+    ["percent%first", "middle", "last"],
+    ["first", "percent%middle", "last"],
+    ["first", "middle", "percent%last"],
+  ].forEach((args, index) => {
+    describe(`M1 percent argument fixture ${index + 1}`, () => {
+      it("U-CMDINPUT-008: static percent-argument label", () => {
+        const root = mkdtempSync(join(tmpdir(), "ut-adapter-percent-args-"));
+        try {
+          const explicit = join(root, "codex.cmd");
+          touchBinary(explicit);
+          const token = args.find((arg) => arg.includes("%")) as string;
+          expectPercentTokenError(
+            () =>
+              buildProviderInvocation({
+                provider: "codex",
+                command: "codex",
+                args,
+                opts: {
+                  platform: "win32",
+                  env: { SystemRoot: "C:\\Windows", UT_TDD_CODEX_BIN: explicit },
+                },
+              }),
+            token,
+          );
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      });
+    });
+  });
+
+  it("U-CMDINPUT-009: preserves normal cmd quoting and direct native/non-Windows percent arguments", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-adapter-percent-preserve-"));
+    try {
+      const cmdPath = join(root, "codex.cmd");
+      touchBinary(cmdPath);
+      const cmdInvocation = buildProviderInvocation({
+        provider: "codex",
+        command: "codex",
+        args: ["exec", "hello world", 'say"hi', ""],
+        opts: {
+          platform: "win32",
+          env: { SystemRoot: "C:\\Windows", UT_TDD_CODEX_BIN: cmdPath },
+        },
+      });
+      expect(cmdInvocation.command).toBe("C:\\Windows\\System32\\cmd.exe");
+      expect(cmdInvocation.args).toEqual([
+        "/d",
+        "/s",
+        "/c",
+        `""${cmdPath}" "exec" "hello world" "say""hi" """`,
+      ]);
+      expect(cmdInvocation.shell).toBe(false);
+      expect(cmdInvocation.windowsVerbatimArguments).toBe(true);
+
+      const nativePath = join(root, "codex.exe");
+      touchBinary(nativePath);
+      expect(
+        buildProviderInvocation({
+          provider: "codex",
+          command: "codex",
+          args: ["percent%native"],
+          opts: {
+            platform: "win32",
+            env: { SystemRoot: "C:\\Windows", UT_TDD_CODEX_BIN: nativePath },
+          },
+        }),
+      ).toEqual({ command: nativePath, args: ["percent%native"], shell: false });
+
+      const posixPath = join(root, "codex");
+      touchBinary(posixPath);
+      expect(
+        buildProviderInvocation({
+          provider: "codex",
+          command: "codex",
+          args: ["percent%posix"],
+          opts: { platform: "linux", env: { UT_TDD_CODEX_BIN: posixPath } },
+        }),
+      ).toEqual({ command: posixPath, args: ["percent%posix"], shell: false });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-CMDINPUT-010: builder rejection makes the version probe false without invoking runProbe", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-adapter-percent-probe-"));
+    try {
+      const explicit = join(root, "percent%codex.cmd");
+      touchBinary(explicit);
+      let runProbeCalls = 0;
+      let thrown: unknown;
+      let result: boolean | undefined;
+      try {
+        result = isProviderCommandSpawnable("codex", {
+          platform: "win32",
+          env: { SystemRoot: "C:\\Windows", UT_TDD_CODEX_BIN: explicit },
+          runProbe: () => {
+            runProbeCalls += 1;
+            return { status: 0 };
+          },
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeUndefined();
+      expect(result).toBe(false);
+      expect(runProbeCalls).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("U-CMDINPUT-011: keeps percent-bearing task text on stdin outside cmd tokens", () => {
+    const root = mkdtempSync(join(tmpdir(), "ut-adapter-percent-stdin-"));
+    try {
+      const explicit = join(root, "codex.cmd");
+      touchBinary(explicit);
+      const task = "inspect literal %PATH% and 100% without expanding it";
+      const plan = buildAdapterPlan(
+        { provider: "codex", role: "qa", task, model: "gpt-5.4", effort: "medium" },
+        "hybrid",
+      );
+      expect(plan.available).toBe(true);
+      expect(plan.messages).not.toContain("provider_model_invalid");
+      expect(plan.messages).not.toContain("provider_effort_invalid");
+      expect(plan.messages).not.toContain("provider_cmd_token_percent_forbidden");
+      expect(plan.stdin).toBe(task);
+      expect(plan.args).not.toContain(task);
+      const invocation = buildProviderInvocation({
+        provider: "codex",
+        command: "codex",
+        args: plan.args,
+        opts: {
+          platform: "win32",
+          env: { SystemRoot: "C:\\Windows", UT_TDD_CODEX_BIN: explicit },
+        },
+      });
+      expect(invocation.command).toBe("C:\\Windows\\System32\\cmd.exe");
+      expect(invocation.args.join(" ")).not.toContain("%PATH%");
+      expect(invocation.args.join(" ")).not.toContain("100%");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

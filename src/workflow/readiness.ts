@@ -1,3 +1,4 @@
+import { stableId } from "../stable-id.ts";
 import type { HarnessDb } from "../state-db/index.ts";
 import { upsertRow } from "../state-db/index.ts";
 
@@ -16,27 +17,22 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function openFindingCount(db: HarnessDb, planId: string): number {
-  const row = db
-    .prepare("SELECT COUNT(*) AS n FROM findings WHERE status = 'open' AND subject_id LIKE ?")
-    .get(`%${planId}%`);
-  return Number(row?.n ?? 0);
-}
-
-function passedGateCount(db: HarnessDb, planId: string): number {
-  const row = db
-    .prepare("SELECT COUNT(*) AS n FROM gate_runs WHERE plan_id = ? AND status = 'passed'")
-    .get(planId);
-  return Number(row?.n ?? 0);
-}
-
-function humanBlockCount(db: HarnessDb, planId: string): number {
-  const row = db
-    .prepare(
-      "SELECT COUNT(*) AS n FROM guardrail_decisions WHERE plan_id = ? AND (decision = 'human-required' OR decision = 'block' OR human_signoff_required = 1)",
-    )
-    .get(planId);
-  return Number(row?.n ?? 0);
+function hasMatchingPassedRoutineGate(
+  db: HarnessDb,
+  workflowRow: Record<string, unknown>,
+): boolean {
+  const workflowRunId = String(workflowRow.workflow_run_id ?? "");
+  const phase = String(workflowRow.phase ?? "");
+  const rows = db.prepare("SELECT gate_run_id, gate_id, status FROM gate_runs").all();
+  return rows.some((gate) => {
+    const gateRunId = String(gate.gate_run_id ?? "");
+    return (
+      gateRunId !== "" &&
+      stableId("gate-workflow", gateRunId) === workflowRunId &&
+      String(gate.gate_id ?? "") === phase &&
+      String(gate.status ?? "") === "passed"
+    );
+  });
 }
 
 export function evaluateAutomationReadiness(db: HarnessDb): AutomationReadinessRow[] {
@@ -45,25 +41,15 @@ export function evaluateAutomationReadiness(db: HarnessDb): AutomationReadinessR
   const results: AutomationReadinessRow[] = [];
   for (const row of rows) {
     const planId = String(row.plan_id ?? "");
-    const openFindings = planId ? openFindingCount(db, planId) : 0;
-    const gates = planId ? passedGateCount(db, planId) : 0;
-    const humanBlocks = planId ? humanBlockCount(db, planId) : 0;
-    let readyStatus: AutomationReadinessRow["ready_status"] = "ready";
-    let blockedReason = "";
-    let humanRequired = 0;
-    if (!planId || gates === 0) {
-      readyStatus = "blocked";
-      blockedReason = "missing evidence: passed gate evidence is required";
-    }
-    if (openFindings > 0) {
-      readyStatus = "blocked";
-      blockedReason = `open findings: ${openFindings}`;
-    }
-    if (humanBlocks > 0) {
-      readyStatus = "human-required";
-      blockedReason = `human-required guardrail decisions: ${humanBlocks}`;
-      humanRequired = 1;
-    }
+    const hasGateEvidence =
+      String(row.workflow ?? "") === "routine-gate" && hasMatchingPassedRoutineGate(db, row);
+    const readyStatus: AutomationReadinessRow["ready_status"] = hasGateEvidence
+      ? "ready"
+      : "blocked";
+    const blockedReason = hasGateEvidence
+      ? ""
+      : "missing evidence: passed gate evidence is required";
+    const humanRequired = 0;
     const result: AutomationReadinessRow = {
       workflow_run_id: String(row.workflow_run_id ?? ""),
       plan_id: planId,

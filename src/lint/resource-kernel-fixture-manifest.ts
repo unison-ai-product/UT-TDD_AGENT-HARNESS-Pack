@@ -116,11 +116,17 @@ export function parseFixtureManifest(yamlText: string): FixtureManifest {
   };
 }
 
-/** contract doc の見出しから節番号集合を作る (`## 4.` → "4"、`### 4.1 ` → "4.1")。 */
+/** L5 D.6 の source §見出しだけから fixture locator 節番号を作る。 */
 export function parseContractSections(markdown: string): Set<string> {
   const out = new Set<string>();
-  for (const line of markdown.split(/\r?\n/)) {
-    const m = /^#{2,3} (\d+(?:\.\d+)*)\.?\s/.exec(line);
+  const lines = markdown.split(/\r?\n/);
+  const d6Start = lines.findIndex((line) => /^### D\.6\b/.test(line));
+  if (d6Start < 0) return out;
+  const remaining = lines.slice(d6Start + 1);
+  const nextSection = remaining.findIndex((line) => /^#{1,3} /.test(line));
+  const d6Lines = nextSection < 0 ? remaining : remaining.slice(0, nextSection);
+  for (const line of d6Lines) {
+    const m = /^#{4,5} source §(\d+(?:\.\d+)*) —\s/.exec(line);
     if (m) out.add(m[1]);
   }
   return out;

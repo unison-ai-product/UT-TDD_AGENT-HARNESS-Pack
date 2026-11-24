@@ -99,7 +99,7 @@ export function loadTrackedCatalogInput(
       "target_kind",
       "target_ref",
       "判断理由",
-      "plan_id",
+      "issue",
     ],
   });
   const manifestDigest = digest(manifestRows);
@@ -180,7 +180,7 @@ export function loadTrackedCatalogInput(
           }
         : {}),
       ...(optional(row, "target_ref") ? { targetRef: optional(row, "target_ref") } : {}),
-      ...(optional(row, "plan_id") ? { planId: optional(row, "plan_id") } : {}),
+      ...(optional(row, "issue") ? { issue: optional(row, "issue") } : {}),
     })),
   };
 }

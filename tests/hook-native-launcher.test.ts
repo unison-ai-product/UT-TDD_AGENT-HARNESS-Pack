@@ -1,12 +1,85 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { gte, minVersion, validRange } from "semver";
 import { afterEach, describe, expect, it } from "vitest";
 import { CODEX_GIT_ROOT_PREFIX } from "../src/lint/hook-invocation.ts";
+import { MISSING_RUNTIME_GUARD_BOOTSTRAP } from "../src/lint/project-hook.ts";
 import { BUILTIN_GITHUB_TEMPLATES } from "../src/setup/templates.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const repoRoot = process.cwd();
+
+type ClaudeSettingsForFailureParity = {
+  hooks: Record<string, Array<{ matcher?: string; hooks: Array<Record<string, unknown>> }>>;
+};
+type ClaudeHookRow = {
+  event: string;
+  matcher: string;
+  entryIndex: number;
+  hookIndex: number;
+  hook: Record<string, unknown>;
+};
+
+function loadClaudeFailureSettings() {
+  return [
+    {
+      label: "source",
+      settings: JSON.parse(
+        readFileSync(join(repoRoot, ".claude", "settings.json"), "utf8"),
+      ) as ClaudeSettingsForFailureParity,
+    },
+    {
+      label: "Pack template",
+      settings: JSON.parse(
+        readFileSync(
+          join(repoRoot, "docs", "templates", "adapter", ".claude", "settings.json"),
+          "utf8",
+        ),
+      ) as ClaudeSettingsForFailureParity,
+    },
+    {
+      label: "generator",
+      settings: JSON.parse(
+        BUILTIN_GITHUB_TEMPLATES["adapter/.claude/settings.json"],
+      ) as ClaudeSettingsForFailureParity,
+    },
+  ];
+}
+
+function claudeHookRows(settings: ClaudeSettingsForFailureParity): ClaudeHookRow[] {
+  return Object.entries(settings.hooks).flatMap(([event, entries]) =>
+    entries.flatMap((entry, entryIndex) =>
+      entry.hooks.map((hook, hookIndex) => ({
+        event,
+        matcher: entry.matcher ?? "",
+        entryIndex,
+        hookIndex,
+        hook,
+      })),
+    ),
+  );
+}
+
+function hookFailureState(rows: ClaudeHookRow[]) {
+  return rows.map(({ event, matcher, entryIndex, hookIndex, hook }) => ({
+    key: `${event}|${matcher}|${entryIndex}|${hookIndex}`,
+    onFailure: Object.hasOwn(hook, "onFailure")
+      ? { present: true, value: hook.onFailure }
+      : { present: false },
+    blockOnFailure: Object.hasOwn(hook, "blockOnFailure")
+      ? { present: true, value: hook.blockOnFailure }
+      : { present: false },
+  }));
+}
+
+function meetsUnflaggedTypeScriptFloor(range: string): boolean {
+  const valid = validRange(range);
+  if (valid === null) return false;
+  const minimum = minVersion(valid);
+  return minimum !== null && gte(minimum, "22.18.0");
+}
 // PLAN-L7-522 S1-b: common/run-bun.ts is retired. The generated wrapper is
 // launched directly by Node, so the execution contract is tested on it.
 const temporaryDirectories: string[] = [];
@@ -19,7 +92,7 @@ function temporaryDirectory(): string {
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
+    removeTestTree(directory);
   }
 });
 
@@ -45,6 +118,41 @@ const RECORDER = [
 ].join("\n");
 
 describe("Claude hook wrapper execution contract (issue #123 / PLAN-L7-522 S1-b)", () => {
+  it("U-HOOKEXEC-001/008: absent-runtime fixtures reach the wrapper and do not record", () => {
+    const recorderOutput = join(temporaryDirectory(), "recorded.json");
+    const withRecorder = materializeWrapper(RECORDER);
+    const recorderResult = spawnSync(process.execPath, [withRecorder.wrapper, recorderOutput], {
+      cwd: withRecorder.root,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+
+    expect(recorderResult.error).toBeUndefined();
+    expect(typeof recorderResult.status).toBe("number");
+    expect(recorderResult.stderr).toContain("consumer_runtime_absent");
+    expect(() => readFileSync(recorderOutput, "utf8")).toThrow();
+
+    const recorderOutputWithoutEntrypoint = join(
+      temporaryDirectory(),
+      "recorded-without-entrypoint.json",
+    );
+    const withoutEntrypoint = materializeWrapper(null);
+    const missingEntrypointResult = spawnSync(
+      process.execPath,
+      [withoutEntrypoint.wrapper, recorderOutputWithoutEntrypoint],
+      {
+        cwd: withoutEntrypoint.root,
+        encoding: "utf8",
+        windowsHide: true,
+      },
+    );
+
+    expect(missingEntrypointResult.error).toBeUndefined();
+    expect(typeof missingEntrypointResult.status).toBe("number");
+    expect(missingEntrypointResult.stderr).toContain("consumer_runtime_absent");
+    expect(() => readFileSync(recorderOutputWithoutEntrypoint, "utf8")).toThrow();
+  });
+
   it("U-HOOKEXEC-001: refuses to launch without the consumer-local sealed runtime", () => {
     const output = join(temporaryDirectory(), "result.json");
     const { root, wrapper } = materializeWrapper(RECORDER);
@@ -58,8 +166,9 @@ describe("Claude hook wrapper execution contract (issue #123 / PLAN-L7-522 S1-b)
       windowsHide: true,
     });
 
-    expect(result.status, result.stderr).toBe(78);
+    expect(result.status, result.stderr).toBe(2);
     expect(result.stderr).toContain("consumer_runtime_absent");
+    expect(result.stderr).toContain("setup --worktree");
     expect(() => readFileSync(output, "utf8")).toThrow();
   });
 
@@ -71,8 +180,9 @@ describe("Claude hook wrapper execution contract (issue #123 / PLAN-L7-522 S1-b)
       windowsHide: true,
     });
 
-    expect(result.status).toBe(78);
+    expect(result.status).toBe(2);
     expect(result.stderr).toContain("consumer_runtime_absent");
+    expect(result.stderr).toContain("setup --worktree");
   });
 
   it("U-HOOKEXEC-008: uses direct executable spawning and never delegates to a shell host", () => {
@@ -90,24 +200,82 @@ describe("Claude hook wrapper execution contract (issue #123 / PLAN-L7-522 S1-b)
     const manifest = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
       engines?: { node?: string };
     };
-    // F0a pins engines.node to an exact version (toolchain-pin lint); the
-    // unflagged-TS floor stays 22.18, so ranges and pins below it must fail.
+    // Every version admitted by the range must meet the unflagged-TS floor.
     const pinned = manifest.engines?.node ?? "";
-    const exact = /^(\d+)\.(\d+)\.\d+$/.exec(pinned);
-    expect(exact).not.toBeNull();
-    const major = Number(exact?.[1]);
-    const minor = Number(exact?.[2]);
-    expect(major > 22 || (major === 22 && minor >= 18)).toBe(true);
+    expect(meetsUnflaggedTypeScriptFloor(pinned)).toBe(true);
   });
 
-  it("U-HOOKEXEC-010: keeps Windows process-tree custody open until the Rust kernel owns it", () => {
-    const plan = readFileSync(
-      join(repoRoot, "docs", "plans", "PLAN-L7-139-codex-hook-adapter.md"),
-      "utf8",
-    );
-    expect(plan).toContain("Issue #134");
-    expect(plan).toContain("Windows Job Object");
-    expect(plan).toContain("未解消");
+  it("U-HOOKEXEC-009: rejects below-floor alternatives and invalid ranges", () => {
+    expect(meetsUnflaggedTypeScriptFloor(">=22.18.0 <25")).toBe(true);
+    expect(meetsUnflaggedTypeScriptFloor(">=22.18.0 || <22.18.0")).toBe(false);
+    expect(meetsUnflaggedTypeScriptFloor("22.x")).toBe(false);
+    expect(meetsUnflaggedTypeScriptFloor("not-a-range")).toBe(false);
+  });
+
+  describe("U-HOOKEXEC-014: source, Pack template, and generator failure-policy parity", () => {
+    it("precondition: all three settings contain both guards and the five record/session hooks", () => {
+      for (const { label, settings } of loadClaudeFailureSettings()) {
+        const rows = claudeHookRows(settings);
+        const guards = rows.filter((row) => row.event === "PreToolUse");
+        expect(guards, label).toHaveLength(2);
+        expect(guards.map((row) => row.matcher).sort(), label).toEqual(
+          ["Agent|Task", "Edit|Write|MultiEdit"].sort(),
+        );
+        const guardByMatcher = new Map(guards.map((row) => [row.matcher, row.hook]));
+        expect(JSON.stringify(guardByMatcher.get("Agent|Task")), label).toContain("agent-guard");
+        expect(JSON.stringify(guardByMatcher.get("Edit|Write|MultiEdit")), label).toContain(
+          "work-guard",
+        );
+        expect(
+          ["SessionStart", "PostToolUse", "Stop", "SubagentStop"].map(
+            (event) => rows.filter((row) => row.event === event).length,
+          ),
+          label,
+        ).toEqual([1, 1, 2, 1]);
+      }
+    });
+
+    it("U-HOOKEXEC-014: keeps record/session hooks fail-open in all three settings", () => {
+      for (const { label, settings } of loadClaudeFailureSettings()) {
+        const recordHooks = claudeHookRows(settings).filter((row) =>
+          ["SessionStart", "PostToolUse", "Stop", "SubagentStop"].includes(row.event),
+        );
+        expect(
+          recordHooks.every((row) => !Object.hasOwn(row.hook, "onFailure")),
+          label,
+        ).toBe(true);
+      }
+    });
+
+    it("U-HOOKEXEC-014: requires both guards to use onFailure block", () => {
+      for (const { label, settings } of loadClaudeFailureSettings()) {
+        const guards = claudeHookRows(settings).filter((row) => row.event === "PreToolUse");
+        expect(
+          Object.fromEntries(guards.map((row) => [row.matcher, row.hook.onFailure])),
+          label,
+        ).toEqual({
+          "Agent|Task": "block",
+          "Edit|Write|MultiEdit": "block",
+        });
+      }
+    });
+
+    it("U-HOOKEXEC-014: rejects the obsolete blockOnFailure key everywhere", () => {
+      for (const { label, settings } of loadClaudeFailureSettings()) {
+        const legacyRows = claudeHookRows(settings).filter((row) =>
+          Object.hasOwn(row.hook, "blockOnFailure"),
+        );
+        expect(legacyRows, label).toEqual([]);
+      }
+    });
+
+    it("U-HOOKEXEC-014: keeps hook-specific failure fields aligned across all three settings", () => {
+      const [source, pack, generator] = loadClaudeFailureSettings().map(({ settings }) =>
+        hookFailureState(claudeHookRows(settings)),
+      );
+      expect(pack).toEqual(source);
+      expect(generator).toEqual(source);
+    });
   });
 
   it("U-HOOKEXEC-002/U-HOOKEXEC-003/U-HOOKEXEC-004/U-HOOKEXEC-007: routes all Claude hooks as exact argv and preserves policy", () => {
@@ -116,7 +284,7 @@ describe("Claude hook wrapper execution contract (issue #123 / PLAN-L7-522 S1-b)
     ) as {
       hooks: Record<
         string,
-        { hooks: { command: string; args?: string[]; blockOnFailure?: boolean }[] }[]
+        { hooks: { command: string; args?: string[]; onFailure?: string }[] }[]
       >;
     };
     const hooks = Object.values(settings.hooks).flatMap((entries) =>
@@ -138,15 +306,15 @@ describe("Claude hook wrapper execution contract (issue #123 / PLAN-L7-522 S1-b)
     }
     const preToolHooks = (
       settings.hooks.PreToolUse as {
-        hooks: { command: string; args?: string[]; blockOnFailure?: boolean }[];
+        hooks: { command: string; args?: string[]; onFailure?: string }[];
       }[]
     ).flatMap((entry) => entry.hooks);
-    expect(preToolHooks.every((hook) => hook.blockOnFailure === true)).toBe(true);
+    expect(preToolHooks.every((hook) => hook.onFailure === "block")).toBe(true);
     for (const event of ["SessionStart", "PostToolUse", "Stop", "SubagentStop"]) {
       expect(
         settings.hooks[event]
           .flatMap((entry) => entry.hooks)
-          .every((hook) => hook.blockOnFailure !== true),
+          .every((hook) => hook.onFailure === undefined),
       ).toBe(true);
     }
   });
@@ -164,8 +332,22 @@ describe("Claude hook wrapper execution contract (issue #123 / PLAN-L7-522 S1-b)
 
     expect(actual).toEqual({
       PreToolUse: [
-        ["node", ".ut-tdd/bin/ut-tdd.mjs", "hook", "agent-guard"],
-        ["node", ".ut-tdd/bin/ut-tdd.mjs", "hook", "work-guard"],
+        [
+          "node",
+          "-e",
+          MISSING_RUNTIME_GUARD_BOOTSTRAP,
+          ".ut-tdd/bin/ut-tdd.mjs",
+          "hook",
+          "agent-guard",
+        ],
+        [
+          "node",
+          "-e",
+          MISSING_RUNTIME_GUARD_BOOTSTRAP,
+          ".ut-tdd/bin/ut-tdd.mjs",
+          "hook",
+          "work-guard",
+        ],
       ],
       SessionStart: [["node", ".ut-tdd/bin/ut-tdd.mjs", "session", "start"]],
       PostToolUse: [["node", ".ut-tdd/bin/ut-tdd.mjs", "hook", "post-tool-use"]],

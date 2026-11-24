@@ -28,7 +28,7 @@ import {
   sha256Hex,
 } from "./review-custody-canonical.ts";
 
-export const REVIEW_CUSTODY_SCHEMA_VERSION = "review-custody/v1";
+export const REVIEW_CUSTODY_SCHEMA_VERSION = "review-custody/v2";
 export const DEFAULT_CUSTODY_VERIFICATION_ATTEMPTS = 3;
 
 export type ReviewCustodyReceiptKind = "pre_merge_review" | "post_merge_closure";
@@ -57,8 +57,6 @@ export interface ReviewCustodyReceipt {
   readonly mergeSha?: string;
   readonly mergeMethod?: "merge" | "squash" | "rebase";
   readonly mergedAt?: string;
-  readonly planId: string;
-  readonly planRevision: string;
   readonly reviewRevision: string;
   readonly judgmentDigest: string;
   readonly receiptDigest: string;
@@ -78,7 +76,6 @@ const LOWER_HEX_40 = /^[0-9a-f]{40}$/;
 const LOWER_HEX_64 = /^[0-9a-f]{64}$/;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 const REF_PATTERN = /^[A-Za-z0-9._/-]{1,255}$/;
-const PLAN_ID_PATTERN = /^[A-Za-z0-9._-]{1,120}$/;
 const WORKFLOW_REF_PATTERN =
   /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml@refs\/heads\/[A-Za-z0-9._/-]+$/;
 const RUN_ID_PATTERN = /^[0-9]{1,20}$/;
@@ -112,8 +109,6 @@ const BASE_FIELDS: Readonly<Record<string, FieldCheck>> = {
   prNumber: isPositiveInteger,
   baseRef: isText(REF_PATTERN),
   headSha: isText(LOWER_HEX_40),
-  planId: isText(PLAN_ID_PATTERN),
-  planRevision: isText(LOWER_HEX_64),
   reviewRevision: isText(REVIEW_REVISION_PATTERN),
   judgmentDigest: isText(LOWER_HEX_64),
   receiptDigest: isText(LOWER_HEX_64),
@@ -280,8 +275,6 @@ export interface CustodySubjectExpectation {
   readonly receiptKind: ReviewCustodyReceiptKind;
   /** post-merge dispatch assertion。GitHub API の merge method facts ではない。 */
   readonly mergeMethod?: "merge" | "squash" | "rebase";
-  readonly planId: string;
-  readonly planRevision: string;
   readonly requestIdentity: ReviewRequestIdentity;
   readonly judgmentDigest: string;
   readonly workflowRef: string;
@@ -375,8 +368,6 @@ function subjectMismatches(input: {
     ["baseRef", receipt.baseRef, expected.baseRef],
     ["headSha", receipt.headSha, expected.headSha],
     ["receiptKind", receipt.receiptKind, expected.receiptKind],
-    ["planId", receipt.planId, expected.planId],
-    ["planRevision", receipt.planRevision, expected.planRevision],
     ["reviewRevision", receipt.reviewRevision, input.reviewRevision],
     ["judgmentDigest", receipt.judgmentDigest, expected.judgmentDigest],
     ["workflowRef", receipt.workflowRef, expected.workflowRef],
@@ -586,8 +577,6 @@ export interface CustodyReceiptDraft {
   readonly mergeSha?: string;
   readonly mergeMethod?: "merge" | "squash" | "rebase";
   readonly mergedAt?: string;
-  readonly planId: string;
-  readonly planRevision: string;
   readonly requestIdentity: ReviewRequestIdentity;
   readonly judgmentDigest: string;
   readonly workflowRef: string;
@@ -639,8 +628,6 @@ export function buildReviewCustodyReceipt(input: {
     prNumber: input.draft.prNumber,
     baseRef: input.draft.baseRef,
     headSha: input.draft.headSha,
-    planId: input.draft.planId,
-    planRevision: input.draft.planRevision,
     reviewRevision: revision.value,
     judgmentDigest: input.draft.judgmentDigest,
     workflowRef: input.draft.workflowRef,

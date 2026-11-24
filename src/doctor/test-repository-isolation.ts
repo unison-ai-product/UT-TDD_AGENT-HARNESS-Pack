@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
-import type { LintResult } from "../plan/lint.ts";
+import type { LintResult } from "../lint/lint-result.ts";
 
 export type RepositoryReadMode = "head_snapshot" | "isolated_fixture";
 export interface RepositoryReadContract {
@@ -12,41 +12,41 @@ export interface RepositoryReadContract {
 }
 
 const CONTRACT_ROWS = `
-asset-catalog:3 asset-drift:1 backfill-pairing:2 cited-command-existence:1 cli-surface:2 cli:1
+agent-guard-delegation-boundary:1
+asset-catalog:2 asset-drift:1 backfill-pairing:1 cited-command-existence:1 claude-version-floor:1 cli-surface:1 cli:1
 advisory-strict-gate-aging:4
-codex-hook-adapter:5 coding-rules:1 context-doc-router:2 cycle-p4-verification:5 db-currency:1 db-projection-coverage:1 db-projection-ingestion:3
-dependency-drift:4 descent-obligation:3 distribution-acceptance:1 distribution-scratch-ignore:1 doctor-runtime-surface:2 doctor:25
-drive-model-passage:2 fr-roadmap-coverage:4 frontend-design-coverage:1 g10-ux-workflow:5 g8-integration-workflow:6 g9-system-workflow:7
-erasable-syntax:1 gate-static:10 impl-plan-trace:1 import-specifier:2 l14-close-audit:8 l6-completion:2 l6-fr-coverage:2 mode-catalog:1 model-id-ssot:1 model-id-ssot-drift:1 module-drift:2 oracle-test-trace:5
-plan-id-naming:1 plan-lint:10 projection-writer:13 proposal-document-coverage:2 readability:5 relation-graph-loader:1 review-green-command-projection:1
+codex-hook-adapter:5 codex-hook-failure:1 coding-rules:1 context-doc-router:2 cycle-p4-verification:3 db-currency:1 db-projection-coverage:1 db-projection-ingestion:3
+dependency-drift:3 descent-obligation:3 distribution-acceptance:1 distribution-scratch-ignore:1 doctor-runtime-surface:2 doctor:25
+drive-model-passage:1 fr-roadmap-coverage:4 frontend-design-coverage:1 g10-ux-workflow:5 g8-integration-workflow:6 g9-system-workflow:7
+erasable-syntax:1 gate-static:10 import-specifier:2 l6-completion:2 l6-fr-coverage:2 mode-catalog:2 model-id-ssot:1 model-id-ssot-drift:1 module-drift:2 oracle-test-trace:13
+projection-writer:9 proposal-document-coverage:2 readability:5 relation-graph-loader:1 support/plan-mechanism-retirement-s3-migration.ts:1
 release-artifact-resolver:1 release-consumer-skills:4
-right-arm-gate-planning:1 right-lung-doc-governance:1 roadmap:1 rule-automation-closure:1 rule-drift:4 runtime-hook-entrypoints:1
+right-lung-doc-governance:1 rule-drift:4 runtime-hook-entrypoints:1
 review-live-cli:4
 review-delegation-root:1
-runtime-portability:2 screen-impl-pair-freeze:1 setup-bun-removal:2 ban-lint-detection-power:3 bun-permanent-ban:14 self-pair-normative-guard:1 setup-agent-floor:2 setup:8 skill-assignment:1 state-db:1
+runtime-portability:2 screen-impl-pair-freeze:1 setup-bun-removal:2 ban-lint-detection-power:3 bun-permanent-ban:14 self-pair-normative-guard:1 setup:8 skill-assignment:1 state-db:1
 sub-doc-catalog-drift:5 sub-doc-section-structure:1 telemetry-closure:1 test-design-naming:1 toolchain-pin:1 tracked-canonical:1
 vmodel-contract-compiler:1 vmodel-source-assets:1 work-guard:1 workspace-roots:3 write-encoding-guard:1
 vmodel-consumer-lint:1
 release-consumer-gates:15
 consumer-g14-static:3
-doctor-test-repository-isolation:1 persistent-db-cleanup-contract:1 memory-clean-cut-removal:1 memory-legacy-archive:1 memory-clean-cut-non-read:1 memory-curation-ledger:1
+consumer-g1-screen-namespace:1
+vitest-assertion-required:1 doctor-test-repository-isolation:1 persistent-db-cleanup-contract:1 memory-clean-cut-removal:1 memory-legacy-archive:1 memory-clean-cut-non-read:1 memory-curation-ledger:1
 secret-scan-diff:1
 feedback-log:2
-github-repository-policy:3
-github-ci-policy:1
-github-forward-store:2
-node-self-host-bootstrap:1 node-slice-admission:3 node-plan-revision-runner:3
+github-repository-policy:3 consumer-ci-guard-red:1 consumer-ci-push-merge-control:1
+gate-run-publish-candidate:3 gate-run-stderr-candidate:1 gate-run-publish-boundary-red:1 gate-run-publish-cli-red:1 github-ci-policy:1 github-ci-node-version-file:1
+node-self-host-bootstrap:1 node-slice-admission:3
 global-setup.ts:1 support/workspace-roots.ts:3
-global-setup-fence:1 vitest-snapshot-runner:3
-hook-native-launcher:1 claude-memory-terminal-gc:1 release-version-identity:2 windows-ci-single-snapshot:2 pack-authoring-template-scope:2
+global-setup-fence:1 vitest-snapshot-runner:3 snapshot-runner-argv-candidates:2
+hook-native-launcher:1 claude-memory-terminal-gc:1 release-version-identity:2 windows-ci-single-snapshot:2 windows-ci-shard-red:1 pack-authoring-template-scope:3
 profile/tracked-loader:2
-plan-asset/ledger-schema:4 plan-asset/legacy-inventory:5 plan-asset/legacy-migration-dry-run:13 plan-asset/project-identity-loader:1
 disposition/git-authoring-provenance:3 disposition/projection:6 disposition/tracked-target-registry:2
   forward-escape-issue-contract:2
-  pack-consumer-runtime-release:4 release-consumer-vmodel-template:1
+  pack-consumer-runtime-release:3 release-consumer-vmodel-template:1
   release-consumer-setup-artifacts:1
   pack-internal-canary-boundary:1 support/pack-internal-canary.ts:1
-  pack-canary-acceptance:2
+  pack-build-inputs-wiring:2 pack-canary-acceptance:2 pack-canary-issue-design:1 claude-version-doctor-fence:2 claude-version-probe:1 pack-publication-audit-wiring:1
   `;
 
 const repositoryReadContracts: Record<string, RepositoryReadContract> = Object.fromEntries(
@@ -65,28 +65,63 @@ const repositoryReadContracts: Record<string, RepositoryReadContract> = Object.f
     }),
 );
 
+repositoryReadContracts["tests/impl-plan-trace.test.ts"] = {
+  mode_calls: { head_snapshot: 1, isolated_fixture: 1 },
+  reason:
+    "the immutable HEAD supplies the real trace input and copied design bytes for the isolated mutation fixture",
+};
+
+repositoryReadContracts["tests/doc-split-integration.test.ts"] = {
+  mode_calls: { head_snapshot: 1, isolated_fixture: 4 },
+  reason:
+    "doc-split candidate 020/021 inspect the execution snapshot baseline and use temporary repositories for append and CLI state checks",
+};
+
+repositoryReadContracts["tests/code-size-integration.test.ts"] = {
+  mode_calls: { head_snapshot: 1, isolated_fixture: 5 },
+  reason:
+    "code-size candidate 016/017 inspect the execution snapshot baseline and use temporary repositories for append and CLI state checks",
+};
+
+repositoryReadContracts["tests/privacy-scan-integration.test.ts"] = {
+  mode_calls: { isolated_fixture: 5 },
+  reason:
+    "privacy-scan candidate 015/016 inspect the execution snapshot and its workflows and use temporary repositories for CLI and distribution checks",
+};
+
+repositoryReadContracts["tests/privacy-scan-distribution.test.ts"] = {
+  mode_calls: { isolated_fixture: 1 },
+  reason:
+    "privacy-scan candidate 014/018 copy the clean Pack artifact set of the execution snapshot into temporary roots",
+};
+
 repositoryReadContracts["tests/design-root.test.ts"] = {
   mode: "head_snapshot",
   calls: 1,
   reason: "missing consumer roots preserve the immutable HEAD gate definition fallback bytes",
 };
 
-for (const [path, calls] of Object.entries({
-  "tests/github-pr-trace.test.ts": 1,
-  "tests/model-id-ssot-drift.test.ts": 1,
-  "tests/model-id-ssot.test.ts": 1,
-  "tests/plan-id-naming.test.ts": 1,
-  "tests/setup-project-identity-bootstrap.test.ts": 2,
-  "tests/sub-doc-schema-integrity.test.ts": 3,
-}))
-  repositoryReadContracts[path] = {
+const HEAD_SNAPSHOT_ROWS = `
+github-pr-trace.test.ts:1 model-id-ssot-drift.test.ts:1 model-id-ssot.test.ts:1 consumer-ci-workflow-red.test.ts:1 consumer-g3-trace-red.test.ts:1
+doctor-source-preflight-profile.test.ts:2 setup-project-identity-bootstrap.test.ts:2 plan-mechanism-retirement.test.ts:1 sub-doc-schema-integrity.test.ts:3 disposition/issue-only-projection.test.ts:1 zero-trust-download-integration.test.ts:2 plan-mechanism-retirement-acceptance.test.ts:1 gh-command-source-inventory.test.ts:1
+`;
+
+for (const [name, calls] of HEAD_SNAPSHOT_ROWS.trim()
+  .split(/\s+/)
+  .map((row) => row.split(":")))
+  repositoryReadContracts[`tests/${name}`] = {
     mode: "head_snapshot",
-    calls,
+    calls: Number(calls),
     reason: "repository contract read is fixed to detached HEAD",
   };
 
-// PLAN-L7-461: doctor envelope の consumer は「検証対象 = detached HEAD snapshot」を
-// 前提に観測面を突き合わせるため、HEAD snapshot 読みを契約として明示する。
+repositoryReadContracts["tests/disposition/projection.test.ts"] = {
+  mode_calls: { head_snapshot: 1 },
+  reason:
+    "disposition projection reads canonical authoring docs from immutable HEAD and uses isolated Git fixtures",
+};
+
+// PLAN-L7-461: doctor envelope の consumer は detached HEAD snapshot の観測面を検証する。
 repositoryReadContracts["tests/support/doctor-envelope.ts"] = {
   mode: "head_snapshot",
   calls: 1,
@@ -105,8 +140,19 @@ repositoryReadContracts["tests/windows-ci-single-snapshot.test.ts"] = {
 };
 
 repositoryReadContracts["tests/doctor.test.ts"] = {
-  mode_calls: { head_snapshot: 20, isolated_fixture: 7 },
+  mode_calls: { head_snapshot: 18, isolated_fixture: 7 },
   reason: "doctor aggregate test exercises both detached HEAD and execution fixture",
+};
+
+repositoryReadContracts["tests/resource-kernel-pair-mapping.test.ts"] = {
+  mode_calls: { head_snapshot: 1 },
+  reason:
+    "Resource Kernel pair mapping reads immutable L5/L8 source docs from headSnapshotRoot; planless fixture access uses the shared workspace-roots wrapper",
+};
+repositoryReadContracts["tests/resource-kernel-fixture-manifest.test.ts"] = {
+  mode_calls: { head_snapshot: 1 },
+  reason:
+    "Resource Kernel fixture manifest reads immutable source docs from headSnapshotRoot; planless fixture access uses the shared workspace-roots wrapper",
 };
 
 repositoryReadContracts["tests/workspace-roots.test.ts"] = {
@@ -138,7 +184,7 @@ repositoryReadContracts["tests/support/pack-consumer-runtime.ts"] = {
 };
 repositoryReadContracts["tests/pack-consumer-runtime-release.test.ts"] = {
   mode: "isolated_fixture",
-  calls: 4,
+  calls: 3,
   reason:
     "clean Pack producer fixture copies tracked assets into a temporary Git repository and installer CLI runs only from the detached execution snapshot",
 };
@@ -148,11 +194,33 @@ repositoryReadContracts["tests/release-consumer-vmodel-template.test.ts"] = {
   reason:
     "consumer template bundle oracle compares emitted bytes to the source template assets while the CLI writes only into a temporary consumer root",
 };
-repositoryReadContracts["tests/plan-revision-digest-query.test.ts"] = {
+repositoryReadContracts["tests/design-protection.test.ts"] = {
   mode: "isolated_fixture",
   calls: 1,
   reason:
-    "CLI subprocess loads the source under test from the writable execution snapshot and reads ledger data only from a temporary fixture root",
+    "design-protection unit oracles resolve subject and CLI paths from the writable execution snapshot",
+};
+repositoryReadContracts["tests/design-protection-repository-contract.test.ts"] = {
+  mode: "isolated_fixture",
+  calls: 1,
+  reason:
+    "design-protection repository-contract oracles resolve subject and repository paths from the writable execution snapshot",
+};
+repositoryReadContracts["tests/upstream-schedule-reader.test.ts"] = {
+  mode: "head_snapshot",
+  calls: 1,
+  reason:
+    "upstream-schedule reader oracles seed isolated filesystem fixtures from the immutable L3 topic",
+};
+repositoryReadContracts["tests/state-channel-consolidation.test.ts"] = {
+  mode_calls: { isolated_fixture: 1 },
+  reason:
+    "state-channel migration oracles read the exact execution snapshot and write only to isolated repositories",
+};
+repositoryReadContracts["tests/windows-hide-default.test.ts"] = {
+  mode_calls: { isolated_fixture: 1 },
+  reason:
+    "windows-hide doctor and Pack checks inspect the writable execution snapshot and isolated fixture roots",
 };
 
 export const REPOSITORY_READ_CONTRACTS: Readonly<Record<string, RepositoryReadContract>> =

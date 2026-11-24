@@ -1,9 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildConsumerReadinessPlan } from "../src/setup/distribution.ts";
+import { heavyAfterEach } from "./support/hook-bounds.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -13,9 +15,9 @@ function temporaryDirectory(): string {
   return directory;
 }
 
-afterEach(() => {
+heavyAfterEach("teardown", () => {
   for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
+    removeTestTree(directory);
   }
 });
 

@@ -5,7 +5,7 @@ import {
   canonicalProjectIdentityBytes,
   loadProjectIdentityFromHead,
   repositoryIdentityFromOrigin,
-} from "../plan-asset/adapters/project-identity-loader.ts";
+} from "../kernel/project-identity.ts";
 
 export { canonicalProjectIdentityBytes, repositoryIdentityFromOrigin };
 

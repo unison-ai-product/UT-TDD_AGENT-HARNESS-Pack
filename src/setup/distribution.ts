@@ -86,28 +86,7 @@ export interface PackSyncPlan {
 
 export const DEFAULT_PACK_REPO = "unison-ai-product/UT-TDD_AGENT-HARNESS-Pack";
 
-/** package/release-plan が共有する、release artifact の安全なファイル名変換。 */
-export function releaseArtifactStem(sourceTag: string): string {
-  return sourceTag.replace(/[^A-Za-z0-9._-]+/g, "-");
-}
-
-export function releaseArtifactFileNames(sourceTag: string): {
-  tarball: string;
-  checksum: string;
-  compiledEsm: string;
-  consumerRuntime: string;
-  consumerChecksum: string;
-} {
-  const stem = releaseArtifactStem(sourceTag);
-  const tarball = `${stem}.tar.gz`;
-  return {
-    tarball,
-    checksum: `${tarball}.sha256`,
-    compiledEsm: `${stem}.ut-tdd.mjs`,
-    consumerRuntime: `${stem}.consumer-runtime.json`,
-    consumerChecksum: `${stem}.consumer.sha256`,
-  };
-}
+export { releaseArtifactFileNames, releaseArtifactStem } from "../github/release-artifact-names.ts";
 
 const CLEAN_REQUIRED_PATHS = [
   "README.md",
@@ -115,6 +94,7 @@ const CLEAN_REQUIRED_PATHS = [
   "NOTICE",
   "package.json",
   ".node-version",
+  "docs/governance/oracle-test-trace-baseline.json",
   "src/cli.ts",
   "src/setup/index.ts",
   ...COMMON_FILES.filter((entry) => entry.template.startsWith("adapter/")).map(
@@ -179,6 +159,7 @@ const CLEAN_ALLOW_FILES = new Set([
   "docs/governance/repository-structure.md",
   "docs/governance/ut-tdd-agent-harness-concept_v3.1.md",
   "docs/governance/ut-tdd-agent-harness-requirements_v1.2.md",
+  "docs/governance/oracle-test-trace-baseline.json",
   "package.json",
   "tsconfig.json",
   "vitest.config.ts",

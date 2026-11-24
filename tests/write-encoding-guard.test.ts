@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import {
   runWriteEncodingGuard,
 } from "../src/lint/write-encoding-guard.ts";
 import { extractEditTargets } from "../src/shared/edit-targets.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const repoRoot = process.cwd();
 const cliPath = join(repoRoot, "src", "cli.ts");
@@ -45,7 +46,7 @@ describe("write encoding guard (PLAN-L7-317)", () => {
       const log = readFileSync(join(cwd, ".ut-tdd", "logs", "encoding-violations.jsonl"), "utf8");
       expect(log).toContain("utf16le-bom");
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      removeTestTree(cwd);
     }
   });
 
@@ -66,7 +67,7 @@ describe("write encoding guard (PLAN-L7-317)", () => {
       expect(run.stderr).not.toContain("write-encoding-guard");
       expect(existsSync(join(cwd, ".ut-tdd", "logs", "encoding-violations.jsonl"))).toBe(false);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      removeTestTree(cwd);
     }
   });
 
@@ -92,7 +93,7 @@ describe("write encoding guard (PLAN-L7-317)", () => {
       expect(log).toContain('"tool_name":"Bash"');
       expect(log).toContain("utf8-bom");
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      removeTestTree(cwd);
     }
   });
 

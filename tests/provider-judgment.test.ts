@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,10 +22,11 @@ import {
   produceProviderJudgment,
 } from "../src/feedback/provider-judgment.ts";
 import { sha256HexOfBytes } from "../src/feedback/review-custody-canonical.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const roots: string[] = [];
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) removeTestTree(root);
 });
 
 const identity: ProviderJudgmentAttemptIdentity = {

@@ -32,7 +32,8 @@ export interface DriveModelPassageResult {
   ok: boolean;
 }
 
-const SECTION_RE = /^##\s+Section\s+2\.1\s+Drive-model Passage Certificate Required\s*$/m;
+const SECTION_RE =
+  /^##\s+(?:Section\s+2\.1\s+Drive-model Passage Certificate Required|§2\.1 各駆動モデルに通過証明書を必須とする)\s*$/m;
 const NEXT_SECTION_RE = /^##\s+/m;
 const EXPECTED_MODES = [
   "Discovery",
@@ -72,11 +73,11 @@ function tableRows(text: string): string[][] {
 }
 
 function hasForwardTarget(text: string): boolean {
-  return /forward|re-entry|route|target|routing/i.test(text);
+  return /forward|re-entry|route|target|routing|対象|経路|再入/i.test(text);
 }
 
 function hasResidualStatus(text: string): boolean {
-  return /residual status|status|gap|parked|po decision/i.test(text);
+  return /residual status|status|gap|parked|po decision|残余状態/i.test(text);
 }
 
 export function analyzeDriveModelPassage(docs: DriveModelPassageDoc[]): DriveModelPassageResult {
@@ -95,8 +96,12 @@ export function analyzeDriveModelPassage(docs: DriveModelPassageDoc[]): DriveMod
       continue;
     }
     const header = parsed[0].map((cell) => cell.toLowerCase());
-    const modeIndex = header.indexOf("drive model / entry mode");
-    const columnsIndex = header.indexOf("required certificate columns");
+    const modeIndex = header.findIndex(
+      (cell) => cell === "drive model / entry mode" || cell === "駆動モデル／入口モード",
+    );
+    const columnsIndex = header.findIndex(
+      (cell) => cell === "required certificate columns" || cell === "必須の通過証明書列",
+    );
     if (modeIndex < 0 || columnsIndex < 0) {
       violations.push({ file: doc.file, reason: "malformed_row" });
       continue;
@@ -131,11 +136,12 @@ export function analyzeDriveModelPassage(docs: DriveModelPassageDoc[]): DriveMod
 export function loadDriveModelPassageDocs(
   repoRoot: string = process.cwd(),
 ): DriveModelPassageDoc[] {
-  const target = join(repoRoot, "docs", "plans", "PLAN-L3-04-upstream-schedule-reconciliation.md");
+  const file = "docs/design/harness/L3-functional/upstream-schedule-reconciliation.md";
+  const target = join(repoRoot, ...file.split("/"));
   if (!existsSync(target)) return [];
   return [
     {
-      file: join("docs", "plans", "PLAN-L3-04-upstream-schedule-reconciliation.md"),
+      file,
       content: readFileSync(target, "utf8"),
     },
   ];

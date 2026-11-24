@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,11 +9,12 @@ import {
 } from "../src/feedback/review-attestation.ts";
 import type { ReviewReceipt, ReviewRequest } from "../src/feedback/review-dispatch.ts";
 import { reconcileReviewProjection } from "../src/feedback/review-projection-reconciliation.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const roots: string[] = [];
 afterEach(() =>
   roots.splice(0).forEach((root) => {
-    rmSync(root, { recursive: true, force: true });
+    removeTestTree(root);
   }),
 );
 

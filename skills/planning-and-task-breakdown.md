@@ -20,118 +20,36 @@ decision_points:
     choose: "split the step further until each step pairs with one design doc and one test-design doc"
     over: "keep the step coarse (e.g. \"implement everything\") and rely on review to catch gaps later"
     because: "a step too large to verify at L6/L7 granularity hides missing V-model pairing until doctor or review surfaces it downstream"
-  - when: "a step produces its own design doc / `generates` artifact"
-    choose: "create a child PLAN for that step"
-    over: "keep it as a schedule step inside the parent PLAN"
-    because: "a step with a standalone `generates` artifact needs its own frontmatter and lint checks; folding it into the parent hides that artifact from PLAN-level tracking"
+  - when: "a step has a distinct outcome and acceptance conditions"
+    choose: "create a formal GitHub sub-issue under the outcome Issue"
+    over: "leaving an independently verifiable outcome as an implicit schedule step"
+    because: "the child Issue makes ownership, prerequisites, and verification visible"
   - when: "authoring §工程表 steps around pair-freeze and trace-freeze"
     choose: "mark the pair-freeze and trace-freeze review steps `[直列]` (serial gates)"
     over: "mark all steps `[並列]` to maximize apparent throughput"
     because: "a schedule with no serial gate around pair-freeze/trace-freeze is a decomposition error — gates must complete in order to be gates at all"
-  - when: "a PLAN is being advanced to `status: done`"
-    choose: "confirm `review_evidence` is populated before the status change"
-    over: "mark `status: done` first and backfill review_evidence afterward"
-    because: "marking done without review_evidence is a false-green that a later `ut-tdd doctor` run will surface"
-  - when: "a new requirement fits an existing PLAN's scope by more than half its FRs"
-    choose: "extend the existing PLAN"
-    over: "author a new overlapping PLAN"
-    because: "one PLAN per FR is the foundational discipline; lumping or duplicating FRs across PLANs is a `ut-tdd plan lint` violation"
-  - when: "a `kind: add-feature` PLAN is authored"
-    choose: "declare the Reverse back-fill pairing in `dependencies`"
-    over: "treat add-feature as a standalone forward-only PLAN"
-    because: "add-feature kind requires a Reverse back-fill pairing by rule; omitting it leaves the retroactive trace unresolved"
+  - when: "an Issue is ready to close"
+    choose: "check the acceptance conditions, required child Issues, and evidence on the PR"
+    over: "closing the Issue once a patch exists"
+    because: "the completion conditions require evidence of the intended outcome"
 ---
 
 # planning and task breakdown
 
-How to decompose a feature or requirement into a PLAN hierarchy and
-schedule steps that can be delegated to agents or executed deterministically
-(FR-L1-01 PLAN management, FR-L1-13 Forward workflow).
+Break a feature or requirement into work that can be reviewed and verified against a design/test-design pair. Record active work in a GitHub Issue and link the exact governing design revision.
 
-## When to load this skill
+## Decompose the work
 
-- Authoring a new PLAN file in `docs/plans/`.
-- Splitting a large requirement into child PLANs or schedule steps.
-- A `ut-tdd doctor` failure reports an orphaned PLAN or a missing
-  `generates` link.
-- A §工程表 schedule section needs parallel/serial annotation.
+- Search existing Issues for the same outcome. Extend the existing Issue if the scope matches.
+- Use a formal GitHub sub-issue for work that has a distinct deliverable and acceptance conditions. In-repo hierarchy rules live in `docs/governance/github-issue-hierarchy.md`.
+- Keep the contract in `docs/design/` or `docs/test-design/`. The Issue links prerequisites, deliverables, the verification pair, and completion conditions.
+- Split work until each implementation step can be verified against a known design section and its test design. For Add-feature work, record the applicable Reverse pairing in the Issue. For a PoC, identify S2 and S3 explicitly.
 
-## Decomposition target: unit-test-design granularity
+## Schedule and verify
 
-The correct stopping point for breakdown is one design document paired
-with one test-design document — a V-model pair at L6/L7. A step that
-cannot be verified at unit-test-design granularity is too large; split it.
+1. [並列] Establish the L6 function design and the matching L7 test design.
+2. [直列] Review and freeze the pair before implementing. Cite the design revision in the Issue.
+3. [直列] Implement and verify the scoped change. Link the tests and CI to the PR.
+4. [直列] Review the exact head and accept the work once its completion conditions are met.
 
-Child PLANs are created when a step produces its own design doc (its own
-`generates` artifact). Steps that do not produce a standalone doc remain
-schedule steps within the parent PLAN.
-
-## PLAN frontmatter checklist
-
-Body of a design-kind PLAN (`kind: design` / `add-design`): where the
-repository adopts the thin-body rule (in the UT-TDD harness development
-repo: root `CLAUDE.md` §PLAN Filing Rules, issue #648), a newly filed
-design-kind PLAN keeps the contract body in `docs/design/` (or
-`docs/test-design/`) and carries only four body items — upstream design
-revision digest (per document), deliverables, verification pair, and
-completion conditions. Do not copy design contract text into the PLAN. The
-frontmatter checklist below still applies unchanged.
-
-Before running `ut-tdd plan lint`, confirm every field:
-
-- [ ] `plan_id` is unique and matches the filename (`PLAN-<kind>-<NN>`).
-- [ ] `kind` is one of: `design`, `impl`, `add-design`, `add-impl`, `poc`,
-  `reverse`, `recovery`, `refactor`, `retrofit`, `research`, `troubleshoot`.
-- [ ] `layer` is the V-model layer the PLAN primarily targets.
-- [ ] `drive` declares the drive model (Forward, Add-feature, Reverse, etc.).
-- [ ] `status` is one of: `draft`, `active`, `pair-freeze`, `trace-freeze`,
-  `done`, `cancelled`.
-- [ ] `generates` lists every design/test-design doc this PLAN produces.
-- [ ] `dependencies` lists every upstream PLAN or doc this PLAN requires;
-  each referenced ID must resolve or `ut-tdd plan lint` will flag it.
-- [ ] `review_evidence` is populated before advancing to `trace-freeze`.
-
-## Authoring §工程表 (schedule steps)
-
-Schedule steps are numbered and annotated with execution mode:
-
-```
-## §工程表
-1. [並列] Author L5 detailed design doc — PLAN-L5-NN
-2. [並列] Author L6 unit-test design doc — PLAN-L6-NN
-3. [直列] pair-freeze review: ut-tdd review --uncommitted
-4. [直列] implement src/ — PLAN-L7-NN
-5. [直列] trace-freeze: npm run test && ut-tdd doctor
-6. [直列] accept: ut-tdd review --uncommitted (no blocking findings)
-```
-
-`[並列]` steps may run concurrently across agents. `[直列]` steps must
-complete in order; each is a gate. A schedule with no serial gate steps
-around pair-freeze and trace-freeze is a decomposition error.
-
-## WBS rules
-
-- One PLAN per FR (requirement) that needs a design doc. Lumping multiple
-  FRs into one PLAN is a lint violation.
-- Add-feature kind requires a Reverse back-fill pairing declared in the
-  `dependencies` field.
-- A `poc` PLAN follows Discovery phases (S0-S4); its §工程表 maps to
-  S2(poc) and S3(verify) steps explicitly.
-
-## Validation commands
-
-```
-ut-tdd plan lint            # schema + schedule + dependency existence
-ut-tdd doctor               # all harness governance gates
-ut-tdd graph export         # visualise the relation graph (mermaid|dot)
-ut-tdd status               # surface active/stalled PLANs
-```
-
-## Anti-patterns
-
-- Steps labelled "implement everything" with no layer annotation — too
-  coarse; one step per V-model layer transition.
-- `generates` left empty on a `design` or `add-design` kind — the doc
-  produced by this PLAN is then invisible to `ut-tdd doctor`.
-- Marking `status: done` without a populated `review_evidence` field —
-  false-green that later doctor runs will surface.
+Steps with separate files and prerequisites can run concurrently. State the reason for serial dependencies. Before closing an Issue, verify its acceptance conditions and the completion of required child Issues.

@@ -33,7 +33,7 @@ import {
   waitForClaudeMemory,
 } from "../src/runtime/claude-memory-wake.ts";
 import { resolveProjectMemoryRoot } from "../src/runtime/project-memory-root.ts";
-import { ensureTrackedProjectIdentity } from "./support/project-identity-fixture.ts";
+import { seedFixtureTemplate } from "./support/claude-memory-wake-fixture.ts";
 
 const wakeReadCounters = vi.hoisted(() => ({
   active: false,
@@ -86,11 +86,8 @@ function inboxFileStem(entryId: string): string {
   return `${safeId.slice(0, 147)}_${createHash("sha256").update(entryId).digest("hex").slice(0, 12)}`;
 }
 
-function fixture(): string {
-  const root = mkdtempSync(join(tmpdir(), "ut-tdd-claude-wake-"));
-  ensureTrackedProjectIdentity(root, "fixture/claude-memory-wake");
-  return root;
-}
+const wakeFixture = seedFixtureTemplate("fixture/claude-memory-wake", "ut-tdd-claude-wake");
+const fixture = (): string => wakeFixture.copy();
 
 function wakeRuntimeRoot(root: string): string {
   const project = resolveProjectMemoryRoot(root);
@@ -362,7 +359,7 @@ describe("Claude HARNESS memory async wake", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 60000); // 27s measured, #1063
 
   it("U-PMEMROOT-007 review composition: v4 review claims through the same guard", async () => {
     const root = fixture();

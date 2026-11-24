@@ -7,10 +7,6 @@ import {
 } from "../lint/cycle-p4-verification.ts";
 import { analyzeDbCurrency, dbCurrencyMessages } from "../lint/db-currency.ts";
 import {
-  analyzeDriveDbRegistration,
-  driveDbRegistrationMessages,
-} from "../lint/drive-db-registration.ts";
-import {
   analyzeDriveModelPassage,
   driveModelPassageMessages,
   loadDriveModelPassageDocs,
@@ -25,6 +21,8 @@ import {
   frRoadmapCoverageMessages,
   loadFrRoadmapCoverageDocs,
 } from "../lint/fr-roadmap-coverage.ts";
+import { lintG1Trace } from "../lint/g1-trace.ts";
+import { lintG3Trace } from "../lint/g3-trace.ts";
 import { analyzeGateRunCoverage, gateRunCoverageMessages } from "../lint/gate-run-coverage.ts";
 import {
   analyzeL6Completion,
@@ -52,7 +50,6 @@ import {
   loadPlaceholderDepsDocs,
   placeholderDepsMessages,
 } from "../lint/placeholder-deps.ts";
-import { analyzePlanDod, loadPlanDodDocs, planDodMessages } from "../lint/plan-dod.ts";
 import {
   analyzeRuleAutomationClosure,
   loadRuleAutomationClosureDocs,
@@ -83,25 +80,7 @@ import {
   loadTelemetryClosureDocs,
   telemetryClosureMessages,
 } from "../lint/telemetry-closure.ts";
-import { lintPlanWithGate } from "../plan/lint.ts";
-import {
-  loadDriveDbRegistrationStats,
-  loadOrBuildDriveDbRegistrationStats,
-} from "../state-db/drive-registration.ts";
-import { defaultHarnessDbPath, type HarnessDb, openHarnessDb } from "../state-db/index.ts";
-import { rebuildHarnessDb } from "../state-db/projection-writer.ts";
-
-export function checkPlanDod(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return { messages: ["plan-dod - violation: repo root could not be read"], ok: false };
-  }
-  try {
-    const r = analyzePlanDod(loadPlanDodDocs(repoRoot));
-    return { messages: planDodMessages(r), ok: r.checked > 0 && r.ok };
-  } catch {
-    return { messages: ["plan-dod - violation: L7 PLAN DoD could not be read"], ok: false };
-  }
-}
+import { loadGateRunCoverageStats } from "./gate-run-coverage-reconciliation.ts";
 
 export function checkPlaceholderDeps(repoRoot: string): { messages: string[]; ok: boolean } {
   if (!existsSync(repoRoot)) {
@@ -118,7 +97,7 @@ export function checkPlaceholderDeps(repoRoot: string): { messages: string[]; ok
   }
 }
 
-export function checkPlanTraceGate(
+export function checkTraceGate(
   repoRoot: string,
   gate: "G1-trace" | "G3-trace",
 ): { messages: string[]; ok: boolean } {
@@ -129,7 +108,7 @@ export function checkPlanTraceGate(
     };
   }
   try {
-    return lintPlanWithGate(undefined, repoRoot, gate);
+    return gate === "G1-trace" ? lintG1Trace(repoRoot) : lintG3Trace(repoRoot);
   } catch {
     return { messages: [`${gate.toLowerCase()} - violation: trace gate could not run`], ok: false };
   }
@@ -171,24 +150,6 @@ export function checkDriveModelPassage(repoRoot: string): { messages: string[]; 
   }
 }
 
-export function checkDriveDbRegistration(repoRoot: string): { messages: string[]; ok: boolean } {
-  if (!existsSync(repoRoot)) {
-    return {
-      messages: ["drive-db-registration - violation: repo root could not be read"],
-      ok: false,
-    };
-  }
-  try {
-    const r = analyzeDriveDbRegistration(loadOrBuildDriveDbRegistrationStats(repoRoot));
-    return { messages: driveDbRegistrationMessages(r), ok: r.ok };
-  } catch {
-    return {
-      messages: ["drive-db-registration - violation: harness.db registration could not be read"],
-      ok: false,
-    };
-  }
-}
-
 export function checkDbCurrency(repoRoot: string): { messages: string[]; ok: boolean } {
   if (!existsSync(repoRoot)) {
     return {
@@ -197,7 +158,7 @@ export function checkDbCurrency(repoRoot: string): { messages: string[]; ok: boo
     };
   }
   try {
-    const r = analyzeDbCurrency(loadDriveDbRegistrationStats(repoRoot));
+    const r = analyzeDbCurrency(existsSync(join(repoRoot, ".ut-tdd", "harness.db")) ? {} : null);
     return { messages: dbCurrencyMessages(r), ok: r.ok };
   } catch {
     return {
@@ -215,7 +176,7 @@ export function checkGateRunCoverage(repoRoot: string): { messages: string[]; ok
     };
   }
   try {
-    const r = analyzeGateRunCoverage(loadOrBuildGateRunCoverageStats(repoRoot));
+    const r = analyzeGateRunCoverage(loadGateRunCoverageStats(repoRoot));
     return { messages: gateRunCoverageMessages(r), ok: r.ok };
   } catch {
     return {
@@ -223,61 +184,6 @@ export function checkGateRunCoverage(repoRoot: string): { messages: string[]; ok
       ok: false,
     };
   }
-}
-
-function loadOrBuildGateRunCoverageStats(repoRoot: string) {
-  const dbPath = defaultHarnessDbPath(repoRoot);
-  const needsRebuild = !existsSync(dbPath);
-  const db = openHarnessDb(dbPath, { repoRoot });
-  try {
-    if (needsRebuild) rebuildHarnessDb({ repoRoot, db, skipTokenTelemetry: true });
-    const gateRuns = count(db, "SELECT COUNT(*) AS value FROM gate_runs");
-    const workflowRuns = count(db, "SELECT COUNT(*) AS value FROM workflow_runs");
-    const workflowPlansWithoutGateRun = count(
-      db,
-      `SELECT COUNT(*) AS value
-       FROM (
-         SELECT DISTINCT w.plan_id
-         FROM workflow_runs w
-         WHERE COALESCE(w.plan_id, '') <> ''
-           AND NOT EXISTS (
-             SELECT 1 FROM gate_runs g WHERE g.plan_id = w.plan_id
-           )
-       )`,
-    );
-    const orphanGateRuns = count(
-      db,
-      `SELECT COUNT(*) AS value
-       FROM gate_runs g
-       WHERE COALESCE(g.plan_id, '') <> ''
-         AND NOT EXISTS (
-           SELECT 1 FROM plan_registry p WHERE p.plan_id = g.plan_id
-         )`,
-    );
-    const blankPlanGateRuns = count(
-      db,
-      "SELECT COUNT(*) AS value FROM gate_runs WHERE COALESCE(plan_id, '') = ''",
-    );
-    const invalidEvidenceFindings = count(
-      db,
-      "SELECT COUNT(*) AS value FROM findings WHERE kind = 'invalid-gate-run-evidence' AND status = 'open'",
-    );
-    return {
-      gateRuns,
-      workflowRuns,
-      workflowPlansWithoutGateRun,
-      orphanGateRuns,
-      blankPlanGateRuns,
-      invalidEvidenceFindings,
-    };
-  } finally {
-    db.close();
-  }
-}
-
-function count(db: HarnessDb, sql: string): number {
-  const row = db.prepare(sql).get() as { value?: number } | undefined;
-  return Number(row?.value ?? 0);
 }
 
 export function checkFrRoadmapCoverage(repoRoot: string): { messages: string[]; ok: boolean } {
@@ -457,7 +363,7 @@ export function checkSubDocSectionStructure(repoRoot: string): {
     return { messages: subDocSectionStructureMessages(r), ok: r.ok };
   } catch {
     return {
-      messages: ["sub-doc-section-structure - violation: docs/plans could not be read"],
+      messages: ["sub-doc-section-structure - violation: design documents could not be read"],
       ok: false,
     };
   }

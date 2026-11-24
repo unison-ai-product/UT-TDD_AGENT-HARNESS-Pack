@@ -11,7 +11,6 @@
  * ただし **doctor の出力は実行環境に依存する**。実測 (2026-07-29):
  * - `memory-sync` は `git ls-tree origin/main` に依存する。
  * - `merged-plan-status` は default branch の ref/SHA を解決できないと throw する (issue #186)。
- * - CI step は `--strict-green-command-digest` 付き、vitest 側は無しで検査集合が異なる。
  *
  * したがって「同一 HEAD かつ full scope」だけでは消費可否を判定できない (advisor
  * `gpt-5.6-sol` の敵対検証 2026-07-29 でこの弱い条件は refuted)。envelope は
@@ -45,7 +44,6 @@ export type DoctorResultEnvelopeScope = DoctorScope | "setup-smoke";
 
 /** producer が実際に適用した option 集合。既定値も明示的に持つ (省略を「偽」と推測しない)。 */
 export interface DoctorRunOptions {
-  strict_green_command_digest: boolean;
   strict_telemetry_provenance: boolean;
   timing: boolean;
 }
@@ -199,12 +197,7 @@ export function parseDoctorResultEnvelope(raw: string): DoctorResultEnvelope | n
   if (typeof c.producer_root !== "string" || c.producer_root.trim() === "") return null;
   if (!isStringRecord(c.ref_map)) return null;
   if (
-    !hasExactKeys(options, [
-      "strict_green_command_digest",
-      "strict_telemetry_provenance",
-      "timing",
-    ]) ||
-    typeof options.strict_green_command_digest !== "boolean" ||
+    !hasExactKeys(options, ["strict_telemetry_provenance", "timing"]) ||
     typeof options.strict_telemetry_provenance !== "boolean"
   ) {
     return null;
@@ -238,7 +231,6 @@ export function parseDoctorResultEnvelope(raw: string): DoctorResultEnvelope | n
     producer_root: c.producer_root,
     ref_map: c.ref_map,
     options: {
-      strict_green_command_digest: options.strict_green_command_digest,
       strict_telemetry_provenance: options.strict_telemetry_provenance,
       timing: options.timing,
     },
@@ -306,8 +298,6 @@ export function doctorResultEnvelopeUsability(input: {
     return { usable: false, reason: "ref-map-mismatch" };
   }
   if (
-    envelope.options.strict_green_command_digest !==
-      input.expectedOptions.strict_green_command_digest ||
     envelope.options.strict_telemetry_provenance !==
       input.expectedOptions.strict_telemetry_provenance ||
     envelope.options.timing !== input.expectedOptions.timing

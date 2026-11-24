@@ -6,6 +6,7 @@ const REBUILD_PERSISTENT_TABLES = new Set([
   "github_object_bindings",
   "github_project_item_projection",
   "github_projection_outbox",
+  "review_evidence_registry",
 ]);
 
 /** 再構築可能な投影だけをFK逆順で消去し、永続負債ledgerは保持する。 */

@@ -2,8 +2,6 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   checkHandoverBypass,
-  checkHandoverCompletionWording,
-  checkHandoverDiscipline,
   type HandoverDeps,
   type HandoverPointer,
   handoverStale,
@@ -18,6 +16,7 @@ import {
 } from "../runtime/agent-slots.ts";
 import type { WorktreeTopologyInput } from "../runtime/worktree-topology.ts";
 import { collectWorktreeTopology } from "../runtime/worktree-topology-collector.ts";
+import type { PathClaudeProbe } from "./claude-path-probe.ts";
 
 export type WorktreeTopologyProvider = WorktreeTopologyInput | (() => WorktreeTopologyInput);
 
@@ -29,6 +28,8 @@ export interface DoctorDeps {
   listDir: (dir: string) => string[];
   /** Optional PF3 input; node deps populate it, tests may provide facts directly. */
   worktreeTopology?: WorktreeTopologyProvider;
+  /** Optional Claude Code probe; tests can avoid invoking a host executable. */
+  probePathClaude?: () => PathClaudeProbe;
 }
 
 export function handoverDeps(deps: DoctorDeps): HandoverDeps {
@@ -45,11 +46,25 @@ export function handoverDeps(deps: DoctorDeps): HandoverDeps {
 
 export function checkHandoverDisciplineMessages(deps: DoctorDeps): string[] {
   const hd = handoverDeps(deps);
-  return [
-    ...checkHandoverDiscipline(hd),
-    ...checkHandoverBypass(hd),
-    ...checkHandoverCompletionWording(hd),
-  ];
+  return checkHandoverBypass(hd);
+}
+
+/** `.ut-tdd/handover/` 直下で書き捨てを数えない許可リスト (#1062 L6 §5)。 */
+const HANDOVER_ALLOWLIST = new Set(["CURRENT.json", ".gitkeep", "provider", "archive"]);
+
+/**
+ * handover 直下の書き捨て (許可リスト外のエントリ) の件数を surface する (#1062 段階6、advisory)。
+ * 件数は message に出すだけで ok は常に true (doctor の exit に影響しない)。
+ */
+export function checkHandoverProse(deps: DoctorDeps): { messages: string[]; ok: boolean } {
+  const entries = deps.listDir(join(deps.repoRoot, ".ut-tdd", "handover"));
+  const count = entries.filter((name) => !HANDOVER_ALLOWLIST.has(name)).length;
+  return {
+    messages: [
+      `handover-prose — ${count} entries outside the allowlist (CURRENT.json / .gitkeep / provider / archive), advisory`,
+    ],
+    ok: true,
+  };
 }
 
 /**

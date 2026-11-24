@@ -7,10 +7,6 @@ import {
   REPOSITORY_READ_CONTRACTS,
 } from "../src/doctor/test-repository-isolation.ts";
 import { analyzeOracleTestTrace, loadOracleTestTraceInput } from "../src/lint/oracle-test-trace.ts";
-import {
-  analyzePlanArtifactExistence,
-  loadPlanArtifactExistenceInput,
-} from "../src/lint/plan-artifact-existence.ts";
 
 // PLAN-L6-104 §5 PR-1 / L7-memory-clean-cut-replacement-test-design §4.2。
 // 削除対象の名前は実行時に組み立てる (本 file 自身が U-MEMCUT-016 の「出現 0」に数えられないため)。
@@ -137,26 +133,6 @@ describe("memory clean-cut PR-1: migration removal (U-MEMCUT-012..016)", () => {
       ],
     });
     expect(kept.orphans).toContain(`${WITHDRAWN_PREFIXES[0]}001`);
-  });
-
-  it("U-MEMCUT-015: PLAN-L7-512 generates has no phantom after the deletion; kept entries would be phantom", () => {
-    const input = loadPlanArtifactExistenceInput(root);
-    const row = input.plans.find((p) => p.planId === "PLAN-L7-512-project-scoped-memory-root");
-    expect(row?.missingArtifacts ?? []).toEqual([]);
-    expect(analyzePlanArtifactExistence(input).violations.map((v) => v.planId)).not.toContain(
-      "PLAN-L7-512-project-scoped-memory-root",
-    );
-    const kept = analyzePlanArtifactExistence({
-      plans: [
-        {
-          planId: "PLAN-L7-512-project-scoped-memory-root",
-          status: "confirmed",
-          missingArtifacts: [MODULE_PATH, TEST_PATH],
-          hollowArtifacts: [],
-        },
-      ],
-    });
-    expect(kept.violations[0]?.missing).toEqual([MODULE_PATH, TEST_PATH]);
   });
 
   it("U-MEMCUT-016: inherited modules and tests remain unchanged, and the name occurs nowhere in src/tests/scripts", () => {

@@ -1,26 +1,66 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  catalogAutomationAssets,
-  checkRosterConsistency,
-  listRosterRegistry,
-  scanSkillCatalog,
-} from "../src/assets/catalog.ts";
-import { openHarnessDb } from "../src/state-db/index.ts";
+import { catalogAutomationAssets, scanSkillCatalog } from "../src/assets/catalog.ts";
+import { defaultHarnessDbPath, openHarnessDb } from "../src/state-db/index.ts";
 import { migrate, rowCounts } from "../src/state-db/migration.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 const legacyRuntimeName = ["he", "lix"].join("");
 
 describe("IT-ASSET-DB-01: automation asset catalog", () => {
+  it("exposes asset catalog as a JSON command surface", () => {
+    const repo = mkdtempSync(join(tmpdir(), "ut-assets-cli-"));
+    const cliPath = join(process.cwd(), "src", "cli.ts");
+    try {
+      mkdirSync(join(repo, "skills"), { recursive: true });
+      writeFileSync(
+        join(repo, "skills", "testing.md"),
+        [
+          "---",
+          "name: testing",
+          "skill_type: testing",
+          "applies_to:",
+          "  layers: [L7]",
+          "  drive_models: [Forward]",
+          "description: test skill",
+          "---",
+          "# Testing",
+        ].join("\n"),
+      );
+      mkdirSync(join(repo, ".ut-tdd"), { recursive: true });
+      const db = openHarnessDb(defaultHarnessDbPath(repo), { repoRoot: repo });
+      try {
+        migrate(db);
+      } finally {
+        db.close();
+      }
+
+      const run = spawnSync(process.execPath, [cliPath, "asset", "catalog", "--json"], {
+        cwd: repo,
+        encoding: "utf8",
+        windowsHide: true,
+      });
+      expect(run.error?.message ?? "", "spawn error").toBe("");
+      expect(run.status, `stderr:\n${run.stderr}\nstdout:\n${run.stdout}`).toBe(0);
+      expect(JSON.parse(run.stdout)).toEqual({
+        ok: true,
+        assets: ["skill:testing"],
+        findings: [],
+      });
+    } finally {
+      removeTestTree(repo);
+    }
+  }, 20_000);
+
   it("catalogs metadata, updates search_index, and never stores prompt bodies", () => {
     const repo = mkdtempSync(join(tmpdir(), "ut-assets-"));
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
       mkdirSync(join(repo, "docs", "skills"), { recursive: true });
-      mkdirSync(join(repo, ".claude", "agents"), { recursive: true });
       writeFileSync(
         join(repo, "docs", "skills", "testing.md"),
         [
@@ -48,16 +88,11 @@ describe("IT-ASSET-DB-01: automation asset catalog", () => {
           "description: YAML review skill",
         ].join("\n"),
       );
-      writeFileSync(
-        join(repo, ".claude", "agents", "reviewer.md"),
-        ["---", "name: reviewer", "role: qa", "---", "# reviewer"].join("\n"),
-      );
-
       const result = catalogAutomationAssets({ repoRoot: repo, db });
 
       expect(result.ok).toBe(true);
-      expect(rowCounts(db).automation_assets).toBe(3);
-      expect(rowCounts(db).search_index).toBe(3);
+      expect(rowCounts(db).automation_assets).toBe(2);
+      expect(rowCounts(db).search_index).toBe(2);
       const stored = db
         .prepare("SELECT capability FROM automation_assets WHERE asset_id = ?")
         .get("skill:testing");
@@ -80,7 +115,7 @@ describe("IT-ASSET-DB-01: automation asset catalog", () => {
       });
     } finally {
       db.close();
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 
@@ -102,7 +137,7 @@ describe("IT-ASSET-DB-01: automation asset catalog", () => {
       expect(rowCounts(db).findings).toBeGreaterThan(0);
     } finally {
       db.close();
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 });
@@ -154,7 +189,7 @@ describe("IT-ASSET-04: in-memory skill catalog scan", () => {
       ]);
       expect(existsSync(join(repo, ".ut-tdd"))).toBe(false);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 
@@ -188,7 +223,7 @@ describe("IT-ASSET-04: in-memory skill catalog scan", () => {
         }),
       ]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 
@@ -226,14 +261,15 @@ describe("IT-ASSET-04: in-memory skill catalog scan", () => {
       );
       expect(existsSync(join(repo, ".ut-tdd"))).toBe(false);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      removeTestTree(repo);
     }
   });
 
   it("real repo has a non-empty skill markdown catalog and no optional-root blocker", () => {
-    const skillRoot = existsSync(join(process.cwd(), "skills")) ? "skills" : "docs/skills";
+    const repoRoot = process.cwd();
+    const skillRoot = existsSync(join(repoRoot, "skills")) ? "skills" : "docs/skills";
     const result = scanSkillCatalog({
-      repoRoot: process.cwd(),
+      repoRoot,
       optionalRoots: [`${skillRoot}/optional`],
     });
 
@@ -246,130 +282,5 @@ describe("IT-ASSET-04: in-memory skill catalog scan", () => {
       subject_id: `${skillRoot}/optional`,
       evidence_path: `${skillRoot}/optional`,
     });
-  });
-});
-
-describe("IT-ASSET-01/02: roster registry and guard consistency", () => {
-  it("scans agent markdown into deterministic roster rows with filename-stem IDs", () => {
-    const repo = mkdtempSync(join(tmpdir(), "ut-roster-"));
-    try {
-      mkdirSync(join(repo, ".claude", "agents"), { recursive: true });
-      writeFileSync(
-        join(repo, ".claude", "agents", "pmo-sonnet.md"),
-        [
-          "---",
-          "name: pmo-sonnet",
-          "description: reviewer",
-          "model: claude-sonnet-4-6",
-          "---",
-          "# pmo-sonnet",
-        ].join("\n"),
-      );
-      writeFileSync(
-        join(repo, ".claude", "agents", "pmo-haiku.md"),
-        [
-          "---",
-          "name: pmo-haiku",
-          "description: scout",
-          "model: claude-haiku-4-5",
-          "---",
-          "# pmo-haiku",
-        ].join("\n"),
-      );
-
-      const result = listRosterRegistry({
-        repoRoot: repo,
-        allowlist: ["pmo-haiku", "pmo-sonnet"],
-      });
-
-      expect(result.ok).toBe(true);
-      expect(result.entries.map((entry) => entry.id)).toEqual(["pmo-haiku", "pmo-sonnet"]);
-      expect(result.entries.map((entry) => entry.model_family)).toEqual(["haiku", "sonnet"]);
-      expect(result.entries.every((entry) => entry.allowlisted)).toBe(true);
-    } finally {
-      rmSync(repo, { recursive: true, force: true });
-    }
-  });
-
-  it("fails roster check closed on missing allowlisted agents and name mismatches", () => {
-    const repo = mkdtempSync(join(tmpdir(), "ut-roster-"));
-    try {
-      mkdirSync(join(repo, ".claude", "agents"), { recursive: true });
-      writeFileSync(
-        join(repo, ".claude", "agents", "pmo-sonnet.md"),
-        [
-          "---",
-          "name: pmo-sonnet-renamed",
-          "description: reviewer",
-          "model: claude-sonnet-4-6",
-          "---",
-          "# pmo-sonnet",
-        ].join("\n"),
-      );
-      writeFileSync(
-        join(repo, ".claude", "agents", "be-logic.md"),
-        [
-          "---",
-          "name: be-logic",
-          "description: backend",
-          "model: claude-sonnet-4-6",
-          "---",
-          "# be-logic",
-        ].join("\n"),
-      );
-
-      const result = checkRosterConsistency({
-        repoRoot: repo,
-        allowlist: ["pmo-haiku", "pmo-sonnet"],
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.allowlistedPresent).toBe(1);
-      expect(result.missingFromRoster).toEqual(["pmo-haiku"]);
-      expect(result.nameMismatches).toEqual([
-        {
-          id: "pmo-sonnet",
-          name: "pmo-sonnet-renamed",
-          path: ".claude/agents/pmo-sonnet.md",
-        },
-      ]);
-      expect(result.nonAllowlisted).toEqual(["be-logic"]);
-    } finally {
-      rmSync(repo, { recursive: true, force: true });
-    }
-  });
-
-  it("real repo roster check is consistent with the guard allowlist", () => {
-    const result = checkRosterConsistency({
-      repoRoot: process.cwd(),
-      allowlist: [
-        "pmo-sonnet",
-        "pmo-haiku",
-        "pmo-project-explorer",
-        "pmo-project-scout",
-        "pmo-tech-docs",
-        "pmo-tech-fork",
-        "pmo-tech-news",
-        "refactor-scout",
-        "be-api",
-        "be-logic",
-        "db-schema",
-        "devops-deploy",
-        "pdm-tech-innovation",
-        "pdm-marketing-innovation",
-        "pdm-innovation-manager",
-        "code-reviewer",
-        "blind-reviewer",
-        "security-audit",
-        "qa-test",
-        "ut-tdd-tl",
-      ],
-    });
-
-    expect(result.ok).toBe(true);
-    expect(result.missingFromRoster).toEqual([]);
-    expect(result.nameMismatches).toEqual([]);
-    expect(result.allowlistedPresent).toBe(20);
-    expect(result.nonAllowlisted).toEqual([]);
   });
 });

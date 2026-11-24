@@ -163,6 +163,7 @@ const EMBEDDED_SKILLS: readonly EmbeddedSkillAsset[] = bundled
         content: require("ut-tdd-skills/planning-and-task-breakdown.md") as string,
       },
       { path: "poc.md", content: require("ut-tdd-skills/poc.md") as string },
+      { path: "pr-preflight.md", content: require("ut-tdd-skills/pr-preflight.md") as string },
       {
         path: "product-profile-tailoring.md",
         content: require("ut-tdd-skills/product-profile-tailoring.md") as string,

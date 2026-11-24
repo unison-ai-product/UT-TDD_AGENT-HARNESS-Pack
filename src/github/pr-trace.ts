@@ -1,40 +1,26 @@
-// PLAN-L7-451 W4: typed PR trace contract (`<!-- ut-tdd:trace/v1 ... -->`)。
+// S4: typed PR trace contract (`<!-- ut-tdd:trace/v2 ... -->`)。
 //
 // PR body に人間可読要約と並置する機械可読 block の生成 (render) と検証 (validate)。
-// 項目語彙は PLAN-L6-85 の PR body 規定 (plan / route / subject HEAD / base / episode /
-// issue / receipt digest) を正とし、ここで拡張しない。block は手入力ではなく
+// 項目語彙は route / subject HEAD / base / issue / episode / receipt digest で、ここで拡張しない。
+// block は手入力ではなく
 // `ut-tdd github pr render` から生成する。validate は欠落・破損を fail-close する。
 
-export const PR_TRACE_MARKER = "ut-tdd:trace/v1";
+export const PR_TRACE_MARKER = "ut-tdd:trace/v2";
 
 export interface PrTraceFields {
-  plan_id: string;
   route_mode: string;
   subject_head: string;
   base_sha: string;
   issue_number: string;
-  plan_revision?: string;
   episode_id?: string;
   admission_receipt_digest?: string;
   review_receipt_digest?: string;
 }
 
-const REQUIRED_KEYS = [
-  "plan_id",
-  "route_mode",
-  "subject_head",
-  "base_sha",
-  "issue_number",
-] as const;
-const OPTIONAL_KEYS = [
-  "plan_revision",
-  "episode_id",
-  "admission_receipt_digest",
-  "review_receipt_digest",
-] as const;
+const REQUIRED_KEYS = ["route_mode", "subject_head", "base_sha", "issue_number"] as const;
+const OPTIONAL_KEYS = ["episode_id", "admission_receipt_digest", "review_receipt_digest"] as const;
 const KNOWN_KEYS = new Set<string>([...REQUIRED_KEYS, ...OPTIONAL_KEYS]);
 
-const PLAN_ID_PATTERN = /^PLAN-[A-Z0-9]+-[0-9A-Za-z][0-9A-Za-z-]*$/;
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/;
 
 export interface PrTraceFinding {
@@ -70,12 +56,6 @@ function validateFields(fields: Partial<PrTraceFields>): PrTraceFinding[] {
       findings.push({ code: `missing-${key.replace(/_/g, "-")}`, message: `${key} が無い` });
     }
   }
-  if (fields.plan_id && !PLAN_ID_PATTERN.test(fields.plan_id)) {
-    findings.push({
-      code: "invalid-plan-id",
-      message: `plan_id が PLAN-* 形式でない: ${fields.plan_id}`,
-    });
-  }
   for (const key of ["subject_head", "base_sha"] as const) {
     const value = fields[key];
     if (value && !SHA_PATTERN.test(value)) {
@@ -85,7 +65,11 @@ function validateFields(fields: Partial<PrTraceFields>): PrTraceFinding[] {
       });
     }
   }
-  if (fields.issue_number && !/^[0-9]+$/.test(fields.issue_number)) {
+  if (
+    fields.issue_number &&
+    (!/^[1-9][0-9]*$/.test(fields.issue_number) ||
+      !Number.isSafeInteger(Number(fields.issue_number)))
+  ) {
     findings.push({
       code: "invalid-issue-number",
       message: `issue_number が数値でない: ${fields.issue_number}`,
@@ -132,7 +116,7 @@ export function validatePrTraceBody(body: string): PrTraceValidation {
     if (!KNOWN_KEYS.has(key)) {
       findings.push({
         code: "trace-key-unknown",
-        message: `PLAN-L6-85 語彙に無いキー: ${key} (契約拡張は PLAN/ADR 経由)`,
+        message: `trace/v2 の語彙に無いキー: ${key}`,
       });
       continue;
     }

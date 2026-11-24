@@ -9,7 +9,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "private": true,
-  "packageManager": "npm@11.6.2+sha512-7iKzNfy8lWYs3zq4oFPa8EXZz5xt9gQNKJZau3B1ErLBb6bF7sBJ00x09485DOvRT2l5Gerbl3VlZNT57MxJVA==",
+  "packageManager": "npm@11.19.1+sha512-ztsxKxt/kkIaAs+2i0GU6I+DRmUdrNasxTZKJe9TCdSjKxlhah/4r/hl5ygMD6XAg1qZ9c2TNomR4qgOydp10g==",
   "utTdd": {
     "artifactProfile": "pack",
     "nodeToolchain": {
@@ -22,40 +22,42 @@
     "ut-tdd": "./src/cli.ts"
   },
   "engines": {
-    "node": "24.13.0",
-    "npm": "11.6.2"
+    "node": ">=24.22.3 <25",
+    "npm": ">=11.19.1 <12"
   },
   "scripts": {
     "dev": "node src/cli.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src tests",
     "format": "biome check --write src tests",
+    "lint:dup": "jscpd",
     "test": "npm run test:pack",
     "test:vitest-snapshot": "node scripts/run-vitest-snapshot.ts",
     "test:pack": "node scripts/run-vitest-snapshot.ts tests/setup.test.ts tests/distribution-acceptance.test.ts tests/skill-recommend.test.ts tests/skill-scaffold.test.ts tests/dependency-drift.test.ts tests/readability.test.ts tests/toolchain-pin.test.ts --reporter=dot",
-    "test:doc-lane": "node scripts/run-vitest-snapshot.ts tests/readability.test.ts tests/rule-drift.test.ts tests/plan-lint.test.ts --reporter=dot",
-    "test:fast": "node scripts/run-vitest-snapshot.ts --exclude tests/cli-surface.test.ts --exclude tests/db-projection-ingestion.test.ts --exclude tests/distribution-acceptance.test.ts --exclude tests/doctor.test.ts --exclude tests/drive-db-registration.test.ts --exclude tests/projection-writer.test.ts --exclude tests/review-green-command-projection.test.ts --exclude tests/runtime-hook-entrypoints.test.ts",
-    "test:db": "node scripts/run-vitest-snapshot.ts tests/db-projection-ingestion.test.ts tests/drive-db-registration.test.ts tests/projection-writer.test.ts tests/review-green-command-projection.test.ts",
+    "test:doc-lane": "node scripts/run-vitest-snapshot.ts tests/readability.test.ts tests/rule-drift.test.ts --reporter=dot",
+    "test:fast": "node scripts/run-vitest-snapshot.ts --exclude tests/cli-surface.test.ts --exclude tests/db-projection-ingestion.test.ts --exclude tests/distribution-acceptance.test.ts --exclude tests/doctor.test.ts --exclude tests/projection-writer.test.ts --exclude tests/runtime-hook-entrypoints.test.ts",
+    "test:db": "node scripts/run-vitest-snapshot.ts tests/db-projection-ingestion.test.ts tests/projection-writer.test.ts",
     "test:cli": "node scripts/run-vitest-snapshot.ts tests/cli-surface.test.ts tests/distribution-acceptance.test.ts tests/runtime-hook-entrypoints.test.ts",
-    "test:windows": "node scripts/run-vitest-snapshot.ts --exclude tests/db-projection-ingestion.test.ts --exclude tests/doctor.test.ts --exclude tests/drive-db-registration.test.ts --exclude tests/projection-writer.test.ts --exclude tests/review-green-command-projection.test.ts",
+    "test:windows": "node scripts/run-vitest-snapshot.ts --exclude tests/db-projection-ingestion.test.ts --exclude tests/doctor.test.ts --exclude tests/projection-writer.test.ts",
     "test:node-fallback": "node scripts/run-vitest-snapshot.ts tests/state-db.test.ts tests/runtime-portability.test.ts",
     "test:source": "npm run test:vitest-snapshot"
   },
   "dependencies": {
     "commander": "^12.1.0",
-    "entities": "^8.0.0",
-    "marked": "^18.0.7",
-    "semver": "^7.8.5",
-    "yaml": "^2.5.1",
-    "zod": "^3.23.8"
+    "entities": "^8.1.0",
+    "marked": "^18.2.0",
+    "semver": "^7.8.6",
+    "typescript": "5.9.3",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
-    "@types/node": "^22.7.4",
-    "@types/semver": "^7.7.1",
-    "@vitest/coverage-v8": "2.1.9",
-    "esbuild": "0.21.5",
-    "typescript": "^5.6.3",
-    "vitest": "^2.1.2"
+    "@types/node": "^24.19.2",
+    "@types/semver": "^7.8.0",
+    "@vitest/coverage-v8": "4.1.12",
+    "esbuild": "0.28.2",
+    "jscpd": "5.4.3",
+    "vitest": "4.1.12"
   }
 }

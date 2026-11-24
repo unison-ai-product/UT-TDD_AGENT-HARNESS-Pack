@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { loadNodeBanDocuments } from "../src/lint/bun-permanent-ban.ts";
 import {
   analyzeDependencyDrift,
   type DependencyDriftInput,
@@ -195,7 +196,7 @@ describe("dependency-drift and regression expansion (PLAN-REVERSE-42)", () => {
     );
   });
 
-  it("IT-ASSET-03: runtime may import the roster boundary through agent-slots only", () => {
+  it("runtime may import the roster boundary through agent-slots only", () => {
     const result = analyzeDependencyDrift({
       sourceDocs: [
         {
@@ -224,7 +225,7 @@ describe("dependency-drift and regression expansion (PLAN-REVERSE-42)", () => {
     );
   });
 
-  it("IT-ASSET-03: roster reverse imports and guard-to-roster imports fail closed", () => {
+  it("roster reverse imports and guard-to-roster imports fail closed", () => {
     const result = analyzeDependencyDrift({
       sourceDocs: [
         {
@@ -256,7 +257,7 @@ describe("dependency-drift and regression expansion (PLAN-REVERSE-42)", () => {
     );
   });
 
-  it("IT-ASSET-03: real repo keeps runtime roster boundary acyclic and one-way", () => {
+  it("real repo keeps runtime roster boundary acyclic and one-way", () => {
     const result = analyzeDependencyDrift(loadDependencyDriftInput(process.cwd()));
 
     expect(result.findings).not.toContainEqual(
@@ -276,20 +277,26 @@ describe("dependency-drift and regression expansion (PLAN-REVERSE-42)", () => {
     ]);
   });
 
-  it("U-DEPD-004: real repo keeps plan-asset and state-db cycle-free through kernel", () => {
-    const result = analyzeDependencyDrift(loadDependencyDriftInput(process.cwd()));
-    expect(result.findings).not.toContainEqual(
-      expect.objectContaining({
-        code: "module-cycle",
-        cycle: expect.arrayContaining(["plan-asset", "state-db"]),
-      }),
-    );
-    expect(result.moduleEdges).toContainEqual({ from: "plan-asset", to: "kernel" });
-    expect(result.moduleEdges).toContainEqual({ from: "state-db", to: "kernel" });
-  });
-
   it("U-DEPD-005: real repo module graph has no cycle", () => {
     const result = analyzeDependencyDrift(loadDependencyDriftInput(process.cwd()));
     expect(result.findings.filter((finding) => finding.code === "module-cycle")).toEqual([]);
+  });
+});
+
+describe("runtime dependency declaration (Issue #1720)", () => {
+  it("U-DEPD-006: typescript imported at runtime by src is declared in dependencies, not devDependencies", () => {
+    const runtimeImport = /^import\s+(?!type)[^;]*?from\s+["']typescript["']/m;
+    const importers = loadDependencyDriftInput().sourceDocs.filter((doc) =>
+      runtimeImport.test(doc.text),
+    );
+    expect(importers.length).toBeGreaterThan(0);
+    const packageJson = loadNodeBanDocuments().toolchain.packageJson;
+    expect(packageJson).not.toBeNull();
+    const pkg = JSON.parse(packageJson ?? "") as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    expect(pkg.dependencies?.typescript).toBe("5.9.3");
+    expect(pkg.devDependencies?.typescript).toBeUndefined();
   });
 });

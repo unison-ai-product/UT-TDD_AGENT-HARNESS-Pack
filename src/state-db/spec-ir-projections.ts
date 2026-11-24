@@ -2,22 +2,15 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { isValidSubDocForLayer, V_MODEL_PAIRS } from "../schema/index.ts";
+import { isValidSubDocForLayer } from "../schema/index.ts";
 import { isSecretLike } from "../secret.ts";
 import { stableId } from "../stable-id.ts";
-import {
-  canonicalPlanRevision,
-  resolvePlanRevisionIdentity,
-} from "./github-review-lane-provenance.ts";
 import type { HarnessDb } from "./index.ts";
 
 type SpecIrSourceKind =
-  | "plan"
   | "design_doc"
   | "test_design"
   | "reference_doc"
-  | "schedule_doc"
-  | "activation_profile"
   | "document_catalog"
   | "document_scale_profile"
   | "typed_spec"
@@ -65,59 +58,6 @@ export interface SpecRelationRow {
   status: string;
   source: string;
   evidence_path: string;
-  indexed_at: string;
-}
-
-export interface ScheduleEntryRow {
-  schedule_entry_id: string;
-  plan_id: string;
-  layer: string;
-  sub_doc: string;
-  v_pair: string;
-  predecessor_plan_ids: string;
-  current_location: string;
-  rag: string;
-  status: string;
-  blocked_reason: string;
-  source_path: string;
-  plan_revision?: string;
-  source_hash: string;
-  indexed_at: string;
-}
-
-export interface ActivationEntryRow {
-  activation_entry_id: string;
-  profile_id: string;
-  target_kind: string;
-  target_id: string;
-  scope_status: string;
-  target_version: string;
-  defer_reason: string;
-  enabled: number;
-  source_path: string;
-  plan_id: string;
-  indexed_at: string;
-}
-
-export interface ActivationScheduleReviewRow {
-  activation_schedule_review_id: string;
-  profile_id: string;
-  plan_id: string;
-  schedule_entry_id: string;
-  activation_entry_id: string;
-  target_kind: string;
-  target_id: string;
-  scope_status: string;
-  enabled: number;
-  target_version: string;
-  defer_reason: string;
-  current_location: string;
-  rag: string;
-  schedule_status: string;
-  layer: string;
-  sub_doc: string;
-  v_pair: string;
-  source_path: string;
   indexed_at: string;
 }
 
@@ -234,9 +174,6 @@ export interface SpecIrFindingRow {
 export interface SpecIrProjection {
   spec_defs: SpecDefRow[];
   spec_relations: SpecRelationRow[];
-  schedule_entries: ScheduleEntryRow[];
-  activation_entries: ActivationEntryRow[];
-  activation_schedule_reviews: ActivationScheduleReviewRow[];
   document_catalog_entries: DocumentCatalogEntryRow[];
   document_scale_profile_entries: DocumentScaleProfileEntryRow[];
   document_scale_profile_reviews: DocumentScaleProfileReviewRow[];
@@ -336,13 +273,6 @@ function stringField(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function projectedPlanRevision(source: SpecIrSource, repoRoot?: string): string {
-  const planId = sourcePlanId(source);
-  return repoRoot
-    ? (canonicalPlanRevision(repoRoot, planId) ?? "")
-    : (resolvePlanRevisionIdentity(source.content, planId)?.token ?? "");
-}
-
 function stringList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
@@ -353,36 +283,6 @@ function stringList(value: unknown): string[] {
         .map((item) => item.trim())
         .filter(Boolean)
     : [];
-}
-
-function dependencyValues(metadata: Record<string, unknown>): string[] {
-  const dependencies =
-    metadata.dependencies && typeof metadata.dependencies === "object"
-      ? (metadata.dependencies as Record<string, unknown>)
-      : {};
-  return [
-    stringField(dependencies.parent),
-    ...stringList(dependencies.requires),
-    ...stringList(metadata.parent_design),
-  ].filter(Boolean);
-}
-
-function referenceValues(metadata: Record<string, unknown>): string[] {
-  return [
-    ...dependencyValues(metadata),
-    stringField(metadata.pair_artifact),
-    ...stringList(metadata.references),
-  ].filter(Boolean);
-}
-
-function planIdFromReference(value: string): string {
-  const normalized = normalizePath(value);
-  const match = normalized.match(/(PLAN-[A-Z0-9-]+[A-Za-z0-9-]*)/);
-  return match?.[1] ?? "";
-}
-
-function planShortId(planId: string): string {
-  return planId.match(/^(PLAN-(?:L\d+|REVERSE|RECOVERY|DISCOVERY)-\d+)/)?.[1] ?? planId;
 }
 
 function firstHeading(content: string): string {
@@ -454,8 +354,12 @@ function inferSubDocFromPath(path: string): string {
 }
 
 function sourceKind(path: string): SpecIrSourceKind | null {
-  if (path === "docs/governance/vmodel-upgrade-schedule.md") return "schedule_doc";
-  if (path === "docs/governance/vmodel-activation-profiles.md") return "activation_profile";
+  if (
+    path === "docs/governance/vmodel-upgrade-schedule.md" ||
+    path === "docs/governance/vmodel-activation-profiles.md"
+  ) {
+    return null;
+  }
   if (path === "docs/governance/vmodel-document-catalog.md") return "document_catalog";
   if (path === "docs/governance/vmodel-document-scale-profiles.md") {
     return "document_scale_profile";
@@ -465,7 +369,6 @@ function sourceKind(path: string): SpecIrSourceKind | null {
   if (path === "docs/governance/vmodel-refactor-qa-release-gates.md") {
     return "refactor_qa_release_contract";
   }
-  if (path.startsWith("docs/plans/")) return "plan";
   if (path.startsWith("docs/design/harness/")) return "design_doc";
   if (path.startsWith("docs/test-design/harness/")) return "test_design";
   if (
@@ -494,13 +397,6 @@ function walkMarkdown(root: string): string[] {
 }
 
 export function loadSpecIrSources(repoRoot: string): SpecIrSource[] {
-  const scheduleSource = join(repoRoot, "docs", "governance", "vmodel-upgrade-schedule.md");
-  const activationProfileSource = join(
-    repoRoot,
-    "docs",
-    "governance",
-    "vmodel-activation-profiles.md",
-  );
   const documentCatalogSource = join(repoRoot, "docs", "governance", "vmodel-document-catalog.md");
   const documentScaleProfileSource = join(
     repoRoot,
@@ -517,34 +413,15 @@ export function loadSpecIrSources(repoRoot: string): SpecIrSource[] {
     "vmodel-refactor-qa-release-gates.md",
   );
   const canonicalSourcePaths = [
-    ...(existsSync(scheduleSource) ? [scheduleSource] : []),
-    ...(existsSync(activationProfileSource) ? [activationProfileSource] : []),
     ...(existsSync(documentCatalogSource) ? [documentCatalogSource] : []),
     ...(existsSync(documentScaleProfileSource) ? [documentScaleProfileSource] : []),
     ...(existsSync(typedSpecSource) ? [typedSpecSource] : []),
     ...(existsSync(agentContractSource) ? [agentContractSource] : []),
     ...(existsSync(refactorQaReleaseContractSource) ? [refactorQaReleaseContractSource] : []),
-    ...walkMarkdown(join(repoRoot, "docs", "plans")),
     ...walkMarkdown(join(repoRoot, "docs", "design", "harness")),
     ...walkMarkdown(join(repoRoot, "docs", "test-design", "harness")),
   ];
-  const uniqueCanonicalPaths = new Set(canonicalSourcePaths);
-  const referencedPaths = new Set<string>();
-  for (const absolutePath of uniqueCanonicalPaths) {
-    const path = normalizePath(relative(repoRoot, absolutePath));
-    if (!path.startsWith("docs/plans/")) continue;
-    const metadata = metadataFromContent(readFileSync(absolutePath, "utf8"));
-    for (const ref of referenceValues(metadata)) {
-      const refPath = normalizePath(ref);
-      if (planIdFromReference(refPath)) continue;
-      const refKind = sourceKind(refPath);
-      if (!refKind) continue;
-      const refAbsolutePath = join(repoRoot, refPath);
-      if (existsSync(refAbsolutePath)) referencedPaths.add(refAbsolutePath);
-    }
-  }
-  const sourcePaths = [...uniqueCanonicalPaths, ...referencedPaths];
-  return [...new Set(sourcePaths)].flatMap((absolutePath) => {
+  const readSource = (absolutePath: string): SpecIrSource[] => {
     const path = normalizePath(relative(repoRoot, absolutePath));
     const kind = sourceKind(path);
     if (!kind) return [];
@@ -558,7 +435,27 @@ export function loadSpecIrSources(repoRoot: string): SpecIrSource[] {
         sourceHash: stableHash(content),
       },
     ];
-  });
+  };
+  const sources = canonicalSourcePaths.flatMap(readSource);
+  const referencedPaths = new Set<string>();
+  for (const source of sources) {
+    for (const declaration of typedSpecDeclarations(source)) {
+      for (const ref of [
+        ...declaration.traces_from,
+        ...declaration.traces_to,
+        ...declaration.tests,
+      ]) {
+        const path = normalizePath(ref);
+        if (!path.endsWith(".md") || sourceKind(path) !== "reference_doc") continue;
+        const absolutePath = join(repoRoot, path);
+        if (normalizePath(relative(repoRoot, absolutePath)) !== path) continue;
+        if (existsSync(absolutePath) && statSync(absolutePath).isFile()) {
+          referencedPaths.add(absolutePath);
+        }
+      }
+    }
+  }
+  return [...sources, ...[...referencedPaths].flatMap(readSource)];
 }
 
 function sourceLayer(source: SpecIrSource): string {
@@ -567,10 +464,6 @@ function sourceLayer(source: SpecIrSource): string {
 
 function sourceSubDoc(source: SpecIrSource): string {
   return stringField(source.metadata.sub_doc) || inferSubDocFromPath(source.path);
-}
-
-function sourcePlanId(source: SpecIrSource): string {
-  return stringField(source.metadata.plan_id);
 }
 
 function sourceStatus(source: SpecIrSource): string {
@@ -639,57 +532,9 @@ function markdownTableRows(content: string, requiredHeaders: string[]): Record<s
   return rows;
 }
 
-function parseScheduleAuthoringRows(
-  sources: SpecIrSource[],
-  indexedAt: string,
-  repoRoot?: string,
-): ScheduleEntryRow[] {
-  const rows: ScheduleEntryRow[] = [];
-  const planRevisions = new Map(
-    sources
-      .filter((source) => source.kind === "plan" && sourcePlanId(source))
-      .map((source) => [sourcePlanId(source), projectedPlanRevision(source, repoRoot)]),
-  );
-  for (const source of sources.filter((item) => item.kind === "schedule_doc")) {
-    for (const row of markdownTableRows(source.content, ["plan_id", "current_location"])) {
-      const planId = row.plan_id ?? "";
-      if (!planId) continue;
-      const planRevision = planRevisions.get(planId);
-      if (!planRevision) continue;
-      const layer = row.layer ?? "";
-      const status = row.status || "active";
-      const rawPredecessors = row.predecessor_plan_ids || row.predecessors || "";
-      const predecessors = rawPredecessors
-        .split(/[|,]/)
-        .map((item) => planIdFromReference(item.trim()) || item.trim())
-        .filter(Boolean)
-        .sort();
-      rows.push({
-        schedule_entry_id: stableId("schedule-entry", planId),
-        plan_id: planId,
-        layer,
-        sub_doc: row.sub_doc ?? "",
-        v_pair: row.v_pair || (V_MODEL_PAIRS as Record<string, string>)[layer] || "",
-        predecessor_plan_ids: predecessors.join("|"),
-        current_location: row.current_location ?? "",
-        rag: row.rag || (status === "confirmed" || status === "completed" ? "green" : "yellow"),
-        status,
-        blocked_reason: row.blocked_reason ?? "",
-        source_path: source.path,
-        plan_revision: planRevision,
-        source_hash: source.sourceHash,
-        indexed_at: indexedAt,
-      });
-    }
-  }
-  return rows;
-}
-
 export function parseSpecDefs(sources: SpecIrSource[], indexedAt: string): SpecDefRow[] {
   const defs: SpecDefRow[] = [];
   for (const source of sources) {
-    const planId = sourcePlanId(source);
-    const ownerArtifactId = planId || source.path;
     const layer = sourceLayer(source);
     const subDoc = sourceSubDoc(source);
     const documentSpecId = stableId("spec", `${source.path}#document`);
@@ -700,12 +545,12 @@ export function parseSpecDefs(sources: SpecIrSource[], indexedAt: string): SpecD
       spec_kind: documentSpecKind,
       layer,
       sub_doc: subDoc,
-      owner_artifact_id: ownerArtifactId,
+      owner_artifact_id: source.path,
       owner_path: source.path,
       section_anchor: "document",
       title: sourceTitle(source),
       lifecycle_status: sourceStatus(source),
-      plan_id: planId,
+      plan_id: "",
       source_path: source.path,
       source_hash: source.sourceHash,
       indexed_at: indexedAt,
@@ -722,13 +567,13 @@ export function parseSpecDefs(sources: SpecIrSource[], indexedAt: string): SpecD
         section_anchor: `spec.defines:${declaredId}`,
         title: declaredId,
         lifecycle_status: sourceStatus(source),
-        plan_id: planId,
+        plan_id: "",
         source_path: source.path,
         source_hash: source.sourceHash,
         indexed_at: indexedAt,
       });
     }
-    if (source.kind === "plan" || source.kind === "reference_doc") continue;
+    if (source.kind === "reference_doc") continue;
     for (const match of source.content.matchAll(/^(#{1,3})\s+(.+)$/gm)) {
       const title = match[2].trim();
       const anchor = slug(title);
@@ -738,12 +583,12 @@ export function parseSpecDefs(sources: SpecIrSource[], indexedAt: string): SpecD
         spec_kind: "section",
         layer,
         sub_doc: subDoc,
-        owner_artifact_id: ownerArtifactId,
+        owner_artifact_id: source.path,
         owner_path: source.path,
         section_anchor: anchor,
         title,
         lifecycle_status: sourceStatus(source),
-        plan_id: planId,
+        plan_id: "",
         source_path: source.path,
         source_hash: source.sourceHash,
         indexed_at: indexedAt,
@@ -753,63 +598,17 @@ export function parseSpecDefs(sources: SpecIrSource[], indexedAt: string): SpecD
   return defs;
 }
 
-/**
- * PLAN-L7-429: PLAN frontmatter の requires / pair_artifact のうち、loadSpecIrSources が
- * spec-ir ソースとして取り込まない artifact 種別 (実装・テスト・runtime 証跡・research・
- * skill・ルート設定ファイル) への参照は spec 依存 relation ではなく evidence 参照であり、
- * relation 解決の対象外とする (orphan-relation を発火させない)。`pair_artifact: self` は
- * PLAN-REVERSE-12 の規定通り unresolved orphan のまま残す (ここでは除外しない)。
- * evidence path の実在欠落検出 (spec-ir-missing-evidence 相当) は本 PLAN の外 (§7 残リスク)。
- */
-const EVIDENCE_REFERENCE_PREFIXES = [
-  "src/",
-  "tests/",
-  "scripts/",
-  "skills/",
-  ".ut-tdd/",
-  ".claude/",
-  ".github/",
-  "docs/research/",
-];
-
-const EVIDENCE_REFERENCE_PATHS = new Set([
-  "CLAUDE.md",
-  "AGENTS.md",
-  "package.json",
-  "docs/improvement-backlog.md",
-]);
-
-function isEvidenceReference(path: string): boolean {
-  return (
-    EVIDENCE_REFERENCE_PATHS.has(path) ||
-    EVIDENCE_REFERENCE_PREFIXES.some((prefix) => path.startsWith(prefix))
-  );
-}
-
 export function parseSpecRelations(
   sources: SpecIrSource[],
   defs: SpecDefRow[],
   indexedAt: string,
 ): { relations: SpecRelationRow[]; findings: SpecIrFindingRow[] } {
-  const byPlanId = new Map(defs.filter((def) => def.plan_id).map((def) => [def.plan_id, def]));
-  const byPlanShortId = new Map<string, SpecDefRow | null>();
-  for (const def of defs.filter((item) => item.plan_id)) {
-    const shortId = planShortId(def.plan_id);
-    const existing = byPlanShortId.get(shortId);
-    byPlanShortId.set(shortId, existing && existing.spec_id !== def.spec_id ? null : def);
-  }
   const byPath = new Map(
     defs.filter((def) => def.section_anchor === "document").map((def) => [def.owner_path, def]),
   );
   const bySpecId = new Map(defs.map((def) => [def.spec_id, def]));
   const relations: SpecRelationRow[] = [];
   const findings: SpecIrFindingRow[] = [];
-  const resolvePlanDef = (planId: string): SpecDefRow | undefined => {
-    const exact = byPlanId.get(planId);
-    if (exact) return exact;
-    const short = byPlanShortId.get(planId);
-    return short ?? undefined;
-  };
   const addRelation = (input: {
     source: SpecIrSource;
     from: SpecDefRow;
@@ -837,34 +636,13 @@ export function parseSpecRelations(
       from_spec_id: from.spec_id,
       to_spec_id: to.spec_id,
       relation_kind: relationKind,
-      plan_id: sourcePlanId(source),
+      plan_id: "",
       status: "active",
       source: source.path,
       evidence_path: evidencePath,
       indexed_at: indexedAt,
     });
   };
-  for (const source of sources.filter((item) => item.kind === "plan")) {
-    const planId = sourcePlanId(source);
-    const from = byPlanId.get(planId);
-    if (!from) continue;
-    for (const ref of dependencyValues(source.metadata)) {
-      const targetPlanId = planIdFromReference(ref);
-      if (!targetPlanId && isEvidenceReference(normalizePath(ref))) continue;
-      const target = targetPlanId ? resolvePlanDef(targetPlanId) : byPath.get(normalizePath(ref));
-      addRelation({ source, from, to: target, relationKind: "requires", evidencePath: ref });
-    }
-    const pairArtifact = normalizePath(stringField(source.metadata.pair_artifact));
-    if (pairArtifact && !isEvidenceReference(pairArtifact)) {
-      addRelation({
-        source,
-        from,
-        to: byPath.get(pairArtifact),
-        relationKind: "pairs",
-        evidencePath: pairArtifact,
-      });
-    }
-  }
   for (const source of sources) {
     for (const declaration of typedSpecDeclarations(source)) {
       const from = bySpecId.get(declaration.id);
@@ -873,7 +651,7 @@ export function parseSpecRelations(
         addRelation({
           source,
           from,
-          to: bySpecId.get(ref),
+          to: bySpecId.get(ref) ?? byPath.get(normalizePath(ref)),
           relationKind: "traces_from",
           evidencePath: ref,
         });
@@ -882,7 +660,7 @@ export function parseSpecRelations(
         addRelation({
           source,
           from,
-          to: bySpecId.get(ref),
+          to: bySpecId.get(ref) ?? byPath.get(normalizePath(ref)),
           relationKind: "traces_to",
           evidencePath: ref,
         });
@@ -891,7 +669,7 @@ export function parseSpecRelations(
         addRelation({
           source,
           from,
-          to: bySpecId.get(ref),
+          to: bySpecId.get(ref) ?? byPath.get(normalizePath(ref)),
           relationKind: "tests",
           evidencePath: ref,
         });
@@ -901,148 +679,11 @@ export function parseSpecRelations(
   return { relations, findings };
 }
 
-export function parseScheduleEntries(
-  sources: SpecIrSource[],
-  indexedAt: string,
-  repoRoot?: string,
-): ScheduleEntryRow[] {
-  const authoredRows = parseScheduleAuthoringRows(sources, indexedAt, repoRoot);
-  const authoredPlanIds = new Set(authoredRows.map((row) => row.plan_id));
-  const fallbackRows = sources
-    .filter((source) => source.kind === "plan" && sourcePlanId(source))
-    .filter((source) => !authoredPlanIds.has(sourcePlanId(source)))
-    .filter((source) => Boolean(projectedPlanRevision(source, repoRoot)))
-    .map((source) => {
-      const planId = sourcePlanId(source);
-      const status = sourceStatus(source);
-      const layer = sourceLayer(source);
-      const predecessors = dependencyValues(source.metadata)
-        .map(planIdFromReference)
-        .filter(Boolean)
-        .sort();
-      const rag = status === "confirmed" || status === "completed" ? "green" : "yellow";
-      return {
-        schedule_entry_id: stableId("schedule-entry", planId),
-        plan_id: planId,
-        layer,
-        sub_doc: sourceSubDoc(source),
-        v_pair: (V_MODEL_PAIRS as Record<string, string>)[layer] ?? "",
-        predecessor_plan_ids: predecessors.join("|"),
-        current_location: `${layer || "unknown"}:${status}`,
-        rag,
-        status,
-        blocked_reason: "",
-        source_path: source.path,
-        plan_revision: projectedPlanRevision(source, repoRoot),
-        source_hash: source.sourceHash,
-        indexed_at: indexedAt,
-      };
-    });
-  return [...authoredRows, ...fallbackRows];
-}
-
 function boolFromField(value: string, fallback: boolean): number {
   const normalized = value.trim().toLowerCase();
   if (["1", "true", "yes", "y", "enabled", "有効"].includes(normalized)) return 1;
   if (["0", "false", "no", "n", "disabled", "無効"].includes(normalized)) return 0;
   return fallback ? 1 : 0;
-}
-
-function parseActivationAuthoringRows(
-  sources: SpecIrSource[],
-  indexedAt: string,
-): ActivationEntryRow[] {
-  const rows: ActivationEntryRow[] = [];
-  for (const source of sources.filter((item) => item.kind === "activation_profile")) {
-    for (const row of markdownTableRows(source.content, ["profile_id", "target_id"])) {
-      const profileId = row.profile_id ?? "";
-      const targetId = row.target_id ?? "";
-      if (!profileId || !targetId) continue;
-      const targetKind = row.target_kind || "plan";
-      const scopeStatus = row.scope_status || "in_scope";
-      const planId = row.plan_id || (targetKind === "plan" ? targetId : "");
-      rows.push({
-        activation_entry_id: stableId("activation-entry", `${profileId}:${targetKind}:${targetId}`),
-        profile_id: profileId,
-        target_kind: targetKind,
-        target_id: targetId,
-        scope_status: scopeStatus,
-        target_version: row.target_version || "",
-        defer_reason: row.defer_reason || "",
-        enabled: boolFromField(row.enabled ?? "", scopeStatus === "in_scope"),
-        source_path: source.path,
-        plan_id: planId,
-        indexed_at: indexedAt,
-      });
-    }
-  }
-  return rows;
-}
-
-export function parseActivationEntries(
-  sources: SpecIrSource[],
-  indexedAt: string,
-): ActivationEntryRow[] {
-  const authoredRows = parseActivationAuthoringRows(sources, indexedAt);
-  const authoredPlanIds = new Set(authoredRows.map((row) => row.plan_id).filter(Boolean));
-  const fallbackRows = sources
-    .filter((source) => source.kind === "plan" && sourcePlanId(source))
-    .filter((source) => !authoredPlanIds.has(sourcePlanId(source)))
-    .map((source) => {
-      const planId = sourcePlanId(source);
-      const drive = stringField(source.metadata.drive) || "unknown";
-      const mode = stringField(source.metadata.route_mode) || "forward";
-      const archived = sourceStatus(source) === "archived";
-      return {
-        activation_entry_id: stableId("activation-entry", `${planId}:${drive}:${mode}`),
-        profile_id: `drive:${drive}:mode:${mode}`,
-        target_kind: "plan",
-        target_id: planId,
-        scope_status: archived ? "out_of_scope" : "in_scope",
-        target_version: source.sourceHash,
-        defer_reason: archived ? "archived plan is out of active projection scope" : "",
-        enabled: archived ? 0 : 1,
-        source_path: source.path,
-        plan_id: planId,
-        indexed_at: indexedAt,
-      };
-    });
-  return [...authoredRows, ...fallbackRows];
-}
-
-export function joinActivationScheduleReviews(input: {
-  activations: ActivationEntryRow[];
-  schedules: ScheduleEntryRow[];
-  indexedAt: string;
-}): ActivationScheduleReviewRow[] {
-  const scheduleByPlanId = new Map(input.schedules.map((schedule) => [schedule.plan_id, schedule]));
-  return input.activations.map((activation) => {
-    const schedule = scheduleByPlanId.get(activation.plan_id);
-    return {
-      activation_schedule_review_id: stableId(
-        "activation-schedule-review",
-        `${activation.activation_entry_id}:${schedule?.schedule_entry_id ?? "missing-schedule"}`,
-      ),
-      profile_id: activation.profile_id,
-      plan_id: activation.plan_id,
-      schedule_entry_id: schedule?.schedule_entry_id ?? "",
-      activation_entry_id: activation.activation_entry_id,
-      target_kind: activation.target_kind,
-      target_id: activation.target_id,
-      scope_status: activation.scope_status,
-      enabled: activation.enabled,
-      target_version: activation.target_version,
-      defer_reason: activation.defer_reason,
-      current_location: schedule?.current_location ?? "",
-      rag: schedule?.rag ?? "",
-      schedule_status: schedule?.status ?? "",
-      layer: schedule?.layer ?? "",
-      sub_doc: schedule?.sub_doc ?? "",
-      v_pair: schedule?.v_pair ?? "",
-      source_path: activation.source_path || schedule?.source_path || "",
-      indexed_at: input.indexedAt,
-    };
-  });
 }
 
 export function parseDocumentCatalogEntries(
@@ -1099,7 +740,7 @@ export function parseDocumentScaleProfileEntries(
         detail_override: row.detail_override ?? "",
         status_override: row.status_override ?? "",
         reason: row.reason ?? "",
-        required_plan_id: row.required_plan_id || null,
+        required_plan_id: null,
         row_digest: profileEntryDigest(row),
         source_path: source.path,
         indexed_at: indexedAt,
@@ -1997,16 +1638,11 @@ export function analyzeSpecIrIntegrity(input: {
   defs: SpecDefRow[];
   relations: SpecRelationRow[];
   relationFindings: SpecIrFindingRow[];
-  schedules: ScheduleEntryRow[];
-  activations: ActivationEntryRow[];
-  activationScheduleReviews: ActivationScheduleReviewRow[];
   documentScaleProfileEntries: DocumentScaleProfileEntryRow[];
   documentScaleProfileReviews: DocumentScaleProfileReviewRow[];
 }): SpecIrFindingRow[] {
   const findings = [...input.relationFindings];
   const defIds = new Set(input.defs.map((def) => def.spec_id));
-  const planIds = new Set(input.defs.map((def) => def.plan_id).filter(Boolean));
-  const schedulePlanCounts = new Map<string, number>();
   const specDefCounts = new Map<string, number>();
   const validScaleProfileDecisions = new Set(["adopt", "conditional", "skip", "defer"]);
   const validScaleProfileDetails = new Set(["lite", "standard", "detailed"]);
@@ -2103,76 +1739,6 @@ export function analyzeSpecIrIntegrity(input: {
       relations: input.relations,
     }).findings,
   );
-  for (const schedule of input.schedules) {
-    schedulePlanCounts.set(schedule.plan_id, (schedulePlanCounts.get(schedule.plan_id) ?? 0) + 1);
-    if (!schedule.current_location.trim()) {
-      findings.push({
-        finding_id: stableId(
-          "finding:schedule-current-location-missing",
-          schedule.schedule_entry_id,
-        ),
-        kind: "schedule-current-location-missing",
-        severity: "warn",
-        subject_id: schedule.schedule_entry_id,
-        source: "spec-ir-projection",
-        status: "open",
-        evidence_path: schedule.source_path,
-      });
-    }
-    if (schedule.rag && !["green", "yellow", "red"].includes(schedule.rag)) {
-      findings.push({
-        finding_id: stableId("finding:schedule-rag-unknown", schedule.schedule_entry_id),
-        kind: "schedule-rag-unknown",
-        severity: "warn",
-        subject_id: schedule.schedule_entry_id,
-        source: "spec-ir-projection",
-        status: "open",
-        evidence_path: schedule.source_path,
-      });
-    }
-  }
-  for (const [planId, count] of schedulePlanCounts) {
-    if (count <= 1) continue;
-    findings.push({
-      finding_id: stableId("finding:schedule-duplicate-plan", planId),
-      kind: "schedule-duplicate-plan",
-      severity: "warn",
-      subject_id: planId,
-      source: "spec-ir-projection",
-      status: "open",
-      evidence_path:
-        input.schedules.find((schedule) => schedule.plan_id === planId)?.source_path ?? "",
-    });
-  }
-  for (const activation of input.activations) {
-    if (
-      (activation.scope_status === "out_of_scope" || activation.scope_status === "deferred") &&
-      activation.defer_reason === ""
-    ) {
-      findings.push({
-        finding_id: stableId("finding:activation-reason-missing", activation.activation_entry_id),
-        kind: "activation-reason-missing",
-        severity: "warn",
-        subject_id: activation.activation_entry_id,
-        source: "spec-ir-projection",
-        status: "open",
-        evidence_path: activation.source_path,
-      });
-    }
-  }
-  for (const review of input.activationScheduleReviews) {
-    if (review.target_kind === "plan" && !review.schedule_entry_id) {
-      findings.push({
-        finding_id: stableId("finding:activation-schedule-missing", review.activation_entry_id),
-        kind: "activation-schedule-missing",
-        severity: "warn",
-        subject_id: review.activation_entry_id,
-        source: "spec-ir-projection",
-        status: "open",
-        evidence_path: review.source_path,
-      });
-    }
-  }
   for (const entry of input.documentScaleProfileEntries) {
     if (!validScaleProfileDecisions.has(entry.decision)) {
       findings.push({
@@ -2225,20 +1791,6 @@ export function analyzeSpecIrIntegrity(input: {
         kind: "document-scale-profile-reason-missing",
         severity: "warn",
         subject_id: entry.document_scale_profile_entry_id,
-        source: "spec-ir-projection",
-        status: "open",
-        evidence_path: entry.source_path,
-      });
-    }
-    if (entry.required_plan_id && !planIds.has(entry.required_plan_id)) {
-      findings.push({
-        finding_id: stableId(
-          "finding:document-scale-profile-required-plan-missing",
-          `${entry.document_scale_profile_entry_id}:${entry.required_plan_id}`,
-        ),
-        kind: "document-scale-profile-required-plan-missing",
-        severity: "warn",
-        subject_id: `${entry.document_scale_profile_entry_id}:${entry.required_plan_id}`,
         source: "spec-ir-projection",
         status: "open",
         evidence_path: entry.source_path,
@@ -2309,8 +1861,6 @@ export function collectSpecIrProjection(repoRoot: string, indexedAt: string): Sp
   const sources = loadSpecIrSources(repoRoot);
   const defs = parseSpecDefs(sources, indexedAt);
   const relationResult = parseSpecRelations(sources, defs, indexedAt);
-  const schedules = parseScheduleEntries(sources, indexedAt, repoRoot);
-  const activations = parseActivationEntries(sources, indexedAt);
   const documentCatalogEntries = parseDocumentCatalogEntries(sources, indexedAt);
   const documentScaleProfileEntries = parseDocumentScaleProfileEntries(sources, indexedAt);
   const documentScaleProfileReviews = joinDocumentScaleProfileReviews({
@@ -2319,11 +1869,6 @@ export function collectSpecIrProjection(repoRoot: string, indexedAt: string): Sp
     indexedAt,
   });
   const agentContracts = parseAgentContractRows(sources, indexedAt);
-  const activationScheduleReviews = joinActivationScheduleReviews({
-    activations,
-    schedules,
-    indexedAt,
-  });
   const typedSpecTraceClosure = analyzeTypedSpecTraceClosure({
     defs,
     relations: relationResult.relations,
@@ -2338,9 +1883,6 @@ export function collectSpecIrProjection(repoRoot: string, indexedAt: string): Sp
     defs,
     relations: relationResult.relations,
     relationFindings: relationResult.findings,
-    schedules,
-    activations,
-    activationScheduleReviews,
     documentScaleProfileEntries,
     documentScaleProfileReviews,
   });
@@ -2379,9 +1921,6 @@ export function collectSpecIrProjection(repoRoot: string, indexedAt: string): Sp
   return {
     spec_defs: defs,
     spec_relations: relationResult.relations,
-    schedule_entries: schedules,
-    activation_entries: activations,
-    activation_schedule_reviews: activationScheduleReviews,
     document_catalog_entries: documentCatalogEntries,
     document_scale_profile_entries: documentScaleProfileEntries,
     document_scale_profile_reviews: documentScaleProfileReviews,
@@ -2418,46 +1957,6 @@ export function projectSpecIr(repoRoot: string, db: HarnessDb, deps: SpecIrProje
       table: "spec_relations",
       id: row.relation_id,
       row: { ...row },
-    });
-  }
-  for (const row of projection.schedule_entries) {
-    deps.recordProjectionEvent(db, {
-      table: "schedule_entries",
-      id: row.schedule_entry_id,
-      row: { ...row },
-    });
-  }
-  for (const row of projection.activation_entries) {
-    deps.recordProjectionEvent(db, {
-      table: "activation_entries",
-      id: row.activation_entry_id,
-      row: { ...row },
-    });
-  }
-  for (const row of projection.activation_schedule_reviews) {
-    deps.recordProjectionEvent(db, {
-      table: "activation_schedule_reviews",
-      id: row.activation_schedule_review_id,
-      row: { ...row },
-    });
-    deps.recordProjectionEvent(db, {
-      table: "search_index",
-      id: stableId("activation-schedule-review", row.activation_schedule_review_id),
-      row: {
-        search_id: stableId("activation-schedule-review", row.activation_schedule_review_id),
-        subject_type: "activation_schedule_review",
-        subject_id: row.activation_schedule_review_id,
-        path: row.source_path,
-        title: `${row.plan_id} ${row.profile_id} ${row.scope_status}`,
-        tokens:
-          `${row.profile_id} ${row.plan_id} ${row.scope_status} ${row.target_version} ` +
-          `${row.layer} ${row.sub_doc} ${row.v_pair} ${row.rag} ${row.schedule_status} ` +
-          `${row.current_location} ${row.defer_reason}`,
-        summary:
-          `activation profile ${row.scope_status}; enabled=${row.enabled}; ` +
-          `location=${row.current_location}`,
-        updated_at: row.indexed_at,
-      },
     });
   }
   for (const row of projection.document_catalog_entries) {

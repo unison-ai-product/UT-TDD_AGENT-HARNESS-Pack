@@ -1,9 +1,10 @@
-import { checkHandoverOutstandingAnchor } from "../handover/index.ts";
 import { checkAdvisoryGateAging } from "../lint/advisory-strict-gate-aging.ts";
+import { checkCodeSize } from "../lint/code-size-inputs.ts";
+import { checkDocSplit } from "../lint/doc-split-inputs.ts";
 import { checkErasableSyntax } from "../lint/erasable-syntax.ts";
-import { checkGreenCommandDigests } from "../lint/green-command-digest.ts";
 import { checkImportSpecifiers } from "../lint/import-specifier.ts";
-import type { LintResult } from "../plan/lint.ts";
+import type { LintResult } from "../lint/lint-result.ts";
+import { checkClaudeVersionFloor } from "./claude-version-floor-check.ts";
 import {
   checkAgentContractDetection,
   checkDbProjectionCoverage,
@@ -33,26 +34,10 @@ import {
   checkSkillAssignment,
   checkVerificationProfile,
 } from "./lint-gates.ts";
-import {
-  checkBackfillResult,
-  checkForwardConvergence,
-  checkForwardConvergenceAudit,
-  checkGuardrailInvariants,
-  checkPairFreeze,
-  checkPlanBodySubstance,
-  checkPlanCompletionDrift,
-  checkPlanGovernance,
-  checkPlanSchedule,
-  checkPlanSupersession,
-  checkPropagation,
-  checkReviewEvidence,
-  checkScrumReverse,
-  checkTestDesignNaming,
-} from "./plan-governance.ts";
+import { checkPairFreeze, checkPropagation, checkTestDesignNaming } from "./plan-governance.ts";
 import {
   checkCycleP4Verification,
   checkDbCurrency,
-  checkDriveDbRegistration,
   checkDriveModelPassage,
   checkFeedbackLog,
   checkFrRoadmapCoverage,
@@ -62,14 +47,13 @@ import {
   checkL7Completion,
   checkL14CloseAudit,
   checkPlaceholderDeps,
-  checkPlanDod,
-  checkPlanTraceGate,
   checkRuleAutomationClosure,
   checkScreenImplPairFreeze,
   checkSubDocCatalogDrift,
   checkSubDocSchemaIntegrity,
   checkSubDocSectionStructure,
   checkTelemetryClosure,
+  checkTraceGate,
 } from "./process-quality.ts";
 import {
   checkForwardFreezeContractsResult,
@@ -91,7 +75,7 @@ import {
   checkSecretScan,
 } from "./rule-quality.ts";
 import type { DoctorCheckDefinition, DoctorOptions } from "./runner.ts";
-import { type DoctorDeps, handoverDeps } from "./runtime-state.ts";
+import { checkHandoverProse, type DoctorDeps } from "./runtime-state.ts";
 import { checkRuntimeStateLocation } from "./runtime-state-location.ts";
 import {
   checkCodexHookAdapter,
@@ -100,16 +84,14 @@ import {
   checkProjectHooks,
 } from "./runtime-surface.ts";
 import {
-  checkDeliverablePlanTrace,
   checkImplPlanTrace,
   checkMemorySync,
-  checkMergedPlanStatus,
   checkOracleTestTrace,
-  checkPlanArtifactExistence,
   checkTrackedCanonical,
 } from "./source-trace.ts";
 import { checkTestRepositoryIsolation } from "./test-repository-isolation.ts";
 import { checkToolchainPin } from "./toolchain.ts";
+import { checkWindowsHide } from "./windows-hide.ts";
 import {
   checkFrontendDesignCoverage,
   checkG8IntegrationWorkflow,
@@ -118,7 +100,6 @@ import {
   checkImprovementBacklog,
   checkLintWiring,
   checkProposalDocumentCoverage,
-  checkRightArmGatePlanning,
   checkRightLungDocGovernance,
 } from "./workflow-quality.ts";
 
@@ -146,6 +127,48 @@ function fullAndToolchain(id: string, run: () => LintResult): DoctorCheckDefinit
   return { id, profiles: fullAndToolchainProfiles, run };
 }
 
+function dependencyAndDbGroup(
+  deps: DoctorDeps,
+  options: DoctorOptions,
+  state: DoctorCheckDefinitionGroupState,
+): DoctorCheckDefinitionGroup {
+  return {
+    id: "dependency-and-db",
+    definitions: [
+      full("dependency-drift", () => {
+        const result = checkDependencyDrift(deps.repoRoot);
+        state.dependencyDriftResult = result.result;
+        return result;
+      }),
+      full(
+        "regression-expansion",
+        () => checkRegressionExpansion(deps.repoRoot, state.dependencyDriftResult),
+        ["dependency-drift"],
+      ),
+      full("db-projection-coverage", () => checkDbProjectionCoverage(deps.repoRoot)),
+      full("db-projection-ingestion", () => checkDbProjectionIngestion(deps.repoRoot, options)),
+      full("design-detection", () => checkDesignDetection(deps.repoRoot)),
+      full("design-doc-cross-integrity", () => checkDesignDocCrossIntegrity(deps.repoRoot)),
+      full("typed-spec-trace-closure", () => checkTypedSpecTraceClosure(deps.repoRoot)),
+      full("typed-spec-ledger-body-sync", () => checkTypedSpecLedgerBodySync(deps.repoRoot)),
+      full("typed-spec-owned-artifact-dispersal", () =>
+        checkTypedSpecOwnedArtifactDispersal(deps.repoRoot),
+      ),
+      full("typed-spec-phase-layer-alignment", () =>
+        checkTypedSpecPhaseLayerAlignment(deps.repoRoot),
+      ),
+      full("agent-contract-detection", () => checkAgentContractDetection(deps.repoRoot)),
+      full("doc-consistency", () => checkDocConsistency(deps.repoRoot)),
+      full("entity-coverage", () => checkEntityCoverage(deps.repoRoot)),
+      full("fr-registry-audit", () => checkFrRegistryAudit(deps.repoRoot)),
+      full("resource-kernel-fixture-manifest", () =>
+        checkResourceKernelFixtureManifest(deps.repoRoot),
+      ),
+      full("resource-kernel-pair-mapping", () => checkResourceKernelPairMapping(deps.repoRoot)),
+    ],
+  };
+}
+
 export function buildDoctorCheckDefinitionGroups(
   deps: DoctorDeps,
   options: DoctorOptions = {},
@@ -156,19 +179,11 @@ export function buildDoctorCheckDefinitionGroups(
     {
       id: "plan-governance",
       definitions: [
-        full("backfill", () => checkBackfillResult(deps.repoRoot)),
-        full("scrum-reverse", () => checkScrumReverse(deps.repoRoot)),
-        full("plan-supersession", () => checkPlanSupersession(deps.repoRoot)),
-        full("plan-body-substance", () => checkPlanBodySubstance(deps.repoRoot)),
-        full("plan-completion-drift", () => checkPlanCompletionDrift(deps.repoRoot)),
         full("propagation", () => checkPropagation(deps.repoRoot)),
-        full("review-evidence", () => checkReviewEvidence(deps.repoRoot)),
         full("pair-freeze", () => checkPairFreeze(deps.repoRoot)),
         full("test-design-naming", () => checkTestDesignNaming(deps.repoRoot)),
         full("module-drift", () => checkModuleDrift(deps.repoRoot)),
-        full("merged-plan-status", () => checkMergedPlanStatus(deps.repoRoot)),
         full("memory-sync", () => checkMemorySync(deps.repoRoot)),
-        full("plan-artifact-existence", () => checkPlanArtifactExistence(deps.repoRoot)),
         full("asset-drift", () => checkAssetDrift(deps.repoRoot)),
         full("skill-assignment", () => checkSkillAssignment(deps.repoRoot)),
         full("descent-obligation", () => checkDescentObligation(deps.repoRoot)),
@@ -191,15 +206,11 @@ export function buildDoctorCheckDefinitionGroups(
         full("model-id-doc-drift", () => checkModelIdDocDrift(deps.repoRoot)),
         full("gate-confirm", () => checkGateConfirm(deps.repoRoot)),
         full("gate-id-format", () => checkGateIdFormat(deps.repoRoot)),
-        full("plan-schedule", () => checkPlanSchedule(deps.repoRoot)),
-        full("plan-governance", () => checkPlanGovernance(deps.repoRoot)),
-        full("plan-dod", () => checkPlanDod(deps.repoRoot)),
         full("placeholder-deps", () => checkPlaceholderDeps(deps.repoRoot)),
-        full("g1-trace", () => checkPlanTraceGate(deps.repoRoot, "G1-trace")),
-        full("g3-trace", () => checkPlanTraceGate(deps.repoRoot, "G3-trace")),
+        full("g1-trace", () => checkTraceGate(deps.repoRoot, "G1-trace")),
+        full("g3-trace", () => checkTraceGate(deps.repoRoot, "G3-trace")),
         full("rule-automation-closure", () => checkRuleAutomationClosure(deps.repoRoot)),
         full("drive-model-passage", () => checkDriveModelPassage(deps.repoRoot)),
-        full("drive-db-registration", () => checkDriveDbRegistration(deps.repoRoot)),
         full("db-currency", () => checkDbCurrency(deps.repoRoot)),
         full("gate-run-coverage", () => checkGateRunCoverage(deps.repoRoot)),
         full("fr-roadmap-coverage", () => checkFrRoadmapCoverage(deps.repoRoot)),
@@ -217,7 +228,11 @@ export function buildDoctorCheckDefinitionGroups(
         full("github-ci-policy", () => checkGithubCiPolicy(deps.repoRoot)),
         full("codex-hook-adapter", () => checkCodexHookAdapter(deps.repoRoot)),
         full("codex-wrapper-parity", () => checkCodexWrapperParity(deps)),
+        full("windows-hide", () => checkWindowsHide(deps.repoRoot)),
         fullAndToolchain("toolchain-pin", () => checkToolchainPin(deps.repoRoot)),
+        fullAndToolchain("claude-version-floor", () =>
+          checkClaudeVersionFloor({ probePathClaude: deps.probePathClaude }),
+        ),
       ],
     },
     {
@@ -229,6 +244,8 @@ export function buildDoctorCheckDefinitionGroups(
         full("secret-scan", () => checkSecretScan(deps.repoRoot)),
         full("feedback-log", () => checkFeedbackLog(deps.repoRoot)),
         full("l6-completion", () => checkL6Completion(deps.repoRoot)),
+        full("doc-split", () => checkDocSplit(deps.repoRoot)),
+        full("code-size", () => checkCodeSize(deps.repoRoot)),
         full("l7-completion", () => checkL7Completion(deps.repoRoot)),
         full("roadmap", () => checkRoadmap(deps.repoRoot)),
       ],
@@ -236,7 +253,6 @@ export function buildDoctorCheckDefinitionGroups(
     {
       id: "source-trace",
       definitions: [
-        full("deliverable-plan-trace", () => checkDeliverablePlanTrace(deps.repoRoot)),
         full("impl-plan-trace", () => checkImplPlanTrace(deps.repoRoot)),
         full("oracle-test-trace", () => checkOracleTestTrace(deps.repoRoot)),
         full("tracked-canonical", () => checkTrackedCanonical(deps.repoRoot)),
@@ -251,47 +267,11 @@ export function buildDoctorCheckDefinitionGroups(
         ),
       ],
     },
-    {
-      id: "dependency-and-db",
-      definitions: [
-        full("dependency-drift", () => {
-          const result = checkDependencyDrift(deps.repoRoot);
-          state.dependencyDriftResult = result.result;
-          return result;
-        }),
-        full(
-          "regression-expansion",
-          () => checkRegressionExpansion(deps.repoRoot, state.dependencyDriftResult),
-          ["dependency-drift"],
-        ),
-        full("guardrail-invariants", () => checkGuardrailInvariants(deps.repoRoot)),
-        full("db-projection-coverage", () => checkDbProjectionCoverage(deps.repoRoot)),
-        full("db-projection-ingestion", () => checkDbProjectionIngestion(deps.repoRoot, options)),
-        full("design-detection", () => checkDesignDetection(deps.repoRoot)),
-        full("design-doc-cross-integrity", () => checkDesignDocCrossIntegrity(deps.repoRoot)),
-        full("typed-spec-trace-closure", () => checkTypedSpecTraceClosure(deps.repoRoot)),
-        full("typed-spec-ledger-body-sync", () => checkTypedSpecLedgerBodySync(deps.repoRoot)),
-        full("typed-spec-owned-artifact-dispersal", () =>
-          checkTypedSpecOwnedArtifactDispersal(deps.repoRoot),
-        ),
-        full("typed-spec-phase-layer-alignment", () =>
-          checkTypedSpecPhaseLayerAlignment(deps.repoRoot),
-        ),
-        full("agent-contract-detection", () => checkAgentContractDetection(deps.repoRoot)),
-        full("doc-consistency", () => checkDocConsistency(deps.repoRoot)),
-        full("entity-coverage", () => checkEntityCoverage(deps.repoRoot)),
-        full("fr-registry-audit", () => checkFrRegistryAudit(deps.repoRoot)),
-        full("resource-kernel-fixture-manifest", () =>
-          checkResourceKernelFixtureManifest(deps.repoRoot),
-        ),
-        full("resource-kernel-pair-mapping", () => checkResourceKernelPairMapping(deps.repoRoot)),
-      ],
-    },
+    dependencyAndDbGroup(deps, options, state),
     {
       id: "workflow-and-final",
       definitions: [
         full("improvement-backlog", () => checkImprovementBacklog(deps.repoRoot)),
-        full("right-arm-gate-planning", () => checkRightArmGatePlanning(deps.repoRoot)),
         full("right-lung-doc-governance", () => checkRightLungDocGovernance(deps.repoRoot)),
         full("g8-integration-workflow", () => checkG8IntegrationWorkflow(deps.repoRoot)),
         full("g9-system-workflow", () => checkG9SystemWorkflow(deps.repoRoot)),
@@ -299,19 +279,10 @@ export function buildDoctorCheckDefinitionGroups(
         full("lint-wiring", () => checkLintWiring(deps.repoRoot)),
         full("proposal-document-coverage", () => checkProposalDocumentCoverage(deps.repoRoot)),
         full("frontend-design-coverage", () => checkFrontendDesignCoverage(deps.repoRoot)),
-        full("handover-outstanding", () => checkHandoverOutstandingAnchor(handoverDeps(deps))),
-        full("green-command-digest", () => {
-          const result = checkGreenCommandDigests(deps.repoRoot);
-          return {
-            ...result,
-            ok: options.strictGreenCommandDigest === true ? result.mismatches.length === 0 : true,
-          };
-        }),
+        full("handover-prose", () => checkHandoverProse(deps)),
         full("advisory-strict-gate-aging", () =>
           checkAdvisoryGateAging({ repoRoot: deps.repoRoot }),
         ),
-        full("forward-convergence", () => checkForwardConvergence(deps.repoRoot)),
-        full("forward-convergence-audit", () => checkForwardConvergenceAudit(deps.repoRoot)),
       ],
     },
   ];

@@ -18,7 +18,7 @@ import {
 describe("team model policy", () => {
   it("pins the approved provider model IDs rather than only routing aliases", () => {
     expect(MODEL_IDS.claude).toEqual({
-      fable: "claude-fable-5-1",
+      fable: "claude-fable-5-2",
       opus: "claude-opus-5-5",
       sonnet: "claude-sonnet-5-5",
       haiku: "claude-haiku-5-5",

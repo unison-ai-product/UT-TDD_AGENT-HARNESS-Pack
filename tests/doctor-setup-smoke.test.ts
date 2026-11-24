@@ -6,6 +6,7 @@ import {
   type SetupSmokeDeps,
 } from "../src/doctor/setup-smoke.ts";
 import { CODEX_GIT_ROOT_PREFIX } from "../src/lint/hook-invocation.ts";
+import { guardBootstrapHookArgs } from "../src/lint/project-hook.ts";
 
 // PLAN-L7-668 §3: Codex の command は `node "$(git rev-parse --show-toplevel)/<script>" [args]`
 // の 1 文字列 (args field は無い)。
@@ -17,14 +18,14 @@ const codexCommands = [
   `node "${CODEX_GIT_ROOT_PREFIX}.ut-tdd/bin/ut-tdd.mjs" session summary`,
 ] as const;
 
-const claudeCommands = [
-  "node .ut-tdd/bin/ut-tdd.mjs hook agent-guard",
-  "node .ut-tdd/bin/ut-tdd.mjs hook work-guard",
+const claudeCommands: (string | { command: string; args: readonly string[] })[] = [
+  { command: "node", args: guardBootstrapHookArgs("agent-guard") },
+  { command: "node", args: guardBootstrapHookArgs("work-guard") },
   "node .ut-tdd/bin/ut-tdd.mjs session start",
   "node .ut-tdd/bin/ut-tdd.mjs hook post-tool-use",
   "node .ut-tdd/bin/ut-tdd.mjs session summary",
   "node .ut-tdd/bin/ut-tdd.mjs hook subagent-stop",
-] as const;
+];
 
 function hooksJson(commands: readonly string[]) {
   return JSON.stringify({
@@ -43,13 +44,16 @@ function codexHooksJson(commands: readonly string[]) {
   });
 }
 
-function claudeHooksJson(commands: readonly string[]) {
+function claudeHooksJson(
+  commands: readonly (string | { command: string; args: readonly string[] })[],
+) {
   return JSON.stringify({
     hooks: {
       SessionStart: [
         {
-          hooks: commands.map((serialized) => {
-            const [command, ...args] = serialized.split(" ");
+          hooks: commands.map((entry) => {
+            if (typeof entry !== "string") return { command: entry.command, args: entry.args };
+            const [command, ...args] = entry.split(" ");
             return { command, args };
           }),
         },
@@ -138,6 +142,50 @@ describe("doctor setup-smoke direct checks", () => {
 
     expect(result.ok).toBe(true);
     expect(result.messages[0]).toMatch(/doctor: setup-smoke - OK/);
+  });
+
+  // U-SETUP-014 の直接 unit 補助 assertion。正式 oracle の定義は変更しない。
+  it.each([
+    "agent-guard",
+    "work-guard",
+  ] as const)("U-SETUP-014 auxiliary assertion rejects %s when its Claude bootstrap is missing", (guardId) => {
+    const commands = [...claudeCommands];
+    const guardIndex = guardId === "agent-guard" ? 0 : 1;
+    commands[guardIndex] = `node .ut-tdd/bin/ut-tdd.mjs hook ${guardId}`;
+    const result = checkSetupSmoke(
+      setupSmokeDeps({ ".claude/settings.json": claudeHooksJson(commands) }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("missing claude-hook:node -e");
+  });
+
+  it.each([
+    "agent-guard",
+    "work-guard",
+  ] as const)("U-SETUP-014 auxiliary assertion rejects a modified %s Claude bootstrap", (guardId) => {
+    const commands = [...claudeCommands];
+    const guardIndex = guardId === "agent-guard" ? 0 : 1;
+    const guard = commands[guardIndex];
+    if (typeof guard === "string") throw new Error(`expected structured ${guardId} hook`);
+    const bootstrap = guard.args[1];
+    if (!bootstrap.includes("process.exit(2)")) {
+      throw new Error(`expected fail-closed ${guardId} bootstrap`);
+    }
+    commands[guardIndex] = {
+      ...guard,
+      args: [
+        guard.args[0],
+        bootstrap.replace("process.exit(2)", "process.exit(0)"),
+        ...guard.args.slice(2),
+      ],
+    };
+    const result = checkSetupSmoke(
+      setupSmokeDeps({ ".claude/settings.json": claudeHooksJson(commands) }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.messages.join("\n")).toContain("missing claude-hook:node -e");
   });
 
   it("rejects template placeholder residue in the project-local wrapper", () => {

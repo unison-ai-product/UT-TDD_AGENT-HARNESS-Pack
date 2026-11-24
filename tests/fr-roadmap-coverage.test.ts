@@ -45,15 +45,15 @@ const closed = `# A-TEST
 
 | Bucket | PLAN / WBS | L7 source | test file / oracle citation | coverage gate | Status |
 |---|---|---|---|---|---|
-| R1 | docs/plans/PLAN-L7-50-feature-list-residual-closure.md#WBS-L7-50-R1 | src/feedback/engine.ts | tests/search-feedback.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
-| R2 | docs/plans/PLAN-L7-50-feature-list-residual-closure.md#WBS-L7-50-R2 | src/workflow/readiness.ts | tests/readiness-guardrail.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
-| R3 | docs/plans/PLAN-L7-50-feature-list-residual-closure.md#WBS-L7-50-R3 | src/guardrail/ledger.ts | tests/issue-queue.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
-| R4 | docs/plans/PLAN-L7-50-feature-list-residual-closure.md#WBS-L7-50-R4 | src/runtime/provider-handover.ts | tests/provider-handover.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
-| R5 | docs/plans/PLAN-L7-50-feature-list-residual-closure.md#WBS-L7-50-R5 | src/assets/catalog.ts | tests/asset-catalog.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
-| R6 | docs/plans/PLAN-L7-50-feature-list-residual-closure.md#WBS-L7-50-R6 | src/lint/ddd-tdd-rules.ts | tests/ddd-tdd-rules.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
-| R7 | docs/plans/PLAN-L7-50-feature-list-residual-closure.md#WBS-L7-50-R7 | src/lint/relation-graph.ts | tests/relation-graph.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
-| R8 | docs/plans/PLAN-L7-50-feature-list-residual-closure.md#WBS-L7-50-R8 | src/lint/tool-adapter.ts | tests/tool-adapter.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
-| R9 | docs/plans/PLAN-L7-50-feature-list-residual-closure.md#WBS-L7-50-R9 | src/export/document-export.ts | tests/document-export.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
+| R1 | docs/design/harness/L3-functional/functional-requirements.md#§3 | src/feedback/engine.ts | tests/search-feedback.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
+| R2 | docs/design/harness/L3-functional/functional-requirements.md#§3 | src/workflow/readiness.ts | tests/readiness-guardrail.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
+| R3 | docs/design/harness/L3-functional/functional-requirements.md#§3 | src/guardrail/ledger.ts | tests/issue-queue.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
+| R4 | docs/design/harness/L3-functional/functional-requirements.md#§3 | src/runtime/provider-handover.ts | tests/provider-handover.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
+| R5 | docs/design/harness/L3-functional/functional-requirements.md#§3 | src/assets/catalog.ts | tests/asset-catalog.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
+| R6 | docs/design/harness/L3-functional/functional-requirements.md#§3 | src/lint/ddd-tdd-rules.ts | tests/ddd-tdd-rules.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
+| R7 | .ut-tdd/audit/A-124-cross-artifact-graph-tooling.md | src/lint/relation-graph.ts | tests/relation-graph.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
+| R8 | .ut-tdd/audit/A-125-mcp-external-verification-profile-scope.md | src/lint/tool-adapter.ts | tests/tool-adapter.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
+| R9 | .ut-tdd/audit/A-126-canonical-document-export.md | src/export/document-export.ts | tests/document-export.test.ts | doctor fr-roadmap-coverage + npm test | \`closed\` |
 
 ## Next
 `;
@@ -80,13 +80,29 @@ describe("fr-roadmap-coverage lint", () => {
     });
   });
 
-  it("U-FRC-003: passes only when closed rows have PLAN/source/test/gate evidence", () => {
-    const r = analyzeFrRoadmapCoverageWithRoot([{ file: "A.md", content: closed }], process.cwd());
+  it("U-FRC-003: passes only when closed rows have source/test/gate evidence", () => {
+    const root = process.cwd();
+    const r = analyzeFrRoadmapCoverageWithRoot([{ file: "A.md", content: closed }], root);
 
     expect(r.ok).toBe(true);
     expect(r.rows).toHaveLength(9);
     expect(r.closureRows).toHaveLength(9);
     expect(frRoadmapCoverageMessages(r)[0]).toContain("closure=9");
+
+    // PLAN / WBS 列は任意の文脈情報であり、空欄でも実在しない path でも違反にしない。
+    const blank = closed.replace(
+      "| R1 | docs/design/harness/L3-functional/functional-requirements.md#§3 |",
+      "| R1 | |",
+    );
+    const missing = closed.replace(
+      "| R2 | docs/design/harness/L3-functional/functional-requirements.md#§3 |",
+      "| R2 | docs/plans/PLAN-L7-99-missing.md |",
+    );
+    for (const content of [blank, missing]) {
+      const optional = analyzeFrRoadmapCoverageWithRoot([{ file: "A.md", content }], root);
+      expect(optional.violations).toEqual([]);
+      expect(optional.ok).toBe(true);
+    }
   });
 
   it("U-FRC-004: fails closed rows without closure evidence", () => {
