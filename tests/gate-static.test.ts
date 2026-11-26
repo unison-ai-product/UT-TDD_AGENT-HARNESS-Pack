@@ -10,6 +10,7 @@ import {
 } from "../src/doctor/workflow-quality.ts";
 import {
   analyzeLayerPairGate,
+  checkPairRetirementFromEnvironment,
   evaluateStaticGate,
   readCoverageSummary,
 } from "../src/gate/static.ts";
@@ -159,16 +160,6 @@ function allNumbers(messages: string[], pattern: RegExp): number[] {
   return messages.flatMap((message) => [...message.matchAll(pattern)].map((m) => Number(m[1])));
 }
 
-/** G0 時点の実測 floor (参考値ではなく「これ未満に減ったら削除とみなす」下限。m4 を殺す)。 */
-const PAIR_TOTAL_FLOOR: Record<string, number> = {
-  G1: 7,
-  G2: 6,
-  G3: 5,
-  G4: 7,
-  G5: 6,
-  G6: 37,
-};
-const PAIR_FREEZE_FLOOR = 68;
 const VERIFICATION_FLOOR = { base: 67 };
 
 it("U-RCDEV-037: preserves harness G1-G7 static and G8-G10 workflow baseline", () => {
@@ -201,7 +192,7 @@ it("U-RCDEV-037: preserves harness G1-G7 static and G8-G10 workflow baseline", (
   expect(actual).toEqual(normalizedBaseline());
 
   // (2) 不変条件: 件数を固定せず、整合 (total==confirmed、draft/orphans 0 など) を表明する
-  for (const [gate, floor] of Object.entries(PAIR_TOTAL_FLOOR)) {
+  for (const gate of ["G1", "G2", "G3", "G4", "G5", "G6"]) {
     const messages = (raw.get(gate) ?? []).filter((m) =>
       m.startsWith(`${gate.toLowerCase()}-pair`),
     );
@@ -213,14 +204,12 @@ it("U-RCDEV-037: preserves harness G1-G7 static and G8-G10 workflow baseline", (
     expect(message).toContain("placeholder=0");
     expect(message).toContain("draft=0");
     expect(message).toContain("orphans=0");
-    // (3) floor: 実測件数が baseline 未満へ減る (設計 pair の削除) と失敗する
-    expect(total).toBeGreaterThanOrEqual(floor);
   }
   const g7 = raw.get("G7") ?? [];
   const pairFreeze = g7.filter((m) => m.startsWith("pair-freeze"));
   expect(pairFreeze).toHaveLength(1);
   expect(pairFreeze[0]).toContain("孤児 0");
-  expect(allNumbers(pairFreeze, /双方向 (\d+) pair/g)[0]).toBeGreaterThanOrEqual(PAIR_FREEZE_FLOOR);
+  expect(allNumbers(pairFreeze, /双方向 (\d+) pair/g)).toHaveLength(1);
   const verification = g7.filter((m) => m.startsWith("verification — "));
   expect(verification).toHaveLength(1);
   const message = verification[0] as string;
@@ -228,6 +217,9 @@ it("U-RCDEV-037: preserves harness G1-G7 static and G8-G10 workflow baseline", (
   expect(base).not.toBeNull();
   expect(base?.[1]).toBe(base?.[2]);
   expect(Number(base?.[1])).toBeGreaterThanOrEqual(VERIFICATION_FLOOR.base);
+
+  const retirement = checkPairRetirementFromEnvironment(root, process.env);
+  expect(retirement.ok, retirement.messages.join("\n")).toBe(true);
 });
 
 function runCli(args: string[], cwd = process.cwd()) {

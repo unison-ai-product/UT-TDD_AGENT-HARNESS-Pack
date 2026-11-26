@@ -2,7 +2,7 @@ import { join } from "node:path";
 // Hook 配線の単一定義源: 生成 settings.json / hooks.json の command は project-hook lint の
 // wrapper 正規形から構築する (gate 要求と setup 生成物の再乖離防止、PLAN-RECOVERY-06)。
 import { codexCommandString } from "../lint/hook-invocation.ts";
-import { guardBootstrapHookArgs, wrapperHookArgs } from "../lint/project-hook.ts";
+import * as projectHooks from "../lint/project-hook.ts";
 import { CLAUDE_CODE_VERSION_FLOOR } from "../runtime/claude-version-floor.ts";
 // model ID は SSoT (src/team/model-policy.ts MODEL_IDS) 参照のみ。生 literal の二重保持は
 // 世代 drift の温床 (A-177 F-5 / PLAN-L7-256: templates が opus-4-7 のまま SSoT と乖離した実績)。
@@ -17,9 +17,8 @@ export type TemplateSet = { [name: string]: string };
 const CLAUDE_OPUS = MODEL_IDS.claude.opus;
 const CLAUDE_SONNET = MODEL_IDS.claude.sonnet;
 const CLAUDE_HAIKU = MODEL_IDS.claude.haiku;
-const GPT_FRONTIER = MODEL_IDS.codex.frontier;
-const GPT_WORKER = MODEL_IDS.codex.worker;
-const GPT_SPARK = MODEL_IDS.codex.spark;
+const { frontier: GPT_FRONTIER, worker: GPT_WORKER, spark: GPT_SPARK } = MODEL_IDS.codex;
+const CONSUMER_CLI_PREFIX = "node .ut-tdd/bin/ut-tdd.mjs";
 
 export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
   ...CLAUDE_COMMAND_TEMPLATE_SET,
@@ -71,6 +70,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     '- Codex delegation: `ut-tdd codex --role <role> --task "..."`',
     '- Claude delegation: `ut-tdd claude --role <role> --task "..."`',
     "- Team run: `ut-tdd team run --definition .ut-tdd/teams/<team>.yaml`",
+    `- Claude lane に宛てた共有 memory (返事・review 依頼・引き継ぎ) を書くときは、\`${CONSUMER_CLI_PREFIX} memory add --notify-claude ...\` を使う。動いている Claude セッションの受信箱へ知らせが届く。Claude lane に宛てない memory には付けない。`,
     "",
     "## GPT / Codex runtime defaults",
     "",
@@ -162,7 +162,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "          {",
     '            "type": "command",',
     '            "command": "node",',
-    `            "args": ${JSON.stringify([...guardBootstrapHookArgs("agent-guard")])},`,
+    `            "args": ${JSON.stringify([...projectHooks.guardBootstrapHookArgs("agent-guard")])},`,
     '            "timeout": 5,',
     '            "onFailure": "block",',
     '            "statusMessage": "agent-guard: generic subagent type and model check"',
@@ -175,7 +175,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "          {",
     '            "type": "command",',
     '            "command": "node",',
-    `            "args": ${JSON.stringify([...guardBootstrapHookArgs("work-guard")])},`,
+    `            "args": ${JSON.stringify([...projectHooks.guardBootstrapHookArgs("work-guard")])},`,
     '            "timeout": 5,',
     '            "onFailure": "block",',
     '            "statusMessage": "work-guard: foreign edit protection"',
@@ -189,8 +189,8 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "          {",
     '            "type": "command",',
     '            "command": "node",',
-    `            "args": ${JSON.stringify([...wrapperHookArgs("session-start")])},`,
-    '            "timeout": 30,',
+    `            "args": ${JSON.stringify([...projectHooks.wrapperHookArgs("session-start")])},`,
+    `            "timeout": ${projectHooks.hookTimeoutSeconds("session-start")},`,
     '            "statusMessage": "session-log: session start (fail-open)"',
     "          }",
     "        ]",
@@ -203,7 +203,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "          {",
     '            "type": "command",',
     '            "command": "node",',
-    `            "args": ${JSON.stringify([...wrapperHookArgs("post-tool-use")])},`,
+    `            "args": ${JSON.stringify([...projectHooks.wrapperHookArgs("post-tool-use")])},`,
     '            "timeout": 30,',
     '            "statusMessage": "session-log: post tool use (fail-open)"',
     "          }",
@@ -216,7 +216,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "          {",
     '            "type": "command",',
     '            "command": "node",',
-    `            "args": ${JSON.stringify([...wrapperHookArgs("session-summary")])},`,
+    `            "args": ${JSON.stringify([...projectHooks.wrapperHookArgs("session-summary")])},`,
     '            "timeout": 30,',
     '            "statusMessage": "session-log: work digest summary (fail-open)"',
     "          }",
@@ -227,7 +227,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "          {",
     '            "type": "command",',
     '            "command": "node",',
-    `            "args": ${JSON.stringify([...wrapperHookArgs("claude-memory-wake")])},`,
+    `            "args": ${JSON.stringify([...projectHooks.wrapperHookArgs("claude-memory-wake")])},`,
     '            "timeout": 930,',
     '            "asyncRewake": true,',
     '            "statusMessage": "HARNESS memory: Claude宛て通知を待機"',
@@ -241,7 +241,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     "          {",
     '            "type": "command",',
     '            "command": "node",',
-    `            "args": ${JSON.stringify([...wrapperHookArgs("subagent-stop")])},`,
+    `            "args": ${JSON.stringify([...projectHooks.wrapperHookArgs("subagent-stop")])},`,
     '            "timeout": 5,',
     '            "statusMessage": "agent-slots: release oldest guard slot (fail-open)"',
     "          }",
@@ -263,7 +263,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     '        "hooks": [',
     "          {",
     '            "type": "command",',
-    `            "command": ${JSON.stringify(codexCommandString(wrapperHookArgs("agent-guard")))},`,
+    `            "command": ${JSON.stringify(codexCommandString(projectHooks.wrapperHookArgs("agent-guard")))},`,
     '            "timeout": 5,',
     '            "statusMessage": "agent-guard: Codex generic subagent type and model check"',
     "          }",
@@ -274,7 +274,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     '        "hooks": [',
     "          {",
     '            "type": "command",',
-    `            "command": ${JSON.stringify(codexCommandString(wrapperHookArgs("work-guard")))},`,
+    `            "command": ${JSON.stringify(codexCommandString(projectHooks.wrapperHookArgs("work-guard")))},`,
     '            "timeout": 5,',
     '            "statusMessage": "work-guard: foreign edit protection"',
     "          }",
@@ -286,8 +286,8 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     '        "hooks": [',
     "          {",
     '            "type": "command",',
-    `            "command": ${JSON.stringify(codexCommandString(wrapperHookArgs("session-start")))},`,
-    '            "timeout": 30,',
+    `            "command": ${JSON.stringify(codexCommandString(projectHooks.wrapperHookArgs("session-start")))},`,
+    `            "timeout": ${projectHooks.hookTimeoutSeconds("session-start")},`,
     '            "statusMessage": "session-log: session start (fail-open)"',
     "          }",
     "        ]",
@@ -299,7 +299,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     '        "hooks": [',
     "          {",
     '            "type": "command",',
-    `            "command": ${JSON.stringify(codexCommandString(wrapperHookArgs("post-tool-use")))},`,
+    `            "command": ${JSON.stringify(codexCommandString(projectHooks.wrapperHookArgs("post-tool-use")))},`,
     '            "timeout": 30,',
     '            "statusMessage": "session-log: post tool use (fail-open)"',
     "          }",
@@ -311,7 +311,7 @@ export const BUILTIN_GITHUB_TEMPLATES: TemplateSet = {
     '        "hooks": [',
     "          {",
     '            "type": "command",',
-    `            "command": ${JSON.stringify(codexCommandString(wrapperHookArgs("session-summary")))},`,
+    `            "command": ${JSON.stringify(codexCommandString(projectHooks.wrapperHookArgs("session-summary")))},`,
     '            "timeout": 30,',
     '            "statusMessage": "session-log: work digest summary (fail-open)"',
     "          }",

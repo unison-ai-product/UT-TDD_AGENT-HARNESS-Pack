@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -22,6 +22,7 @@ import {
 } from "../src/memory/curation-ledger.ts";
 import { loadMemoryEntries, parseMemoryFile } from "../src/memory/index.ts";
 import { readLegacyArchiveManifest, sha256Hex } from "../src/memory/legacy-archive-manifest.ts";
+import { removeTestTree } from "./support/temp-tree.ts";
 
 // The shipped ledger, manifest and canonical corpus are repository facts read from the execution
 // root once (test-repository-isolation contract: 1 call).
@@ -30,7 +31,7 @@ const cliPath = join(root, "src", "cli.ts");
 
 const scratch: string[] = [];
 afterAll(() => {
-  for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
+  for (const dir of scratch) removeTestTree(dir);
 });
 
 function ledgerOf(): CurationLedger {

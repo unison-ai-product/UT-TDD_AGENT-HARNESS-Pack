@@ -111,14 +111,15 @@ function oracle(
     it("fixture 実行が健全 (反転しない)", () => {
       expectSound(run, names);
     });
-    it.fails(`${id} 契約`, () => {
+    it(`${id} 契約`, () => {
+      expect(run.parsed, run.raw.slice(0, 300)).toBe(true);
       contract(run);
     });
   });
 }
 
 oracle(
-  "CANDIDATE-U-VITASSERT-001",
+  "U-VITASSERT-001",
   "早期 return は 0 件で FAIL し CLI は非 0",
   `it("zero early return", () => { if (Date.now() > 0) return; expect(1).toBe(1); });
 `,
@@ -131,7 +132,7 @@ oracle(
 );
 
 oracle(
-  "CANDIDATE-U-VITASSERT-002",
+  "U-VITASSERT-002",
   "it.fails は反転を維持し 0 件判定を適用しない",
   `it("zero normal", () => { return; });
 it.fails("fails returns normally", () => { return; });
@@ -147,7 +148,7 @@ it.fails("fails really throws", () => { expect(1).toBe(2); });
 );
 
 oracle(
-  "CANDIDATE-U-VITASSERT-003",
+  "U-VITASSERT-003",
   "import と context.expect は同じ counter",
   `it("import only", () => { expect(1).toBe(1); });
 it("local only", (ctx) => { ctx.expect(1).toBe(1); });
@@ -165,7 +166,7 @@ it("poll only", async () => { await expect.poll(() => 1).toBe(1); });
 );
 
 oracle(
-  "CANDIDATE-U-VITASSERT-004",
+  "U-VITASSERT-004",
   "helper・parameterized・例外",
   `function check(): void { expect(1).toBe(1); }
 it("via helper", () => { check(); });
@@ -184,7 +185,7 @@ it("throws originally", () => { throw new Error("boom-original"); });
 );
 
 oracle(
-  "CANDIDATE-U-VITASSERT-005",
+  "U-VITASSERT-005",
   "retry は最終試行の 0 件を診断し skip/todo は維持",
   `let n = 0;
 it("retry zero", { retry: 1 }, (ctx) => { n += 1; if (n === 1) ctx.expect(1).toBe(2); });
@@ -203,7 +204,7 @@ it.todo("todoed");
 );
 
 oracle(
-  "CANDIDATE-U-VITASSERT-006",
+  "U-VITASSERT-006",
   "hook と並行する別ケースの assertion を混ぜない",
   `describe("hook", () => {
   beforeEach(() => { expect(1).toBe(1); });
@@ -225,7 +226,7 @@ describe.concurrent("concurrent", () => {
 );
 
 oracle(
-  "CANDIDATE-U-VITASSERT-007",
+  "U-VITASSERT-007",
   "標準診断を上書きしない",
   `it("mismatch three", (ctx) => { expect.assertions(3); expect(1).toBe(1); ctx.expect(1).toBe(1); });
 it("assertions two none", () => { expect.assertions(2); });
@@ -234,10 +235,10 @@ it("has assertions none", () => { expect.hasAssertions(); });
   ["mismatch three", "assertions two none", "has assertions none"],
   (run) => {
     expect(messagesOf(run, "mismatch three")).toMatch(
-      /expected 3 assertions to be called but got 2/,
+      /expected number of assertions to be 3, but got 2/,
     );
     expect(messagesOf(run, "assertions two none")).toMatch(
-      /expected 2 assertions to be called but got 0/,
+      /expected number of assertions to be 2, but got 0/,
     );
     expect(messagesOf(run, "has assertions none")).toMatch(/expected any number of assertion/);
   },

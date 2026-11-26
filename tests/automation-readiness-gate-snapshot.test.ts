@@ -113,7 +113,7 @@ function writePassedGatesAtomically(
 }
 
 describe("automation readiness gate snapshot", () => {
-  it.fails("U-READSNAP-001 reads and indexes gate evidence in linear work", () => {
+  it("U-READSNAP-001 reads and indexes gate evidence in linear work", () => {
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);
@@ -195,7 +195,7 @@ describe("automation readiness gate snapshot", () => {
     }
   });
 
-  it.fails("U-READSNAP-002 keeps a mid-evaluation gate commit for the next call", () => {
+  it("U-READSNAP-002 keeps a mid-evaluation gate commit for the next call", () => {
     const fixture = openIsolatedFileDbs();
     let writer: ReturnType<typeof openHarnessDb> | undefined;
     try {
@@ -271,7 +271,7 @@ describe("automation readiness gate snapshot", () => {
     }
   });
 
-  it.fails("U-READSNAP-003 rolls back all readiness writes after a later write fails", () => {
+  it("U-READSNAP-003 rolls back all readiness writes after a later write fails", () => {
     const db = openHarnessDb(":memory:");
     try {
       migrate(db);

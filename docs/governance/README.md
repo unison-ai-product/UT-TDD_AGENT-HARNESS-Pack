@@ -25,6 +25,12 @@ V-model 機構の正本 (中核 5 点への追加読み。repository-structure.m
 > `repository-structure.md` §1、PLAN-L7-459 H1)。CLAUDE.md 側は起動時の最小読み順、
 > 本リストは文書体系の完全な正本索引。
 
+運用規律の正本 (root `CLAUDE.md` から本文を逐語で移した文書。PO 指示 2026-11-26。`CLAUDE.md` は見出しと 1 行索引だけを持ち、索引は規範ではない):
+
+- `operating-rules-review-merge.md` (review・merge・FLAG 是正・commit 協調・引き継ぎ検証)
+- `operating-rules-delegation-routing.md` (モデル routing・委譲・教訓の記録先・lane 間の依頼)
+- `operating-rules-general.md` (目的・PO 判断・棚卸し・配布・guard・取得物・Coding Rules 他)
+
 > **ADR-001 境界**: 実装は UT-TDD 所有の TypeScript/Node である (Node authority sealed、Bun は永久禁止 #134)。migration
 > docs と source snapshots は porting audit と regression idea の参照資料に限る。
 > これらは現行の正本でも実行経路でもない。

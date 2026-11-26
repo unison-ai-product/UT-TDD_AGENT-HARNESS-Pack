@@ -97,7 +97,10 @@ export function resolveProjectMemoryRootWithPorts(
     return { ok: false, reason: "canonical_root_invalid" };
   }
   const currentProjectId = ports.projectIdentity(currentWorktreeRoot);
-  const canonicalProjectId = ports.projectIdentity(canonicalProjectRoot);
+  const canonicalProjectId =
+    currentWorktreeRoot === canonicalProjectRoot
+      ? currentProjectId
+      : ports.projectIdentity(canonicalProjectRoot);
   if (!currentProjectId || !canonicalProjectId) {
     return { ok: false, reason: "project_identity_unavailable" };
   }

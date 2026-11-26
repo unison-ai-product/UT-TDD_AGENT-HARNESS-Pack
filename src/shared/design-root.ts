@@ -9,8 +9,11 @@ export interface VModelRoots {
   testDesignRoot: string;
 }
 
-function firstExistingRoot(repoRoot: string, candidates: readonly string[]): string {
-  const existing = candidates.find((root) => existsSync(join(repoRoot, root)));
+function firstExistingRoot(
+  exists: (path: string) => boolean,
+  candidates: readonly string[],
+): string {
+  const existing = candidates.find(exists);
   if (existing) return existing;
   const fallback = candidates[candidates.length - 1];
   if (!fallback) throw new Error("V-model root candidates must not be empty");
@@ -24,9 +27,13 @@ function firstExistingRoot(repoRoot: string, candidates: readonly string[]): str
  * its historical paths while clean consumers can author directly under docs/.
  */
 export function resolveVModelRoots(repoRoot: string = process.cwd()): VModelRoots {
+  return selectVModelRoots((path) => existsSync(join(repoRoot, path)));
+}
+
+export function selectVModelRoots(exists: (path: string) => boolean): VModelRoots {
   return {
-    designRoot: firstExistingRoot(repoRoot, DESIGN_ROOT_CANDIDATES),
-    testDesignRoot: firstExistingRoot(repoRoot, TEST_DESIGN_ROOT_CANDIDATES),
+    designRoot: firstExistingRoot(exists, DESIGN_ROOT_CANDIDATES),
+    testDesignRoot: firstExistingRoot(exists, TEST_DESIGN_ROOT_CANDIDATES),
   };
 }
 

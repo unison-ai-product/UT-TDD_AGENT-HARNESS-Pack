@@ -88,7 +88,42 @@ GitHub で Pack リポジトリを **Watch → Custom → Releases** に設定�
 
 > **いまの canary 版の制約** (どちらも修正予定です)
 > - release asset から入れた環境では、`ut-tdd status` の更新通知が動きません。`update: check skipped (harness package.json unreadable)` と表示されます ([#867](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/867))。新しい版は、上の Watch で知ってください。
-> - 一度入れた runtime を、新しい版の asset で上書きすることはできません。setup が `consumer_runtime_update_unsupported` で止まり、元の版のまま残ります ([#930](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/930))。新しい版を試すときは、まだ入れていない repository (または新しい clone) に入れてください。
+> - 一度入れた runtime を、新しい版の asset で上書きすることはできません。setup が `consumer_runtime_update_unsupported` で止まり、元の版のまま残ります ([#930](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/930))。新しい版へ移るには、下の「新しい clone へ入れ直す手順」で、新しい clone に入れてください。
+
+### 新しい clone へ入れ直す手順
+
+入れた runtime は、その場で新しい版に更新できません (#930)。新しい版へ移る方法は、プロジェクトの新しい clone を作り、そこへ新しい版を入れ直すことです。
+
+1. プロジェクトの新しい clone を作ります。commit 済みのファイル (設計文書など) は、clone にそのまま付いてきます (origin から clone する場合は、元の clone の commit を先に push してください)。origin remote が必要な点は §0 と同じです。
+2. 新しい clone で、§1 と同じく `.ut-tdd/` を Git の対象から外します (`echo ".ut-tdd/" >> .git/info/exclude`。Windows PowerShell では §1 の `Add-Content` を使います)。
+3. 新しい版の asset 5 つだけを、新しく作った専用のフォルダに置きます (§1 の手順 1 と同じ表の 5 つです)。
+4. 新しい clone の中で、そのフォルダを指定して setup を実行します。`<consumer anchor>` は、**新しい版の** release notes にあるものを使ってください。
+
+   ```sh
+   node <フォルダ>/<版>.ut-tdd.mjs setup --solo --consumer-runtime-release <フォルダ> --expected-consumer-digest <consumer anchor>
+   ```
+
+5. §2 の動作確認チェックリストを実行します (最低限、`node .ut-tdd/bin/ut-tdd.mjs doctor --setup-smoke` が `OK (checked=23, failed=0)` になること)。
+
+動作確認が通るまで、元の clone は消さずに残してください。
+
+**引き継がれるもの・引き継がれないもの**
+
+- commit 済みのファイル (設計文書など) は、元の clone と同じ内容のままです。
+- 元の clone の `.ut-tdd/` (activation と、手元の runtime 状態) は、新しい clone に引き継がれません。新しい clone では、setup が新しい activation を作ります。
+- 元の clone の `.ut-tdd/` の状態を、新しい clone へ移す方法は検証していません。移すことは勧めません。
+
+**つまずきやすい点**
+
+asset を置いたフォルダに、5 つ以外のファイルやフォルダがあると、setup は `consumer_runtime_asset_set_mismatch` で止まります (§5)。作業用のフォルダを直接指定せず、5 つだけを入れた専用のフォルダを使ってください。
+
+**この手順の検証の範囲**
+
+この手順は、canary.7 から canary.8 への入れ直しを、Windows (Node v24.22.3) で 1 回流して確かめただけです。その実測では、新しい版の setup と `doctor --setup-smoke` はどちらも exit 0 で、setup は約 10 秒かかりました。この実測では、新しい clone を元の手元の clone から作り、そのあと origin をプロジェクトの origin に向け直しています。プロジェクトの origin から直接 clone する方法は確かめていません。その場合、元の clone の未 push の commit は付いてこないので、先に push してください。ほかの OS と、ほかの版の組み合わせは確かめていません ([#1879](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/1879))。
+
+### 既存の設計文書の plan: を issue: に直す
+
+既存の設計文書で `plan: docs/plans/PLAN-<id>.md` を使っている場合は、対応する GitHub Issue の番号を確かめ、frontmatter を `issue: <番号>` に変更してください。v0.2.0-canary.8 以降の文書所有者の検査は、旧 `plan:` を所有者として数えません。
 
 ## 4. setup を流し直したとき
 

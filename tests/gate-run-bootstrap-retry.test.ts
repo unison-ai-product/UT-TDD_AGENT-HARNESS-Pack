@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { checkGateRunCoverage } from "../src/doctor/process-quality.ts";
 import { stableId } from "../src/stable-id.ts";
 import { defaultHarnessDbPath, openHarnessDb } from "../src/state-db/index.ts";
 import { migrate } from "../src/state-db/migration.ts";
+import { heavyBeforeAll } from "./support/hook-bounds.ts";
 import { removeTestTree } from "./support/temp-tree.ts";
 
 const EVIDENCE_PATH = ".ut-tdd/gate_runs/gate-run.json";
@@ -184,7 +185,7 @@ describe("gate-run bootstrap retry oracles", () => {
   let controlAfterProjection!: GateWorkflowProjection;
   let controlValidProjection!: GateWorkflowProjection;
 
-  beforeAll(() => {
+  heavyBeforeAll("db", () => {
     const rollbackRepo = newRepo("001");
     roots.push(rollbackRepo);
     writeEvidence(rollbackRepo, { malformed: true });

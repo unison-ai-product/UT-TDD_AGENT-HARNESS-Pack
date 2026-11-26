@@ -11,6 +11,7 @@ This project uses UT-TDD Agent Harness commands as the local orchestration surfa
 - Codex delegation: `ut-tdd codex --role <role> --task "..."`
 - Claude delegation: `ut-tdd claude --role <role> --task "..."`
 - Team run: `ut-tdd team run --definition .ut-tdd/teams/<team>.yaml`
+- Claude lane に宛てた共有 memory (返事・review 依頼・引き継ぎ) を書くときは、`node .ut-tdd/bin/ut-tdd.mjs memory add --notify-claude ...` を使う。動いている Claude セッションの受信箱へ知らせが届く。Claude lane に宛てない memory には付けない。
 
 ## GPT / Codex runtime defaults
 

@@ -59,6 +59,7 @@ interface RequiredProjectHook {
   wrapperArgs: readonly string[];
   onFailure?: "block";
   asyncRewake?: boolean;
+  timeoutSeconds?: number;
 }
 
 /**
@@ -101,6 +102,7 @@ export const REQUIRED = [
     wrapperCommand: wrapperCommand("session start"),
     sourceArgs: args(`\${CLAUDE_PROJECT_DIR}/src/cli.ts`, "session", "start"),
     wrapperArgs: args(WRAPPER_CLI, "session", "start"),
+    timeoutSeconds: 60,
   },
   {
     id: "post-tool-use",
@@ -140,6 +142,14 @@ export const REQUIRED = [
 
 /** REQUIRED の id union。typo を compile error にする (module 評価時 throw の回避)。 */
 export type RequiredProjectHookId = (typeof REQUIRED)[number]["id"];
+
+type TimedProjectHook = Extract<(typeof REQUIRED)[number], { timeoutSeconds: number }>;
+
+export function hookTimeoutSeconds(id: TimedProjectHook["id"]): number {
+  const entry = REQUIRED.find((required): required is TimedProjectHook => required.id === id);
+  if (!entry) throw new Error(`unknown timed project hook id: ${id}`);
+  return entry.timeoutSeconds;
+}
 
 /** setup templates 用: 必須 hook id → 正規 wrapper command (単一定義源)。 */
 export function wrapperHookCommand(id: RequiredProjectHookId): string {

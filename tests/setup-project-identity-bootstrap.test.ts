@@ -149,8 +149,8 @@ describe("project identity bootstrap", () => {
     });
   });
 
-  it("CANDIDATE-U-PROJID-004: a tracked symlink mode is treated as missing", () => {
-    if (win) return;
+  it("CANDIDATE-U-PROJID-004: a tracked symlink mode is treated as missing", (ctx) => {
+    if (win) ctx.skip();
     const root = fixture();
     const target = join(root, "target.json");
     writeFileSync(target, canonicalProjectIdentityBytes("acme/widget"));
@@ -273,8 +273,8 @@ describe("project identity bootstrap", () => {
     expect(readFileSync(path, "utf8")).toContain("other/repo");
   });
 
-  it("rejects an identity path symlink", () => {
-    if (win) return;
+  it("rejects an identity path symlink", (ctx) => {
+    if (win) ctx.skip();
     const root = fixture();
     const target = join(root, "elsewhere.json");
     writeFileSync(target, canonicalProjectIdentityBytes("acme/widget"));
@@ -424,8 +424,8 @@ describe("project identity bootstrap", () => {
     });
   });
 
-  it("CANDIDATE-U-PROJID-025: an OS-resolved 8.3 path preserves identity", () => {
-    if (!win) return;
+  it("CANDIDATE-U-PROJID-025: an OS-resolved 8.3 path preserves identity", (ctx) => {
+    if (!win) ctx.skip();
     const root = trackedFixture();
     const alternate = windowsShortPath(root);
     expect(alternate).not.toBe("");

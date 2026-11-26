@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { linkSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { ensureDir } from "../shared/fs.ts";
 
 export interface GateRunEvidenceInput {
@@ -126,14 +126,32 @@ export function buildGateRunEvidence(input: GateRunEvidenceInput): GateRunEviden
   };
 }
 
-function assertGateRunIdAvailable(dir: string, gateRunId: string): void {
+const EXISTING_EVIDENCE_SCAN_FAILED = "existing_evidence_scan_failed";
+
+export function formatGateRunEvidenceWarning(error: unknown): string {
+  const detail =
+    error instanceof Error && "code" in error && error.code === EXISTING_EVIDENCE_SCAN_FAILED
+      ? error.message
+      : String(error);
+  return `gate run evidence write failed: ${detail}`;
+}
+
+function assertGateRunIdAvailable(repoRoot: string, dir: string, gateRunId: string): void {
   const existingFiles = readdirSync(dir).filter((name) => name.endsWith(".json"));
   for (const name of existingFiles) {
     const existingPath = join(dir, name);
-    const existing = JSON.parse(readFileSync(existingPath, "utf8")) as {
-      gate_run_id?: unknown;
-    };
-    if (existing.gate_run_id === gateRunId) {
+    let existingId: unknown;
+    try {
+      const existing = JSON.parse(readFileSync(existingPath, "utf8")) as {
+        gate_run_id?: unknown;
+      };
+      existingId = existing.gate_run_id;
+    } catch {
+      const code = EXISTING_EVIDENCE_SCAN_FAILED;
+      const relativePath = relative(repoRoot, existingPath).split(sep).join("/");
+      throw Object.assign(new Error(`${code}: ${JSON.stringify(relativePath)}`), { code });
+    }
+    if (existingId === gateRunId) {
       const error = Object.assign(new Error("EEXIST: gate run evidence ID already exists"), {
         code: "EEXIST",
       });
@@ -149,7 +167,7 @@ export function writeGateRunEvidence(
   const evidence = buildGateRunEvidence(input);
   const dir = gateRunEvidenceDir(input.repoRoot);
   ensureDir(dir, { recursive: true });
-  assertGateRunIdAvailable(dir, evidence.gate_run_id);
+  assertGateRunIdAvailable(input.repoRoot, dir, evidence.gate_run_id);
 
   const absolutePath = join(
     dir,

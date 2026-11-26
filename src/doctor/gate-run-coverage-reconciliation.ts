@@ -176,10 +176,6 @@ function currentStats(
     workflowRuns: count(db, "SELECT COUNT(*) AS value FROM workflow_runs"),
     workflowPlansWithoutGateRun: failure.workflowPlansWithoutGateRun,
     orphanGateRuns: failure.orphanGateRuns,
-    blankPlanGateRuns: count(
-      db,
-      "SELECT COUNT(*) AS value FROM gate_runs WHERE COALESCE(plan_id, '') = ''",
-    ),
     invalidEvidenceFindings: failure.invalidEvidenceFindings,
   };
 }
@@ -426,7 +422,7 @@ export function loadGateRunCoverageStats(repoRoot: string): GateRunCoverageStats
     } catch (error) {
       if (!(error instanceof GateRunCoverageMismatch)) throw error;
       if (uninitialized) {
-        return { gateRuns: 0, workflowRuns: 0, blankPlanGateRuns: 0, ...error.failure };
+        return { gateRuns: 0, workflowRuns: 0, ...error.failure };
       }
       return currentStats(db, error.failure);
     }

@@ -46,6 +46,12 @@ import {
 } from "../vmodel-contract/adapters/yaml-contract-loader.ts";
 import { evaluateRightArmStaticGate } from "./right-arm-static.ts";
 
+export {
+  checkPairRetirement,
+  checkPairRetirementFromEnvironment,
+  type PairRetirementCheck,
+} from "./pair-retirement.ts";
+
 const REVIEW_ONLY_STATIC_GATES = new Set(["G0.5", "R4"]);
 
 export interface StaticGateInput {

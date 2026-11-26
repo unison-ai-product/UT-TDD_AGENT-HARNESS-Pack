@@ -27,14 +27,14 @@ const ALLOWED_SCRIPT_WRAPPERS = new Set([
   "scripts/ut-tdd.ps1",
   "scripts/run-vitest-snapshot.ts",
 ]);
+const WINDOWS_CI_SHARD_SCRIPTS = ["aggregate", "evidence", "partition", "measurement"];
 const ALLOWED_NODE_SCRIPT_ENTRYPOINTS = new Set([
   "scripts/build-node.mjs",
   "scripts/node-generation-ci.mjs",
   "scripts/node-generation-ci-aggregate.mjs",
+  "scripts/oracle-baseline-ratchet.mjs",
   "scripts/pack-canary-acceptance.mjs",
-  "scripts/windows-ci-shard-aggregate.mjs",
-  "scripts/windows-ci-shard-evidence.mjs",
-  ...["partition", "measurement"].map((check) => `scripts/windows-ci-shard-${check}.mjs`),
+  ...WINDOWS_CI_SHARD_SCRIPTS.map((check) => `scripts/windows-ci-shard-${check}.mjs`),
 ]);
 const VITEST_ENTRYPOINT = /\b(?:vitest\s+run|scripts[\\/]run-vitest-snapshot\.ts)\b/;
 

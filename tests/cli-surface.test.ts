@@ -12,7 +12,6 @@ import {
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { describe, expect, it } from "vitest";
 import { stringify } from "yaml";
 import { utTddCliProbe } from "../src/cli/distribution.ts";
 import {
@@ -31,6 +30,7 @@ import { digestMaterializedReleaseEntries } from "../src/setup/release-materiali
 import { defaultHarnessDbPath, openHarnessDb, upsertRow } from "../src/state-db/index.ts";
 import { migrate } from "../src/state-db/migration.ts";
 import { MODEL_IDS } from "../src/team/model-policy.ts";
+import { describe, expect, heavyIt, it } from "./support/hook-bounds.ts";
 import { stubSyntheticPrivacyHome } from "./support/privacy-denylist-home.ts";
 import { removeTestTree } from "./support/temp-tree.ts";
 
@@ -295,17 +295,16 @@ describe("L7 CLI surface closure", () => {
     );
   }, 15_000);
 
-  it("runs a named consumer-safe doctor profile without relying on setup-smoke alias", () => {
-    const run = runCli(["doctor", "--profile", "consumer-toolchain", "--json"]);
-    const payload = JSON.parse(run.stdout);
-
-    expect(run.status).toBe(0);
-    expect(payload.ok).toBe(true);
-    expect(payload.messages).toEqual(
-      expect.arrayContaining([expect.stringContaining("doctor: toolchain-pin - OK")]),
-    );
-    expect(payload.messages.join("\n")).not.toContain("plan-governance");
-  }, 20_000);
+  heavyIt(
+    "runs a named consumer-safe doctor profile without relying on setup-smoke alias",
+    ["db", 40_000],
+    () => {
+      const result = parseCliJson(runCli(["doctor", "--profile", "consumer-toolchain", "--json"]));
+      expect(result.ok).toBe(true);
+      expect(result.messages).toContainEqual(expect.stringContaining("doctor: toolchain-pin - OK"));
+      expect(result.messages.join("\n")).not.toContain("plan-governance");
+    },
+  );
 
   it("fail-closes unsupported doctor profile as machine-readable JSON", () => {
     const run = runCli(["doctor", "--profile", "bogus", "--json"]);
@@ -622,32 +621,12 @@ describe("L7 CLI surface closure", () => {
     }
   }, 20_000);
 
-  it("passes plan skill injection through task route adapter plans", () => {
-    const sourcePlan = join(
-      repoRoot,
-      "docs",
-      "plans",
-      "PLAN-L7-135-dynamic-skill-injection-materialization.md",
-    );
-    if (!existsSync(sourcePlan)) return;
+  it("rejects the retired plan option when routing a task", () => {
+    const run = runCli(["task", "route", "--role", "se", "--plan", "PLAN-L7-135", "--json"]);
 
-    const run = runCli([
-      "task",
-      "route",
-      "--role",
-      "se",
-      "--plan",
-      sourcePlan,
-      "--mode",
-      "codex-only",
-      "--execute",
-      "--json",
-    ]);
-    const payload = JSON.parse(run.stdout);
-
-    expect(run.status).toBe(0);
-    expect(payload.adapterPlan.context_injection.required_paths.length).toBeGreaterThan(0);
-    expect(payload.adapterPlan.stdin).toContain("UT-TDD context injection:");
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("unknown option '--plan'");
+    expect(run.stdout).toBe("");
   }, 20_000);
 
   it("keeps proposal advisory lanes aligned with executable task routing", () => {

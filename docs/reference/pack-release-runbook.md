@@ -87,6 +87,72 @@ node src/cli.ts distribution sync-pack --repo-dir <Pack の checkout> --tag <v0.
 3. Pack に PR を出し、Pack の CI を green にします。Draft の間は公開しません。
 4. 公開に使う tag は C2 に付けます。tag は書き換えません (取り消せないため)。
 
+### 4.1 C1 のビルド入力が source commit の blob と一致することを照らす
+
+[未自動 #1897] 人が行います。`package` の照合は、ビルド入力の期待 bytes を C1 の blob とするため、`sync-pack` の後から C1 の commit までの間に人が書き換えた bytes を検出できません (`pack-build-inputs.md` §5.1、残余リスク)。この手順がその穴を塞ぎます。
+
+**いつ行うか**: 手順 1 で C1 を commit した後、§5 (`package`) の前です。C1 の SHA が決まっていればよく、C2 (手順 2) の前後どちらでも構いません。
+
+**前提**: source の checkout は §2 で固定した SHA にあり、作業木が clean であることとします。ビルド入力の一覧は、source の `src/setup/pack-build-inputs.ts` (`selectPackBuildInputs`、一覧の単一の正本) から作ります。一覧を手で書き写しません。一覧だけを出す専用のコマンドは無いため、その関数を Node で呼びます。
+
+```bash
+SRC_DIR=<source の clone の絶対 path>
+PACK_DIR=<Pack の checkout の絶対 path>
+C1=<C1 の SHA>
+WORK=<空の作業 directory (Pack の checkout の外)>
+
+# 1. C1 の Source-Commit (40 桁) を読む。無い、または 40 桁でなければ中止する
+SRC=$(git -C "$PACK_DIR" log -1 --format='%(trailers:key=Source-Commit,valueonly,unfold)' "$C1" | tr -d '[:space:]')
+echo "$SRC" | grep -Eq '^[0-9a-f]{40}$' || { echo "STOP: Source-Commit が読めない"; exit 1; }
+
+# 2. その commit が source の checkout にあり、§2 で固定した HEAD と同じことを確かめる
+git -C "$SRC_DIR" cat-file -e "$SRC^{commit}" || { echo "STOP: source commit が無い"; exit 1; }
+[ "$SRC" = "$(git -C "$SRC_DIR" rev-parse HEAD)" ] || { echo "STOP: source の HEAD が Source-Commit と違う"; exit 1; }
+
+# 3. ビルド入力の path の一覧を作る (Pack 側も source 側も同じ相対 path。pack-build-inputs.md §5)
+node --input-type=module -e '
+import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+const [dir, sha] = process.argv.slice(1);
+const { selectPackBuildInputs } = await import(pathToFileURL(dir + "/src/setup/pack-build-inputs.ts").href);
+const tree = execFileSync("git", ["-C", dir, "ls-tree", "-r", "--name-only", sha], { encoding: "utf8" }).split("\n").filter(Boolean);
+const s = selectPackBuildInputs(tree);
+if (!s.ok) { console.error(JSON.stringify(s.reasons)); process.exit(1); }
+console.log(s.paths.join("\n"));
+' "$SRC_DIR" "$SRC" > "$WORK/build-inputs.txt" || { echo "STOP: 一覧が作れない"; exit 1; }
+wc -l < "$WORK/build-inputs.txt"   # 件数を控える
+
+# 4. path ごとに、C1 の blob の OID と source commit の blob の OID を比べ、全行を記録する
+while IFS= read -r p; do
+  p=${p%$'\r'}
+  c1_oid=$(git -C "$PACK_DIR" rev-parse "$C1:$p" 2>/dev/null) || c1_oid=MISSING
+  src_oid=$(git -C "$SRC_DIR" rev-parse "$SRC:$p" 2>/dev/null) || src_oid=MISSING
+  if [ "$c1_oid" = MISSING ] || [ "$c1_oid" != "$src_oid" ]; then s=MISMATCH; else s=ok; fi
+  echo "$s $p $c1_oid $src_oid"
+done < "$WORK/build-inputs.txt" > "$WORK/build-input-oids.txt"
+if grep -q '^MISMATCH' "$WORK/build-input-oids.txt"; then echo "STOP"; grep '^MISMATCH' "$WORK/build-input-oids.txt"; else echo "OK"; fi
+```
+
+- 比べる OID は、**commit 済みの C1** の blob です (`git rev-parse "$C1:<path>"`)。`git hash-object <path>` は作業木の現在の bytes を読むため、commit の後に書き換えた file や、commit していない変更を見落とします。この手順の目的は C1 に入った bytes の確認なので、作業木ではなく commit を読みます。
+- 手順 3 は、source の `selectPackBuildInputs` をそのまま使います (一覧の複製を持ちません)。source が §2 の SHA に固定され clean であることが、一覧と source の blob を同じ commit に揃える前提です。
+- `$WORK` の 2 つの file は一時 file です。Pack の checkout の外に置き、commit しません。
+
+**止める条件**: 次のどれか 1 つでも当てはまれば、**`package` に進まず公開を止めます**。
+- `Source-Commit` の trailer が無い、または 40 桁でない。
+- `Source-Commit` の commit が source の checkout に無い、または source の HEAD と違う。
+- 一覧が作れない (`pack_build_input_*` の理由コードが出る)。
+- C1 に無い path が 1 件でもある (`MISSING`)。
+- OID が 1 件でも一致しない (`MISMATCH`)。
+
+止めたときは、C1 を作り直します (ビルド入力を直接書き換えず、`sync-pack` の出力をそのまま `git add` します)。原因が分からなければ #1897 に報告します。
+
+**証跡**: 次を公開 Issue のコメントに残します (件数は §7 の release note にも書きます)。
+- `Source-Commit` の SHA と C1 の SHA。
+- 一覧の件数。
+- path ごとの 2 つの OID の組 (`build-input-oids.txt` の全行) と、最後に `OK` と出たこと。
+
+この手順は、コマンドによる検査が入るまでの暫定です。入ったら本節の「[未自動 #1897]」を取り除き、コマンドの使い方に置き換えます。
+
 ## 5. asset を作る (`package`)
 
 [自動] 5 asset の生成。[未自動 #1882] ビルド入力の欠落の検査 (Green 後は理由コードで止まります)。

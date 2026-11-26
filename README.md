@@ -213,11 +213,10 @@ Claude Code (VS Code 拡張を含む) と Codex の hook も、この runtime �
 **新しい版を知るには**、GitHub で Pack リポジトリを **Watch → Custom → Releases** に設定してください。公開したときに通知が届きます。
 
 > [!WARNING]
-> **いまの canary 版の制約** (どちらも修正予定です)
+> **いまの canary 版 (v0.2.0-canary.8) の制約** (3 件とも修正予定です)
 > - release asset から入れた環境では、`ut-tdd status` の更新通知が動きません。`update: check skipped (harness package.json unreadable)` と表示されます ([#867](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/867))。
-> - 一度入れた runtime を、新しい版の asset で上書きすることはできません。setup が `consumer_runtime_update_unsupported` で止まり、元の版のまま残ります ([#930](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/930))。
->
-> 新しい版を試すときは、まだ入れていない repository (または新しい clone) に入れてください。
+> - 一度入れた runtime を、新しい版の asset で上書き (その場で更新) することはできません。setup が `consumer_runtime_update_unsupported` で止まり、元の版のまま残ります ([#930](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/930))。新しい版へ移るには、新しい clone に入れ直してください。
+> - 負荷の高い環境では、Claude Code の SessionStart hook が設定上の上限 (30 秒) を超えて cancel されることがあります。負荷の低い Windows の実測では cold 約 9.4 秒、warm 約 7.1〜8.8 秒でしたが、負荷の高い状態では 30 秒を超えました ([#1938](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS/issues/1938)。次の canary で処理を軽くし、上限も見直す予定です)。
 
 setup の再実行は**非破壊**です。あなたが所有するファイルは上書きしません (対話シェルではファイルごとに `[y/N]` で確認し、既定は N。非対話シェルでは常に既存のファイルを残します)。adapter doc は managed block の中だけを更新し、`.ut-tdd/` の runtime 状態は消しません。詳細は [セットアップガイド §4](docs/reference/setup-guide.md) にあります。
 
@@ -225,10 +224,10 @@ setup の再実行は**非破壊**です。あなたが所有するファイル�
 
 困ったことや、期待と違う動きがあったら、Pack repo の [Issues](https://github.com/unison-ai-product/UT-TDD_AGENT-HARNESS-Pack/issues/new) から報告してください。
 
-タイトルは「[版] 何をしたら何が起きたか」の形にして、1 行で書いてください (例: `[canary.6] setup が consumer anchor 不一致で止まる`)。
+タイトルは「[版] 何をしたら何が起きたか」の形にして、1 行で書いてください (例: `[canary.8] setup が consumer anchor 不一致で止まる`)。
 本文には次の項目を書いてください。分からない項目は「不明」で構いません。
 
-1. 版 (例: `v0.2.0-canary.6`)
+1. 版 (例: `v0.2.0-canary.8`)
 2. OS (Windows / Linux / WSL) と、その版
 3. `node -v` の出力
 4. 実行したコマンド (そのままコピーしたもの)
@@ -433,9 +432,12 @@ rules are enforced by schema, lint, doctor gates, and hooks — not by prose.
   Setup verifies the SHA-256 against the anchor and writes nothing on mismatch.
   Afterwards use `node .ut-tdd/bin/ut-tdd.mjs <command>`. Only Node.js 24 is
   needed; no `npm ci`.
-- **Known canary limits**: the `status` update notice does not work for
-  release-asset installs (#867), and an installed runtime cannot yet be
-  upgraded in place (#930). Watch the Pack repository's Releases instead.
+- **Known canary limits (v0.2.0-canary.8)**: the `status` update notice does
+  not work for release-asset installs (#867); an installed runtime cannot yet
+  be upgraded in place, so move to a new version by installing into a new clone
+  (#930); and under heavy load the Claude Code SessionStart hook can exceed its
+  30-second timeout and be cancelled (#1938). Watch the Pack repository's
+  Releases for new versions.
 - **Bug reports**: open an issue on the Pack repository with the version, OS,
   `node -v`, the exact command, the full output, and the steps to reproduce.
   The repository is public — never paste secrets or personal data.

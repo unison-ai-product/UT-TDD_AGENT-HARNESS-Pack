@@ -38,7 +38,7 @@ issue: <Issue 番号>
 
 #### 第4章 物理設計・インデックス
 
-> ※ 全テーブルに tenant_id 先頭のインデックスを基本とする。
+> ※ 適用条件: tenant-isolation=row-level のとき (L3 第9章 `DEC-NNN`)、テナント識別列を先頭にしたインデックスを基本とする。
 
 | テーブル | インデックス | 種別 | 目的 |
 |---|---|---|---|
@@ -49,7 +49,7 @@ issue: <Issue 番号>
 
 - <項目を記入>
 
-#### 第6章 制約・RLS
+#### 第6章 制約・行レベルのアクセス制御
 
 - <項目を記入>
 
@@ -63,28 +63,44 @@ issue: <Issue 番号>
 
 - <項目を記入>
 
+#### 第9章 方式の決定の詳細
+
+> ※ 決定そのもの (選んだ方式・理由・却下した案) は L3 要件定義書 第9章の決定記録 (`DEC-NNN`) が正本で、ここには置かない。ここには、選んだ方式を実現する物理設計の詳細だけを置く。節の冒頭で、どの決定記録の詳細かを参照する。
+
+##### 9-1 データの保存方式の詳細
+
+参照する決定記録: <DEC-NNN> (論点 ID: data-store)
+
+- <項目を記入>
+
+##### 9-2 テナント分離の詳細
+
+参照する決定記録: <DEC-NNN> (論点 ID: tenant-isolation)
+
+- <項目を記入>
+
 ### 移植元: diagrams.yaml `ER図` (semantic item catalog `d_er` skeleton)
 
 > trace: 基本設計 第6章
 
-> 全テーブルが tenant_id を保持しRLSで分離。PK=主キー/FK=外部キー。
+> PK=主キー/FK=外部キー。適用条件: tenant-isolation=row-level のときだけ、各テーブルにテナント識別列(FK)を足す。分離の方式は L3 第9章の `DEC-NNN` で決まっており、それが別の方式のときは、下の tenants とのテナント関連を分離の単位 (schema / DB の対応表) に読み替える。
 
 | エンティティ id | 名称 | フィールド |
 |---|---|---|
-| tenants | tenants テナント | PK id, name, plan |
-| users | users ユーザー | PK id, FK tenant_id, email, role |
-| tasks | tasks タスク | PK id, FK tenant_id, FK project_id, status |
-| subs | subscriptions 契約 | PK id, FK tenant_id, status |
-| projects | projects PJ | PK id, FK tenant_id, name |
-| audit | audit_logs 監査 | PK id, FK tenant_id, action |
+| tenants | tenants テナント (適用条件: tenant-isolation!=none-single-org のとき) | PK id, name, plan |
+| users | users ユーザー | PK id, email, role |
+| tasks | tasks タスク | PK id, FK project_id, status |
+| subs | subscriptions 契約 | PK id, status |
+| projects | projects PJ | PK id, name |
+| audit | audit_logs 監査 | PK id, action |
 
 | 関連元 | 関連先 | 多重度 |
 |---|---|---|
-| tenants | users | 1..N |
-| tenants | projects | 1..N |
+| tenants | users | 1..N (適用条件: tenant-isolation!=none-single-org のとき) |
+| tenants | projects | 1..N (適用条件: tenant-isolation!=none-single-org のとき) |
 | projects | tasks | 1..N |
-| tenants | subs | 1..N |
-| tenants | audit | 1..N |
+| tenants | subs | 1..N (適用条件: tenant-isolation!=none-single-org のとき) |
+| tenants | audit | 1..N (適用条件: tenant-isolation!=none-single-org のとき) |
 
 ### 移植元: ZIP-DOC-039 イベントスキーマ
 

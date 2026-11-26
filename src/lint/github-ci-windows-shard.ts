@@ -10,6 +10,18 @@ const shard = githubExpression("matrix.shard");
 const temp = githubExpression("runner.temp");
 const attempt = githubExpression("github.run_attempt");
 const evidenceDirectory = `${temp}/windows-ci-evidence`;
+const pairRetirementEnv = {
+  PAIR_RETIREMENT_EVENT_NAME: githubExpression("github.event_name"),
+  PAIR_RETIREMENT_BASE_SHA: githubExpression("github.event.pull_request.base.sha"),
+  PAIR_RETIREMENT_HEAD_SHA: githubExpression("github.event.pull_request.head.sha"),
+};
+
+export const LINUX_FULL_REGRESSION_ENV = {
+  UT_TDD_DOCTOR_RESULT_FILE: `${temp}/ut-tdd-doctor-result.json`,
+  UT_TDD_DOCTOR_RESULT_ROOT: githubExpression("github.workspace"),
+  ...pairRetirementEnv,
+};
+
 const reportCommand = [
   "$report = Join-Path $env:RUNNER_TEMP 'windows-vitest-report.json'",
   "if (Test-Path -LiteralPath $report) { throw 'Vitest report path already exists' }",
@@ -43,6 +55,7 @@ export const WINDOWS_SHARD_REGRESSION_STEPS = [
     name: "test — Windows full 回帰 (vitest run, windows leg)",
     id: "windows-full-regression",
     if: full,
+    env: pairRetirementEnv,
     run: reportCommand,
   },
   {

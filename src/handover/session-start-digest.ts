@@ -10,6 +10,11 @@ import type { MemoryEntry } from "../memory/index.ts";
 import type { ClaudeInboxBacklogSummary } from "../runtime/claude-memory-wake.ts";
 import type { HarnessDb } from "../state-db/index.ts";
 
+export const EXTERNAL_OBSERVATIONS_NOT_CHECKED = [
+  "  inbox PR state: not checked (pending reviews retained)",
+  "  post-merge backstop: not checked",
+] as const;
+
 export interface GateRunDigestRow {
   gate_id: string;
   status: string;
@@ -22,6 +27,7 @@ export interface SessionStartDigest {
   head_commits: string[];
   memory: MemoryEntry[];
   escalation_lines: string[];
+  external_observations_status?: "not_checked";
   post_merge_backstop?: PostMergeBackstopResult;
   unclaimed_inbox?: ClaudeInboxBacklogSummary;
 }
@@ -68,6 +74,7 @@ export function selectSessionStartDigest(
   headCommits: string[],
   input: {
     escalationLines?: string[];
+    externalObservationsStatus?: "not_checked";
     memory?: MemoryEntry[];
     postMergeBackstop?: PostMergeBackstopResult;
     unclaimedInbox?: ClaudeInboxBacklogSummary;
@@ -77,7 +84,7 @@ export function selectSessionStartDigest(
   const memory = input.memory ?? [];
   const postMergeBackstop =
     input.postMergeBackstop ??
-    (db.path === ":memory:"
+    (db.path === ":memory:" || input.externalObservationsStatus === "not_checked"
       ? undefined
       : scanPostMergeBackstop({
           repoRoot: resolve(dirname(resolve(db.path)), ".."),
@@ -91,6 +98,7 @@ export function selectSessionStartDigest(
       head_commits: headCommits.slice(0, 5),
       memory,
       escalation_lines: escalationLines.filter(Boolean),
+      external_observations_status: input.externalObservationsStatus,
       post_merge_backstop: postMergeBackstop,
       unclaimed_inbox: input.unclaimedInbox,
     };
@@ -116,6 +124,9 @@ export function renderSessionStartDigest(digest: SessionStartDigest): string {
     lines.push(`  gate: ${gate.gate_id}=${gate.status}`);
   }
   for (const line of digest.escalation_lines) lines.push(`  escalation: ${line}`);
+  if (digest.external_observations_status === "not_checked") {
+    lines.push(...EXTERNAL_OBSERVATIONS_NOT_CHECKED);
+  }
   if (digest.post_merge_backstop) {
     lines.push(`  ${formatPostMergeBackstop(digest.post_merge_backstop)}`);
   }

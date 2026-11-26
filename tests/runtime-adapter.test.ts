@@ -250,8 +250,8 @@ describe("runtime adapter plan", () => {
     }
   });
 
-  it("U-ADAPTER-009: probes Windows .cmd providers with spaces in the path", () => {
-    if (process.platform !== "win32") return;
+  it("U-ADAPTER-009: probes Windows .cmd providers with spaces in the path", (ctx) => {
+    if (process.platform !== "win32") ctx.skip();
     const root = mkdtempSync(join(tmpdir(), "ut adapter cmd probe "));
     try {
       const explicit = join(root, "codex.cmd");

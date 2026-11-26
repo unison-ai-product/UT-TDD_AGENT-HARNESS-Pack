@@ -190,21 +190,20 @@ function writeFakeCodex(binDir: string): string {
 }
 describe("runtime hook entrypoints", () => {
   registerPlanret014LifecycleOracle({ runCli, readSessionStartEvents });
-  describe("U-SLOG-011: source開発repo自身の5記録hookを30秒にする", () => {
-    it("U-SLOG-011: source開発repo自身の5記録hookを30秒にする", () => {
+  describe("U-SLOG-011: source開発repo自身のPostToolUseとStopの記録hookを30秒にする", () => {
+    it("U-SLOG-011: source開発repo自身のPostToolUseとStopの記録hookを30秒にする", () => {
       const claude = JSON.parse(readFileSync(join(repoRoot, ".claude", "settings.json"), "utf8"));
       const codex = JSON.parse(readFileSync(join(repoRoot, ".codex", "hooks.json"), "utf8"));
 
       expect(claude.hooks.PostToolUse[0].hooks[0].timeout).toBe(30);
       expect(claude.hooks.Stop[0].hooks[0].timeout).toBe(30);
-      expect(codex.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
       expect(codex.hooks.PostToolUse[0].hooks[0].timeout).toBe(30);
       expect(codex.hooks.Stop[0].hooks[0].timeout).toBe(30);
     });
   });
 
-  describe("U-SLOG-010: Pack consumerの5記録hookを30秒にする", () => {
-    it("U-SLOG-010: Pack consumerの5記録hookを30秒にする", () => {
+  describe("U-SLOG-010: Pack consumerのPostToolUseとStopの記録hookを30秒にする", () => {
+    it("U-SLOG-010: Pack consumerのPostToolUseとStopの記録hookを30秒にする", () => {
       const claudeSettings = [
         JSON.parse(
           readFileSync(
@@ -215,7 +214,6 @@ describe("runtime hook entrypoints", () => {
         JSON.parse(BUILTIN_GITHUB_TEMPLATES["adapter/.claude/settings.json"]),
       ];
       for (const settings of claudeSettings) {
-        expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
         expect(settings.hooks.PostToolUse[0].hooks[0].timeout).toBe(30);
         expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(30);
         expect(
@@ -236,7 +234,6 @@ describe("runtime hook entrypoints", () => {
         JSON.parse(BUILTIN_GITHUB_TEMPLATES["adapter/.codex/hooks.json"]),
       ];
       for (const settings of codexHooks) {
-        expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
         expect(settings.hooks.PostToolUse[0].hooks[0].timeout).toBe(30);
         expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(30);
         expect(
@@ -262,14 +259,12 @@ describe("runtime hook entrypoints", () => {
       ),
     ];
 
-    expect(sourceSettings.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
     expect(sourceSettings.hooks).toMatchObject({
       PreToolUse: [{ hooks: [{ timeout: 5 }] }, { hooks: [{ timeout: 5 }] }],
       Stop: [{}, { hooks: [{ timeout: 930 }] }],
       SubagentStop: [{ hooks: [{ timeout: 5 }] }],
     });
     for (const settings of consumerSettings) {
-      expect(settings.hooks.SessionStart[0].hooks[0].timeout).toBe(30);
       expect(settings.hooks).toMatchObject({
         PreToolUse: [{ hooks: [{ timeout: 5 }] }, { hooks: [{ timeout: 5 }] }],
         Stop: [{}, { hooks: [{ timeout: 930 }] }],
