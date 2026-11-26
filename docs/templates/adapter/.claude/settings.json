@@ -35,7 +35,7 @@
             "type": "command",
             "command": "node",
             "args": [".ut-tdd/bin/ut-tdd.mjs","session","start"],
-            "timeout": 30,
+            "timeout": 60,
             "statusMessage": "session-log: session start (fail-open)"
           }
         ]

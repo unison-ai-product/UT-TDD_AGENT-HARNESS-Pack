@@ -31,7 +31,7 @@
           {
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.ut-tdd/bin/ut-tdd.mjs\" session start",
-            "timeout": 30,
+            "timeout": 60,
             "statusMessage": "session-log: session start (fail-open)"
           }
         ]

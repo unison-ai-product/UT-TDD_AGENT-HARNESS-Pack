@@ -38,7 +38,7 @@ issue: <Issue 番号>
 
 ### 第4章 イベント計測設計
 
-> ※ プロダクト分析用のイベント。命名は snake_case、共通プロパティに tenant_id/user_id/timestamp。
+> ※ プロダクト分析用のイベント。命名は snake_case、共通プロパティに user_id/timestamp (適用条件: tenant-isolation!=none-single-org のときはテナント識別子も)。
 
 | イベント名 | 発火点 | 主なプロパティ |
 |---|---|---|

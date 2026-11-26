@@ -1,13 +1,5 @@
 import { execFileSync } from "node:child_process";
-import {
-  chmodSync,
-  cpSync,
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -24,6 +16,7 @@ import { openHarnessDb } from "../../src/state-db/index.ts";
 import { migrate } from "../../src/state-db/migration.ts";
 import { projectVmodelAuthoring } from "../../src/state-db/vmodel-projections.ts";
 import { heavyAfterAll, heavyBeforeAll } from "../support/hook-bounds.ts";
+import { removeTestTree } from "../support/temp-tree.ts";
 import { headSnapshotRoot } from "../support/workspace-roots.ts";
 
 const issueOnlyCatalogPaths = [
@@ -60,7 +53,7 @@ heavyBeforeAll(["db", 120000], () => {
 }); // 48s measured, bounded per #1063
 
 heavyAfterAll("teardown", () => {
-  if (issueOnlyFixtureRoot) rmSync(issueOnlyFixtureRoot, { recursive: true, force: true });
+  if (issueOnlyFixtureRoot) removeTestTree(issueOnlyFixtureRoot);
 });
 
 describe("U-DISPPTR-001 issue-only projection", () => {
@@ -269,7 +262,7 @@ function createIssueOnlyFixture(): string {
     );
     return fixtureRoot;
   } catch (error) {
-    rmSync(fixtureRoot, { recursive: true, force: true });
+    removeTestTree(fixtureRoot);
     throw error;
   }
 }

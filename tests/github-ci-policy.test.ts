@@ -1642,7 +1642,7 @@ describe("U-OIDBASE-013: Issue #1099 必須PR baseline ratchet", () => {
     };
     const job = workflow.jobs["harness-check-linux"];
     const ratchetSteps = (job.steps ?? []).filter((step) =>
-      step.run?.includes("checkOracleBaselineRatchet"),
+      step.run?.includes("scripts/oracle-baseline-ratchet.mjs"),
     );
     // 足場ではこのassertionがRed。存在しないscriptの実行失敗をRedと数えない。
     expect(ratchetSteps).toHaveLength(1);
@@ -1664,7 +1664,7 @@ describe("U-OIDBASE-013: Issue #1099 必須PR baseline ratchet", () => {
       .split(/\r?\n/)
       .filter((line) => !/^\s*(?:#|\/\/)/.test(line))
       .join("\n");
-    expect(executableRun).toMatch(/\bcheckOracleBaselineRatchet\s*\(/);
+    expect(executableRun.trim()).toBe("node scripts/oracle-baseline-ratchet.mjs");
     const binding = JSON.stringify(step);
     expect(binding).toContain("$" + "{{ github.event_name }}");
     expect(binding).toContain("$" + "{{ github.sha }}");

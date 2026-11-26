@@ -317,7 +317,6 @@ describe("gate-run-coverage doctor", () => {
       workflowRuns: 2,
       workflowPlansWithoutGateRun: 1,
       orphanGateRuns: 1,
-      blankPlanGateRuns: 0,
       invalidEvidenceFindings: 0,
     });
 
@@ -335,7 +334,6 @@ describe("gate-run-coverage doctor", () => {
       workflowRuns: 2,
       workflowPlansWithoutGateRun: 1,
       orphanGateRuns: 1,
-      blankPlanGateRuns: 0,
       invalidEvidenceFindings: 0,
     });
 
@@ -352,7 +350,6 @@ describe("gate-run-coverage doctor", () => {
       workflowRuns: 2,
       workflowPlansWithoutGateRun: 0,
       orphanGateRuns: 0,
-      blankPlanGateRuns: 0,
       invalidEvidenceFindings: 0,
     });
 
@@ -360,13 +357,12 @@ describe("gate-run-coverage doctor", () => {
     expect(gateRunCoverageMessages(result).join("\n")).toContain("gate-run-coverage - OK");
   });
 
-  it("analyzer accepts one blank-plan gate when the reciprocal projection is complete", () => {
+  it("analyzer accepts one gate when the reciprocal projection is complete", () => {
     const result = analyzeGateRunCoverage({
       gateRuns: 1,
       workflowRuns: 1,
       workflowPlansWithoutGateRun: 0,
       orphanGateRuns: 0,
-      blankPlanGateRuns: 1,
       invalidEvidenceFindings: 0,
     });
 

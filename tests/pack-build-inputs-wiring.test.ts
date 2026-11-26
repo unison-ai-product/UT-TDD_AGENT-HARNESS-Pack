@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, type TestContext } from "vitest";
 import { stringify } from "yaml";
 import { packageConsumerRuntimeRelease } from "../src/cli/distribution.ts";
 import {
@@ -27,7 +27,7 @@ import {
   digestConsumerRuntimeBytes,
   digestMaterializedReleaseEntries,
 } from "../src/setup/index.ts";
-import { heavyAfterAll, heavyBeforeAll } from "./support/hook-bounds.ts";
+import { heavyAfterAll, heavyBeforeAll, heavyIt } from "./support/hook-bounds.ts";
 import {
   useSyntheticPrivacyHome,
   writeSyntheticPrivacyDenylist,
@@ -201,6 +201,12 @@ function kindsOf(stdout: string): unknown[] {
   return Array.isArray(findings) ? findings.map((finding) => pick(finding, "kind")) : [];
 }
 
+function registeredPackTests(ctx: TestContext, id: string) {
+  return (ctx.task.suite?.tasks ?? [])
+    .filter((task) => task.type === "test")
+    .filter((task) => task.name.startsWith(`${id}:`));
+}
+
 function walkBytes(root: string): Map<string, string> {
   const out = new Map<string, string>();
   if (!existsSync(root)) return out;
@@ -316,35 +322,39 @@ describe("U-PKBIN sync-pack / package wiring", () => {
     expect(pick(json, "pack", "copiedArtifacts")).toBe(seedArtifactPaths.length);
   });
 
-  it("U-PKBIN-008: --prune-local はビルド入力を消さず、一覧に無い stale file だけを消す", () => {
-    const source = cloneSource("c008");
-    const packDir = join(scratchRoot, "c008-pack");
-    mkdirSync(packDir, { recursive: true });
-    const first = runDistribution(source, privacyHome.path, [
-      "sync-pack",
-      "--repo-dir",
-      packDir,
-      "--json",
-    ]);
-    expect(first.status).toBe(0);
-    write(packDir, "stale/leftover.txt", "stale\n");
-    const second = runDistribution(source, privacyHome.path, [
-      "sync-pack",
-      "--repo-dir",
-      packDir,
-      "--prune-local",
-      "--json",
-    ]);
-    const json = parseJson(second.stdout);
-    expect(second.status).toBe(0);
-    for (const rel of seedBuildInputs) {
-      expect(existsSync(join(packDir, rel))).toBe(true);
-      expect(pick(json, "pack", "unmanagedExistingPaths")).not.toContain(rel);
-      expect(pick(json, "pack", "prunedPaths")).not.toContain(rel);
-    }
-    expect(pick(json, "pack", "prunedPaths")).toEqual(["stale/leftover.txt"]);
-    expect(existsSync(join(packDir, "stale", "leftover.txt"))).toBe(false);
-  });
+  heavyIt(
+    "U-PKBIN-008: --prune-local はビルド入力を消さず、一覧に無い stale file だけを消す",
+    ["pack", 75_000],
+    () => {
+      const source = cloneSource("c008");
+      const packDir = join(scratchRoot, "c008-pack");
+      mkdirSync(packDir, { recursive: true });
+      const first = runDistribution(source, privacyHome.path, [
+        "sync-pack",
+        "--repo-dir",
+        packDir,
+        "--json",
+      ]);
+      expect(first.status).toBe(0);
+      write(packDir, "stale/leftover.txt", "stale\n");
+      const second = runDistribution(source, privacyHome.path, [
+        "sync-pack",
+        "--repo-dir",
+        packDir,
+        "--prune-local",
+        "--json",
+      ]);
+      const json = parseJson(second.stdout);
+      expect(second.status).toBe(0);
+      for (const rel of seedBuildInputs) {
+        expect(existsSync(join(packDir, rel))).toBe(true);
+        expect(pick(json, "pack", "unmanagedExistingPaths")).not.toContain(rel);
+        expect(pick(json, "pack", "prunedPaths")).not.toContain(rel);
+      }
+      expect(pick(json, "pack", "prunedPaths")).toEqual(["stale/leftover.txt"]);
+      expect(existsSync(join(packDir, "stale", "leftover.txt"))).toBe(false);
+    },
+  );
 
   it("U-PKBIN-009: package はビルド入力の欠落を install の前に理由コードで止め outDir を空に保つ", async () => {
     const source = cloneSource("c009", (root) => {
@@ -375,39 +385,59 @@ describe("U-PKBIN sync-pack / package wiring", () => {
     }
   });
 
-  it("U-PKBIN-011: ビルド入力の denylist 一致は sync-pack / package の書き出し前に止める", () => {
-    const home = writeSyntheticPrivacyDenylist(mkdtempSync(join(tmpdir(), "pkbin-011-home-")));
-    const term = ["example", "fixture", "denylist", "term"].join("-");
-    try {
-      const source = cloneSource("c011", (root) => {
-        const target = seedBuildInputs.find((rel) => rel.startsWith("docs/templates/vmodel/"));
-        if (!target) throw new Error("fixture has no template build input");
-        write(root, target, `${readFileSync(join(root, target), "utf8")}\nmentions ${term}\n`);
-      });
-      tagRelease(source);
-      const packDir = join(scratchRoot, "c011-pack");
-      mkdirSync(packDir, { recursive: true });
-      const sync = runDistribution(source, home, ["sync-pack", "--repo-dir", packDir, "--json"]);
-      expect(sync.status).toBe(1);
-      expect(kindsOf(sync.stdout)).toContain("privacy-denylist-hit");
-      expect(readdirSync(packDir)).toEqual([]);
-      expect(`${sync.stdout}${sync.stderr}`).not.toContain(term);
-      const releaseDir = join(scratchRoot, "c011-release");
-      const pkg = runDistribution(source, home, [
-        "package",
-        "--tag",
-        TAG,
-        "--out",
-        releaseDir,
-        "--json",
-      ]);
-      expect(pkg.status).toBe(1);
-      expect(kindsOf(pkg.stdout)).toContain("privacy-denylist-hit");
-      expect(existsSync(join(releaseDir, `${TAG}.tar.gz`))).toBe(false);
-      expect(`${pkg.stdout}${pkg.stderr}`).not.toContain(term);
-    } finally {
-      removeTestTree(home);
+  heavyIt(
+    "U-PKBIN-011: ビルド入力の denylist 一致は sync-pack / package の書き出し前に止める",
+    ["pack", 75_000],
+    () => {
+      const home = writeSyntheticPrivacyDenylist(mkdtempSync(join(tmpdir(), "pkbin-011-home-")));
+      const term = ["example", "fixture", "denylist", "term"].join("-");
+      try {
+        const source = cloneSource("c011", (root) => {
+          const target = seedBuildInputs.find((rel) => rel.startsWith("docs/templates/vmodel/"));
+          if (!target) throw new Error("fixture has no template build input");
+          write(root, target, `${readFileSync(join(root, target), "utf8")}\nmentions ${term}\n`);
+        });
+        tagRelease(source);
+        const packDir = join(scratchRoot, "c011-pack");
+        mkdirSync(packDir, { recursive: true });
+        const sync = runDistribution(source, home, ["sync-pack", "--repo-dir", packDir, "--json"]);
+        expect(sync.status).toBe(1);
+        expect(kindsOf(sync.stdout)).toContain("privacy-denylist-hit");
+        expect(readdirSync(packDir)).toEqual([]);
+        expect(`${sync.stdout}${sync.stderr}`).not.toContain(term);
+        const releaseDir = join(scratchRoot, "c011-release");
+        const pkg = runDistribution(source, home, [
+          "package",
+          "--tag",
+          TAG,
+          "--out",
+          releaseDir,
+          "--json",
+        ]);
+        expect(pkg.status).toBe(1);
+        expect(kindsOf(pkg.stdout)).toContain("privacy-denylist-hit");
+        expect(existsSync(join(releaseDir, `${TAG}.tar.gz`))).toBe(false);
+        expect(`${pkg.stdout}${pkg.stderr}`).not.toContain(term);
+      } finally {
+        removeTestTree(home);
+      }
+    },
+  );
+
+  it("the two Pack CLI cases each have one numeric timeout registration", (ctx) => {
+    for (const id of ["U-PKBIN-008", "U-PKBIN-011"]) {
+      const matches = registeredPackTests(ctx, id);
+      expect(matches, id).toHaveLength(1);
+      expect(matches[0]?.timeout, id).toEqual(expect.any(Number));
     }
+  });
+
+  it("U-PKBIN-018: U-PKBIN-008 has a 75 second timeout", (ctx) => {
+    expect(registeredPackTests(ctx, "U-PKBIN-008")[0]?.timeout).toBe(75_000);
+  });
+
+  it("U-PKBIN-019: U-PKBIN-011 has a 75 second timeout", (ctx) => {
+    expect(registeredPackTests(ctx, "U-PKBIN-011")[0]?.timeout).toBe(75_000);
   });
 });
 

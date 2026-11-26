@@ -409,7 +409,7 @@ export function assertProducerPathsOutsideHome(input: {
 function readGitBlob(repoRoot: string, revision: string, path: string): Buffer {
   try {
     return execFileSync("git", ["-C", repoRoot, "show", `${revision}:${path}`], {
-      encoding: null,
+      maxBuffer: 8 * 1024 * 1024,
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {

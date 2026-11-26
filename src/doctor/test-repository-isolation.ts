@@ -12,7 +12,7 @@ export interface RepositoryReadContract {
 }
 
 const CONTRACT_ROWS = `
-agent-guard-delegation-boundary:1
+agent-guard-delegation-boundary:1 workflow-model-guard:1
 asset-catalog:2 asset-drift:1 backfill-pairing:1 cited-command-existence:1 claude-version-floor:1 cli-surface:1 cli:1
 advisory-strict-gate-aging:4
 codex-hook-adapter:5 codex-hook-failure:1 coding-rules:1 context-doc-router:2 cycle-p4-verification:3 db-currency:1 db-projection-coverage:1 db-projection-ingestion:3
@@ -35,7 +35,7 @@ vitest-assertion-required:1 doctor-test-repository-isolation:1 persistent-db-cle
 secret-scan-diff:1
 feedback-log:2
 github-repository-policy:3 consumer-ci-guard-red:1 consumer-ci-push-merge-control:1
-gate-run-publish-candidate:3 gate-run-stderr-candidate:1 gate-run-publish-boundary-red:1 gate-run-publish-cli-red:1 github-ci-policy:1 github-ci-node-version-file:1
+gate-run-publish-candidate:3 gate-run-stderr-candidate:1 gate-run-publish-boundary-red:1 gate-run-publish-cli-red:1 gate-run-evidence-diagnostics-red:1 github-ci-policy:1 github-ci-node-version-file:1
 node-self-host-bootstrap:1 node-slice-admission:3
 global-setup.ts:1 support/workspace-roots.ts:3
 global-setup-fence:1 vitest-snapshot-runner:3 snapshot-runner-argv-candidates:2
@@ -102,7 +102,7 @@ repositoryReadContracts["tests/design-root.test.ts"] = {
 };
 
 const HEAD_SNAPSHOT_ROWS = `
-github-pr-trace.test.ts:1 model-id-ssot-drift.test.ts:1 model-id-ssot.test.ts:1 consumer-ci-workflow-red.test.ts:1 consumer-g3-trace-red.test.ts:1
+github-pr-trace.test.ts:1 model-id-ssot-drift.test.ts:1 model-id-ssot.test.ts:1 consumer-ci-workflow-red.test.ts:1 consumer-g3-trace-red.test.ts:1 gate-run-coverage-stat-retirement.test.ts:1 gate-run-bootstrap-hook-budget.test.ts:1 consumer-doctor-cli-test-budget.test.ts:1 pack-sessionstart-timeout.test.ts:2 consumer-generated-instructions-red.test.ts:1
 doctor-source-preflight-profile.test.ts:2 setup-project-identity-bootstrap.test.ts:2 plan-mechanism-retirement.test.ts:1 sub-doc-schema-integrity.test.ts:3 disposition/issue-only-projection.test.ts:1 zero-trust-download-integration.test.ts:2 plan-mechanism-retirement-acceptance.test.ts:1 gh-command-source-inventory.test.ts:1
 `;
 

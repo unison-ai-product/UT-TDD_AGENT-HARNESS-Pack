@@ -173,13 +173,14 @@ export function verifyAgentG1Positive(value, subjectRevision) {
     throw new Error("agent-g1-positive-invalid");
 }
 
-/** Require a separate negative revision that names the frozen required document slot. */
+/** Require a separate negative revision that names the consumer G1 core document slot (DOC-L1-REQUIREMENTS). */
 export function verifyAgentG1Negative(value, positiveRevision) {
   if (!agentEvidenceObject(value) || !agentCommit(positiveRevision) ||
       !agentCommit(value.revision) || value.revision === positiveRevision ||
       value.parent !== positiveRevision || value.applicable !== true || value.passed !== false ||
       !Array.isArray(value.messages) || !value.messages.some((message) =>
-        typeof message === "string" && /business-requirements\.md/i.test(message)))
+        typeof message === "string" && message.includes("missing_core_doc:DOC-L1-REQUIREMENTS")) ||
+      value.messages.some((message) => typeof message === "string" && /business-requirements/i.test(message)))
     throw new Error("agent-g1-negative-invalid");
 }
 
@@ -377,8 +378,8 @@ export function runAgentAuthoringAndGates(input) {
   let negativeRevision;
   let negativeGate;
   try {
-    git("rm", "--", subjectPath);
-    const negativeCommit = run("git", ["-C", root, "commit", "--quiet", "-m", "test(canary): remove required business requirements"], {
+    git("rm", "--", functionalPath);
+    const negativeCommit = run("git", ["-C", root, "commit", "--quiet", "-m", "test(canary): remove required core document functional-requirements"], {
       cwd: root, encoding: "utf8", windowsHide: true, env: process.env, timeout: 30_000,
     });
     requireCommandSuccess(negativeCommit, "agent-g1-negative-commit");

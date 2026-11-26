@@ -3,7 +3,6 @@ export interface GateRunCoverageStats {
   workflowRuns: number;
   workflowPlansWithoutGateRun: number;
   orphanGateRuns: number;
-  blankPlanGateRuns: number;
   invalidEvidenceFindings: number;
 }
 
@@ -12,7 +11,6 @@ export interface GateRunCoverageViolation {
     | "missing_gate_runs"
     | "workflow_without_gate_run"
     | "orphan_gate_run"
-    | "blank_plan_gate_run"
     | "invalid_gate_run_evidence";
   count?: number;
 }
